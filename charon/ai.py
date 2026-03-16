@@ -137,17 +137,52 @@ def query_claude_web_search_json(
 def _repair_json_strings(text: str) -> str:
     """Repair broken JSON from AI responses.
 
-    Handles two common issues:
+    Handles common issues:
     1. Unescaped quotes inside string values:
        "evidence": "some text" and "more text"
     2. Unquoted trailing text after a string value:
        "evidence": "some text" trailing words without closing quote
+    3. Comma-separated quoted strings used as a single value:
+       "evidence": "text one", "text two", "text three"
     """
-    # Line-based repair: process each line and fix obvious breaks
+    # Pre-pass: fix comma-separated quoted strings in values.
+    # Pattern: a key-value line where the value contains ", " separating
+    # multiple quoted segments that aren't valid JSON keys (no ":" after them).
+    import re
     lines = text.split("\n")
     repaired_lines = []
 
     for line in lines:
+        stripped = line.strip()
+        # Detect lines like: "key": "val1", "val2", "val3"
+        # where val2/val3 don't have ":" after them (so they're not real keys)
+        kv_match = re.match(r'^("[\w\s]+")\s*:\s*"', stripped)
+        if kv_match:
+            # Find everything after the ": "
+            colon_pos = stripped.index(":")
+            after_colon = stripped[colon_pos + 1:].strip()
+            # Check if it has the pattern: "...", "..." without colons
+            # Count unescaped quotes
+            segments = re.split(r'(?<!\\)",\s*"', after_colon)
+            if len(segments) > 1:
+                # Multiple quoted segments — merge them into one value
+                # Strip leading/trailing quotes and rejoin with semicolons
+                merged_parts = []
+                for seg in segments:
+                    clean = seg.strip().strip('"').rstrip(',').rstrip()
+                    if clean:
+                        merged_parts.append(clean)
+                # Rebuild the line
+                trailing = ""
+                if stripped.rstrip().endswith(","):
+                    trailing = ","
+                merged_value = "; ".join(merged_parts)
+                # Escape any remaining unescaped quotes in the merged value
+                merged_value = merged_value.replace('"', '\\"')
+                indent = line[:len(line) - len(line.lstrip())]
+                repaired_lines.append(f'{indent}{kv_match.group(1)}: "{merged_value}"{trailing}')
+                continue
+
         repaired_lines.append(_repair_json_line(line))
 
     return "\n".join(repaired_lines)
@@ -249,8 +284,17 @@ def _parse_json_response(raw: str) -> dict[str, Any]:
             elif in_block:
                 json_lines.append(line)
         if json_lines:
+            fenced_json = "\n".join(json_lines)
             try:
-                result = json.loads("\n".join(json_lines))
+                result = json.loads(fenced_json)
+                if isinstance(result, dict):
+                    return result
+            except json.JSONDecodeError:
+                pass
+            # Try repairing unescaped quotes inside the fenced JSON
+            repaired = _repair_json_strings(fenced_json)
+            try:
+                result = json.loads(repaired)
                 if isinstance(result, dict):
                     return result
             except json.JSONDecodeError:

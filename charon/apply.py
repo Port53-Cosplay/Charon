@@ -37,6 +37,8 @@ def extract_email_domain(url: str | None) -> str | None:
             "monster.com", "dice.com", "lever.co", "greenhouse.io",
             "smartrecruiters.com", "jobvite.com", "icims.com", "ultipro.com",
             "myworkdayjobs.com", "applytojob.com", "workday.com",
+            "builtin.com", "simplyhired.com", "careerbuilder.com",
+            "wellfound.com", "angel.co", "hired.com",
         }
         registrable = ".".join(parts[-2:]) if len(parts) >= 2 else host
         if registrable in job_board_domains:

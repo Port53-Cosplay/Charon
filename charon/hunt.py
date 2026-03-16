@@ -153,7 +153,12 @@ def run_hunt_dossier(
     if company:
         result["company"] = company
         status(f"Phase 3: Building dossier on {company}...")
-        dossier_result = analyze_dossier(company, profile)
+        # Pass role context from recon for better contact search
+        role_title = None
+        role_align = result.get("role_alignment", {})
+        if isinstance(role_align, dict):
+            role_title = role_align.get("closest_target")
+        dossier_result = analyze_dossier(company, profile, role_title=role_title)
         result["dossier"] = dossier_result
     else:
         status("Could not identify company name. Skipping dossier.")

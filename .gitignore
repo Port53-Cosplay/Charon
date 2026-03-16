@@ -41,3 +41,11 @@ dossiers/
 *.pem
 *.key
 credentials*
+
+# Private Claude Code instructions
+CLAUDE.local.md
+.claude/Commands/
+
+# Work artifacts
+manualList.txt
+Batches/

@@ -35,14 +35,20 @@ Named after the ferryman of the underworld. Because job hunting is already hell.
 ## CLI Commands
 
 ```
-charon ghostbust --url <url> | --paste
-charon redflags  --url <url> | --paste
-charon dossier   --company <name>
-charon hunt      --url <url> | --paste   # full pipeline: ghostbust → redflags → dossier
-charon watch     --add <company> | --list | --remove <company>
-charon digest    --send                  # manually trigger email digest
-charon profile   --edit | --show        # manage your profile
-charon history   --list | --clear       # view past runs
+charon ghostbust  --url <url> | --paste
+charon redflags   --url <url> | --paste
+charon dossier    --company <name>
+charon hunt       --url <url> | --paste   # full pipeline: ghostbust → redflags → dossier
+charon applied    --add --company <name> --role <title> [--url <url>] [--notes <text>]
+charon applied    --list [--company <name>] [--status <status>]
+charon applied    --update <id> --status <status>
+charon applied    --stats
+charon watch      --add <company> | --list | --remove <company>
+charon digest     --send                  # manually trigger email digest
+charon profile    --edit | --show         # manage your profile
+charon history    --list | --clear        # view past runs
+charon dashboard                          # launch local HTML dashboard
+charon dashboard  --port 8080             # custom port
 ```
 
 ### `charon ghostbust`
@@ -100,7 +106,62 @@ Researches a company and scores it against the user's weighted values profile. U
 ### `charon hunt`
 Full pipeline. Runs `ghostbust` → `redflags` → `dossier` in sequence. If ghostbust score is above the disqualify threshold, stops early and tells you why. Otherwise proceeds through all three and gives a combined report.
 
+Before running, checks the `applied` log. If the user has already applied to a role at the same company, warns them:
+`⚠️  You applied to a role at [Company] on [date]. This may be a duplicate — continue? [y/N]`
+
 **Output:** Combined report with all three analyses, an overall "worth applying?" verdict, and a confidence level.
+
+---
+
+### `charon applied`
+Tracks job applications to avoid duplicates and maintain a personal pipeline log.
+
+```
+charon applied --add --company "Netflix" --role "Security Engineer" --url "https://..."
+charon applied --list
+charon applied --list --company "Netflix"
+charon applied --list --status interviewing
+charon applied --update <id> --status rejected
+charon applied --stats
+```
+
+**Stored fields:** company, role, url, date_applied, notes (optional), status (default: `applied`)
+
+**Statuses:** `applied`, `responded`, `interviewing`, `offered`, `rejected`, `ghosted`
+
+**Duplicate detection:** When `ghostbust`, `redflags`, `hunt`, or `dossier` is run, Charon automatically checks the applied log. If the same company already has an entry, it warns the user before proceeding. Does not hard-block — just flags it clearly.
+
+**Auto-links:** When adding an application for a URL you've already run through `ghostbust`/`redflags`, Charon links those results to the application record automatically.
+
+**Stats output (`--stats`):** Pipeline funnel — applied → responded → interviewing → offered, plus rejection rate and ghost rate.
+
+**Output:** Rich table with color-coded statuses. Ghosted entries dimmed. Active pipeline highlighted.
+
+---
+
+### `charon dashboard` *(Phase 6)*
+Launches a locally-hosted interactive HTML dashboard. Opens in the default browser at `http://localhost:7777`.
+
+```
+charon dashboard            # start server, open browser
+charon dashboard --port 8080
+```
+
+Press Ctrl+C to stop.
+
+**What it shows:**
+- Application pipeline — all tracked applications with status, color-coded, filterable by status/company
+- Dossier library — saved company dossiers with scores and key findings
+- Ghost job history — past ghostbust results with scores
+- Red flag history — past redflags results
+- Daily activity feed — what Charon has run recently
+- Stats panel — application funnel, response rate, ghost rate, ghost job encounter rate
+
+**Aesthetic:** Dark terminal-inspired theme. Monospace fonts. Green/amber/red status colors. Feels like a security operations dashboard — think SOC analyst's personal ops center, not a job board. Should be visually distinctive and purpose-built. Single HTML file with embedded CSS and JS.
+
+**Implementation:** Lightweight Python HTTP server (stdlib `http.server` or FastAPI). Dashboard reads directly from `~/.charon/charon.db`. No external services, no cloud, entirely local.
+
+**Data is read-only from the dashboard** — all writes happen through the CLI.
 
 ---
 
@@ -174,6 +235,13 @@ ghostbust:
 
 dossier:
   save_path: "~/.charon/dossiers/"
+
+applications:
+  ghosted_after_days: 21      # days of silence before flagging as ghosted
+
+dashboard:
+  port: 7777
+  auto_open_browser: true
 ```
 
 ---
@@ -183,7 +251,7 @@ dossier:
 ### Phase 0 — Scaffolding
 - Repo structure, pyproject.toml, CLI entry point
 - Profile loading/validation
-- SQLite history database schema
+- SQLite history, watchlist, and applications database schema
 - `charon profile --show` and `--edit` working
 - Rich output helpers (colors, tables, score bars)
 
@@ -201,17 +269,25 @@ dossier:
 - Three-tier flag output
 - Save result to history
 
+### Phase 2.5 — `charon applied`
+- SQLite `applications` table
+- `--add`, `--list`, `--update`, `--stats` subcommands
+- Duplicate detection hook (warns when ghostbust/redflags/hunt/dossier targets a company already in log)
+- Auto-link to existing ghostbust/redflags results by URL
+- Rich table output with color-coded statuses
+
 ### Phase 3 — `charon dossier`
 - Company name input
 - Claude with web search for research
-- Weighted scoring against profile values
-- Full dossier output with evidence
+- Weighted scoring against profile values including DEI resilience sub-dimension under `people_treatment`
+- Full dossier output with evidence cited per dimension
 - `--save` to markdown file
 - Save result to history
 
 ### Phase 3.5 — `charon hunt`
 - Pipeline orchestration of ghostbust → redflags → dossier
 - Early exit logic on high ghost score
+- Applied log duplicate check before running
 - Combined report output
 
 ### Phase 4 — `charon watch` + `charon digest`
@@ -220,12 +296,21 @@ dossier:
 - Daily digest email generation
 - `charon digest --send` and `--preview`
 
-### Phase 5 — `charon apply` + `charon inbox`
-- Application tracker with full lifecycle management
-- IMAP inbox monitoring for response detection (Gmail, Outlook, any provider)
-- AI-powered email classification (rejection, interview, follow-up)
+### Phase 5 — `charon inbox`
+- Application tracker auto-status updates via IMAP inbox monitoring
+- AI-powered email classification (rejection, interview, follow-up, auto-ack)
 - Auto-ghost detection after configurable timeout (default: 21 days)
-- Digest integration: company responses highlighted at top of daily digest
+- Digest integration: responses highlighted at top of daily digest
+
+### Phase 6 — `charon dashboard`
+- Local HTML dashboard served via Python HTTP server
+- Dark SOC-style aesthetic — terminal-inspired, monospace, purpose-built
+- Application pipeline view with color-coded statuses, filterable
+- Dossier library with scores and key findings
+- History views for ghostbust and redflags runs
+- Stats panel: funnel, response rate, ghost rate
+- Read-only — all data writes happen through CLI
+- Single HTML file with embedded CSS/JS
 
 ---
 
@@ -302,7 +387,7 @@ inbox:
     - name: gmail
       imap_server: imap.gmail.com
       imap_user: you@gmail.com
-      # Password from Vault (empire12/charon/imap-gmail) or CHARON_IMAP_PASS_GMAIL env var
+      # Password from Vault (charon/imap-gmail) or CHARON_IMAP_PASS_GMAIL env var
 
 vault:
   url: "https://vault-address:8200"
@@ -310,7 +395,7 @@ vault:
   secret_id: ""
   ca_cert: "~/.charon/vault-ca.crt"
   mount: "secret"
-  secret_prefix: "empire12/charon"
+  secret_prefix: "charon"
 ```
 
 ---
@@ -328,13 +413,16 @@ charon/
 │   ├── ai.py               # All Claude API calls
 │   ├── ghostbust.py        # Ghost job analysis logic
 │   ├── redflags.py         # Red flag analysis logic
-│   ├── dossier.py          # Company dossier logic
+│   ├── dossier.py          # Company dossier logic (includes DEI dimension)
 │   ├── hunt.py             # Pipeline orchestration
+│   ├── applied.py          # Application tracking (Phase 2.5)
 │   ├── watch.py            # Watchlist and crawler (Phase 4)
 │   ├── digest.py           # Email digest (Phase 4)
-│   ├── apply.py            # Application tracking (Phase 5)
-│   ├── inbox.py            # Gmail integration (Phase 5)
+│   ├── inbox.py            # IMAP inbox monitoring (Phase 5)
+│   ├── dashboard.py        # Local HTML dashboard server (Phase 6)
 │   └── output.py           # Rich formatting helpers
+├── charon/templates/
+│   └── dashboard.html      # Dashboard single-file HTML/CSS/JS
 ├── tests/
 ├── docs/
 ├── REQUIREMENTS.md         # This file
@@ -367,4 +455,5 @@ All Claude API calls should:
 - The AI judgment approach for dealbreakers is intentional and important — do not replace with keyword/regex matching
 - The profile file is the user's most important configuration — make it easy to understand and edit
 - Keep the dark ferryman aesthetic consistent in any user-facing copy, help text, and error messages
+- The dashboard (Phase 6) should feel like a SOC operations dashboard — dark, terminal-inspired, purpose-built. Think security professional's personal ops center, not a job board. Single HTML file with embedded CSS/JS. No Bootstrap, no generic UI kit aesthetics.
 - RESPONSIBLE_USE.md should note this tool is for personal job searching only

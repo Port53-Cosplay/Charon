@@ -22,7 +22,7 @@ def _get_vault_client(vault_config: dict[str, Any]):
     if not url:
         raise SecretsError("vault.url not set in profile.")
 
-    # Support custom CA cert for private PKI (Empire12 uses private CA)
+    # Support custom CA cert for private PKI
     ca_cert = vault_config.get("ca_cert", "") or os.environ.get("VAULT_CACERT", "")
     if ca_cert:
         ca_cert = os.path.expanduser(ca_cert)
@@ -94,7 +94,7 @@ def get_imap_password(profile: dict[str, Any], account_name: str) -> str:
 
     # 2. Try Vault if configured
     if vault_config.get("url"):
-        vault_path = vault_config.get("secret_prefix", "empire12/charon")
+        vault_path = vault_config.get("secret_prefix", "charon")
         secret_key = f"imap-{account_name.lower()}"
         try:
             data = read_secret(vault_config, f"{vault_path}/{secret_key}")
@@ -113,7 +113,7 @@ def get_imap_password(profile: dict[str, Any], account_name: str) -> str:
     raise SecretsError(
         f"No password found for account '{account_name}'.\n"
         f"  Options:\n"
-        f"  1. Store in Vault at {vault_config.get('secret_prefix', 'empire12/charon')}/imap-{account_name.lower()}\n"
+        f"  1. Store in Vault at {vault_config.get('secret_prefix', 'charon')}/imap-{account_name.lower()}\n"
         f"  2. Set {env_key} environment variable\n"
         f"  3. Set imap_pass in profile (not recommended)"
     )

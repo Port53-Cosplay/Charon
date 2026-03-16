@@ -1,5 +1,11 @@
 # Charon — Project Instructions for Claude Code
 
+## Working Style — MANDATORY
+
+- **Before implementing anything non-trivial:** Assess the situation, offer 2+ solutions, present a plan, and ASK the user before executing. Do not just go do it.
+- **Data operations are sacred.** Never overwrite, sync, push, or delete user data without explicit confirmation. Show what will change first.
+- **When unsure, ask.** A question costs nothing. A wrong action costs trust.
+
 ## Project Overview
 
 Charon is a security-forward CLI tool for job seekers. Metasploit-style aesthetic, dark ferryman theme. Python 3.11+, Click/Typer, Rich, Claude API.
@@ -93,3 +99,17 @@ charon/
 - Every command should feel like it belongs alongside nmap and metasploit
 - Users are stressed job seekers — prioritize clarity in output
 - Run `/security-review` after completing each phase
+
+## Technical Notes
+
+- **Stack:** Python 3.11+, Click, Rich, Claude API (claude-sonnet-4-20250514), httpx, BeautifulSoup, SQLite
+- **Build backend:** Hatchling — requires `[tool.hatch.build.targets.wheel] packages = ["charon"]` since project name != package dir
+- **Windows cp1252:** Do NOT use unicode symbols in Click help strings or Rich output. Use ASCII: `[X]` `[!]` `[+]` `[>]` `---`. The `output.py` module forces UTF-8 on Windows stdout/stderr.
+- **pytest + output.py:** UTF-8 stdout wrapping breaks pytest capture. Gated with `sys.stdout.isatty()`.
+- **Em-dash in tables:** Don't use `---` in Rich tables on Windows. Use `-`.
+- **DB schema columns:** `applied_at`, `updated_at`, `ghosted_notified` (NOT applied_date/updated_date).
+- **DB location:** `~/.charon/charon.db` — initializes on import of `charon.db`.
+- **Profile path:** `~/.charon/profile.yaml` — SMTP password from `CHARON_MAIL_PASS` env var.
+- **Test isolation:** `conftest.py` autouse fixture redirects DB to temp path.
+- **JSON repair:** `_repair_json_strings()` in ai.py handles unescaped quotes, unclosed strings from AI responses.
+- **Prompt injection hardening:** All four AI system prompts include anti-injection directives.

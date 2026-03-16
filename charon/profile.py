@@ -74,7 +74,7 @@ DEFAULT_PROFILE = {
         "secret_id": "",
         "ca_cert": "",
         "mount": "secret",
-        "secret_prefix": "empire12/charon",
+        "secret_prefix": "charon",
     },
 }
 

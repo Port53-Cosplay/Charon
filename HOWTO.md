@@ -10,7 +10,7 @@ Quick reference for using Charon day-to-day. Run all commands from any terminal.
 
 ```bash
 # Make sure you're in the project directory (or charon is installed)
-cd C:\Users\lurka\Projects\Charon
+cd /path/to/charon
 
 # Check your profile is set up
 charon profile --show
@@ -56,7 +56,7 @@ This records the application with today's date and extracts the company's email 
 You can add notes too:
 
 ```bash
-charon apply --add --company "Rapid7" --role "AI Red Team" --url https://rapid7.com/careers/456 --notes "Applied via dshanks@duck.com"
+charon apply --add --company "Rapid7" --role "AI Red Team" --url https://rapid7.com/careers/456 --notes "Applied via you@example.com"
 ```
 
 ### 3. Let the automation work
@@ -123,9 +123,9 @@ special characters (`$`, commas, parentheses). Instead, save the posting to a `.
 (e.g. in Notepad) and pipe it in:
 
 ```bash
-charon hunt --paste < posting.txt
-charon ghostbust --paste < posting.txt
-charon redflags --paste < posting.txt
+Get-Content posting.txt | charon hunt --paste
+Get-Content posting.txt | charon ghostbust --paste
+Get-Content posting.txt | charon redflags --paste
 ```
 
 This avoids shell interpretation issues and works reliably every time.
@@ -136,7 +136,7 @@ This avoids shell interpretation issues and works reliably every time.
 # Update status (if you hear back before the scanner catches it)
 charon apply --id 3 --status interviewing
 
-# Valid statuses: applied, responded, interviewing, offered, rejected, ghosted
+# Valid statuses: applied, acknowledged, responded, interviewing, offered, rejected, ghosted
 ```
 
 ### Check for Ghosted Applications
@@ -272,11 +272,17 @@ charon apply --stats
 | Status | Meaning | How it gets set |
 |--------|---------|-----------------|
 | `applied` | You submitted an application | You run `charon apply --add` |
-| `responded` | Company acknowledged receipt | Auto: inbox scanner detects acknowledgment email |
+| `acknowledged` | Receipt confirmed (auto-email from employer or job board) | Auto: inbox scanner detects "thanks for applying", "application sent", etc. |
+| `responded` | Actual human reply from employer | Auto: inbox scanner detects non-automated response |
 | `interviewing` | Interview scheduled/in progress | Auto: inbox scanner detects interview invite |
 | `offered` | You received an offer | Auto: inbox scanner detects offer email |
 | `rejected` | Application was declined | Auto: inbox scanner detects rejection email |
 | `ghosted` | No response after 21 days | Auto: daily ghost check |
+
+**Note:** `acknowledged` and `responded` are different. `acknowledged` means a machine
+confirmed your application was received (job board auto-emails, employer ATS confirmations).
+`responded` means an actual person replied. This distinction matters so you don't confuse
+an auto-receipt with a real response.
 
 You can always override any status manually with `charon apply --id <num> --status <status>`.
 
@@ -315,7 +321,7 @@ Averages all analyses into a single "worth applying?" score.
 
 ## Your Profile (what it controls)
 
-Your profile lives at `C:\Users\lurka\.charon\profile.yaml`. Key sections:
+Your profile lives at `~/.charon/profile.yaml`. Key sections:
 
 - **values** - How much you care about each dimension (weights must sum to 1.0)
 - **dealbreakers** - Instant disqualifiers (AI detects these even when obfuscated)
@@ -331,7 +337,7 @@ Your profile lives at `C:\Users\lurka\.charon\profile.yaml`. Key sections:
 
 - **Use `hunt` for most things.** It runs all three analyses and gives you a combined verdict. Only use individual commands when you want a deep dive on one aspect.
 - **Always include `--url` when tracking applications.** Charon extracts the company's email domain from the posting URL, which helps the inbox scanner match responses.
-- **Use dshanks@duck.com when applying.** Replies forward to your Gmail, where the scanner picks them up.
+- **Use a dedicated forwarding email when applying.** Replies forward to your monitored inbox, where the scanner picks them up.
 - **Check `--stats` regularly.** It shows your application funnel — how many applied vs responded vs ghosted. Good for staying motivated (or adjusting strategy).
 - **The dossier `--save` flag is useful.** Saves a markdown file you can reference later during interviews.
 

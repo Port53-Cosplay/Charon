@@ -1,0 +1,84 @@
+# Charon User Profile
+# Copy to ~/.charon/profile.yaml and customize
+#
+# Values weights must sum to 1.0
+# Dealbreakers, yellow flags, and green flags are natural language --
+# the AI interprets them flexibly, including obfuscated versions.
+
+values:
+  security_culture: 0.30        # Does the company take security seriously?
+  people_treatment: 0.25        # Are employees treated like humans?
+  leadership_transparency: 0.20 # Does leadership communicate honestly?
+  work_life_balance: 0.15       # Is sustainable work pace supported?
+  compensation: 0.10            # Is comp fair and transparent?
+
+dealbreakers:
+  - "requires or strongly implies on-site work or relocation"
+  - "shift work, overnight hours, or on-call rotation required"
+  - "no salary or compensation range provided anywhere in posting"
+  - "remote work not available, not mentioned, or clearly not genuine"
+  - "rigid core hours inconsistent with async/flexible work"
+
+yellow_flags:
+  - "heavy synchronous meeting culture or real-time availability expectations"
+  - "fast-paced, high-pressure, or hustle language"
+  - "strong preference for local candidates"
+  - "unlimited PTO without supporting context"
+  - "like a family culture language"
+
+green_flags:
+  - "async-first or results-oriented work culture"
+  - "explicitly flexible or self-directed schedule"
+  - "transparent salary range included in posting"
+  - "security team has organizational authority"
+  - "genuine remote-first culture with documented practices"
+
+target_roles:
+  - "security engineer"
+  - "penetration tester"
+  - "application security"
+
+# Notification settings (for digest emails)
+notifications:
+  enabled: false
+  mail_server: "smtp.example.com"
+  mail_port: 587
+  mail_from: "charon@example.com"
+  mail_to: "you@example.com"
+  mail_user: ""                   # SMTP username if auth required
+  mail_pass: ""                   # Prefer CHARON_MAIL_PASS env var instead
+
+# Ghost job detection
+ghostbust:
+  disqualify_threshold: 70        # Ghost score % that stops the hunt pipeline
+
+# Dossier output
+dossier:
+  save_path: "~/.charon/dossiers/"
+
+# Application tracking
+applications:
+  ghosted_after_days: 21          # Days of silence before marking as ghosted
+
+# IMAP inbox monitoring (for auto-status updates)
+inbox:
+  accounts:
+    - name: gmail
+      imap_server: imap.gmail.com
+      imap_user: you@gmail.com
+      # Password: set CHARON_IMAP_PASS_GMAIL env var
+      #   or store in Vault at <secret_prefix>/imap-gmail
+
+# HashiCorp Vault integration (optional -- env vars work fine without this)
+vault:
+  url: ""
+  role_id: ""                     # AppRole auth (preferred)
+  secret_id: ""
+  ca_cert: ""                     # Path to CA cert for private PKI
+  mount: "secret"
+  secret_prefix: "charon"         # Vault path prefix for secrets
+
+# Dashboard
+dashboard:
+  port: 7777
+  auto_open_browser: true

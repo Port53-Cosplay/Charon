@@ -34,6 +34,7 @@ from charon.ghostbust import analyze_ghostbust
 from charon.redflags import analyze_redflags
 from charon.dossier import analyze_dossier, save_dossier_markdown
 from charon.hunt import run_hunt, run_hunt_recon, run_hunt_dossier
+from charon.batch import run_batch
 from charon.digest import DigestError, build_digest, send_digest, preview_digest
 from charon.ai import AIError
 from charon.apply import ApplyError, track_application, update_status, check_ghosted, get_stats, list_applications
@@ -563,6 +564,34 @@ def _display_dossier(result: dict, prof: dict) -> None:
     console.print()
     panel("Verdict", result.get("verdict", "No verdict available."), "header")
 
+    # Contacts
+    contacts_data = result.get("contacts", {})
+    contacts_list = contacts_data.get("contacts", []) if isinstance(contacts_data, dict) else []
+    if contacts_list:
+        console.print()
+        section_header("POTENTIAL CONTACTS")
+        category_styles = {
+            "recruiter": ("good", "Recruiter"),
+            "hiring_manager": ("warning", "Hiring Mgr"),
+            "team_member": ("info", "Team Member"),
+        }
+        for contact in contacts_list:
+            cat = contact.get("category", "team_member")
+            style, label = category_styles.get(cat, ("info", cat.title()))
+            name = contact.get("name", "Unknown")
+            title = contact.get("title", "")
+            url_str = contact.get("linkedin_url", "")
+            relevance = contact.get("relevance", "")
+            console.print(f"  [{style}][{label}][/{style}]  {name} — {title}")
+            if url_str:
+                console.print(f"             [dim]{url_str}[/dim]")
+            if relevance:
+                console.print(f"             [dim]{relevance}[/dim]")
+        search_notes = contacts_data.get("search_notes", "")
+        if search_notes:
+            console.print()
+            console.print(f"  [dim]{search_notes}[/dim]")
+
 
 @cli.command()
 @click.option("--url", help="URL of the job posting to analyze.")
@@ -603,7 +632,7 @@ def hunt(url: str | None, paste: bool, full: bool) -> None:
                     paste_path.write_text("", encoding="utf-8")
                     click.launch(str(paste_path))
                     print_info(f"Paste the job posting into {paste_path}, save it, then run:")
-                    print_info(f"  charon hunt --paste < \"{paste_path}\"")
+                    print_info(f"  Get-Content \"{paste_path}\" | charon hunt --paste")
         else:
             print_error(str(e))
         return
@@ -615,7 +644,7 @@ def hunt(url: str | None, paste: bool, full: bool) -> None:
                 paste_path.write_text("", encoding="utf-8")
                 click.launch(str(paste_path))
                 print_info(f"Paste the job posting into {paste_path}, save it, then run:")
-                print_info(f"  charon hunt --paste < \"{paste_path}\"")
+                print_info(f"  Get-Content \"{paste_path}\" | charon hunt --paste")
         return
 
     console.print()
@@ -738,16 +767,98 @@ def _append_hunt_log(result: dict, url: str | None, score: float) -> None:
     role_align = (result.get("role_alignment") or {}).get("alignment_score", "-")
     dossier = (result.get("dossier") or {}).get("weighted_score", "-")
 
-    entry = (
-        f"{timestamp} | {score:5.1f} | G:{ghost:<4} R:{redflag:<4} A:{role_align:<4} D:{dossier:<4}\n"
-        f"  {source}\n"
-    )
+    entry = f"{timestamp} | {score:5.1f} | G:{ghost:<4} R:{redflag:<4} A:{role_align:<4} D:{dossier:<4} | {source}\n"
 
     try:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(entry)
     except OSError:
         pass
+
+
+# ── batch ────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--threshold", default=75, type=int, help="Min overall score for detailed output (default: 75).")
+def batch(file: str, threshold: int) -> None:
+    """Batch recon: scan a file of URLs and output a scores table.
+
+    FILE should contain one job posting URL per line.
+    Lines starting with # are ignored.
+
+    Outputs {stem}_results.txt (scores table) and
+    {stem}_results_top.txt (details for postings scoring above threshold).
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+
+    try:
+        prof = load_profile()
+    except ProfileError as e:
+        print_error(f"Profile error: {e}")
+        return
+
+    print_banner()
+    section_header("BATCH RECON")
+
+    # Count URLs for progress display
+    input_path = Path(file)
+    url_lines = [
+        line.strip()
+        for line in input_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    total = len(url_lines)
+
+    if total == 0:
+        print_error("No URLs found in file.")
+        return
+
+    print_info(f"Loaded {total} URLs from {input_path.name}")
+    print_info(f"Threshold for detailed output: {threshold}")
+    console.print()
+
+    # Progress tracking
+    current_url = ""
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Scanning...", total=total)
+
+        def on_progress(current, count, url, status):
+            nonlocal current_url
+            current_url = url
+            short_url = url if len(url) <= 50 else url[:47] + "..."
+            if status == "scanning":
+                progress.update(task, description=f"[{current}/{count}] {short_url}")
+            elif status == "done":
+                progress.update(task, advance=1)
+
+        summary = run_batch(str(input_path), threshold, prof, on_progress=on_progress)
+
+    console.print()
+
+    # Display summary
+    above = summary["above_threshold"]
+    errors = summary["errors"]
+
+    print_success(f"Scanned {summary['total']} postings.")
+    if above > 0:
+        print_success(f"{above} scored above {threshold} - details in {Path(summary['top_path']).name}")
+    else:
+        print_info(f"No postings scored above {threshold}.")
+    if errors > 0:
+        print_warning(f"{errors} URL(s) failed - see results table for details.")
+
+    print_info(f"Results: {summary['results_path']}")
+    if summary.get("top_path"):
+        print_info(f"Top picks: {summary['top_path']}")
 
 
 def _display_ghostbust_summary(ghost: dict) -> None:
@@ -1213,6 +1324,7 @@ def digest(send: bool, preview: bool) -> None:
 @click.option("--list", "list_apps", is_flag=True, help="List tracked applications.")
 @click.option("--status", help="Filter by status or update status (with --id).")
 @click.option("--id", "app_id", type=int, help="Application ID for status update.")
+@click.option("--remove", "remove_id", type=int, help="Remove an application by ID.")
 @click.option("--ghost-check", is_flag=True, help="Check for ghosted applications.")
 @click.option("--stats", is_flag=True, help="Show application statistics.")
 def apply_cmd(
@@ -1224,13 +1336,26 @@ def apply_cmd(
     list_apps: bool,
     status: str | None,
     app_id: int | None,
+    remove_id: int | None,
     ghost_check: bool,
     stats: bool,
 ) -> None:
     """Track job applications. The ferryman keeps a ledger."""
     # Determine action
-    if not any([add, list_apps, ghost_check, stats, app_id]):
+    if not any([add, list_apps, ghost_check, stats, app_id, remove_id]):
         list_apps = True
+
+    if remove_id:
+        from charon.db import delete_application, get_application
+        app = get_application(remove_id)
+        if not app:
+            print_error(f"No application with ID {remove_id}.")
+            return
+        if delete_application(remove_id):
+            print_success(f"Removed #{remove_id}: {app['company']} - {app['role']}")
+        else:
+            print_error(f"Failed to remove application #{remove_id}.")
+        return
 
     if add:
         if not company:
@@ -1386,7 +1511,7 @@ def inbox_cmd(scan: bool, setup: bool, show_status: bool, days: int) -> None:
         console.print()
         console.print("  [header]2. Store passwords in Vault or env vars:[/header]")
         console.print()
-        console.print("     Vault: secret/empire12/charon/imap-gmail  key: password")
+        console.print("     Vault: secret/<prefix>/imap-gmail  key: password")
         console.print("     Env:   CHARON_IMAP_PASS_GMAIL")
         console.print()
         console.print("  [header]3. For Gmail, generate an App Password:[/header]")

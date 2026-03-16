@@ -237,7 +237,7 @@ def mark_digest_sent(entry_ids: list[int]) -> None:
         conn.close()
 
 
-VALID_STATUSES = {"applied", "responded", "interviewing", "offered", "rejected", "ghosted"}
+VALID_STATUSES = {"applied", "acknowledged", "responded", "interviewing", "offered", "rejected", "ghosted"}
 
 
 def add_application(
@@ -258,6 +258,17 @@ def add_application(
         )
         conn.commit()
         return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def delete_application(app_id: int) -> bool:
+    """Delete an application by ID. Returns True if deleted."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

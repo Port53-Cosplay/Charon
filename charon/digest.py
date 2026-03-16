@@ -1,6 +1,5 @@
 """Daily email digest generation and sending."""
 
-import json
 import smtplib
 import os
 from datetime import datetime, timezone
@@ -8,102 +7,162 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Any
 
-from charon.db import get_unsent_digest, mark_digest_sent
+from charon.db import get_applications
 
 
 class DigestError(Exception):
     """Raised when digest generation or sending fails."""
 
 
-def build_digest() -> tuple[str, str, list[int]]:
-    """Build the digest content. Returns (subject, body_text, entry_ids).
+STATUS_EMOJI = {
+    "acknowledged": "\U0001f4e8",  # incoming envelope
+    "responded": "\U0001f4ac",     # speech balloon
+    "interviewing": "\U0001f3af",  # bullseye
+    "offered": "\U0001f389",       # party popper
+    "rejected": "\u274c",          # red X
+    "ghosted": "\U0001f47b",       # ghost
+    "applied": "\U0001f4e4",       # outbox tray
+}
 
-    Returns empty strings if nothing to report.
-    """
-    entries = get_unsent_digest()
-    if not entries:
-        return "", "", []
+STATUS_COLOR = {
+    "acknowledged": "#2196F3",  # blue
+    "responded": "#FF9800",     # orange
+    "interviewing": "#9C27B0",  # purple
+    "offered": "#4CAF50",       # green
+    "rejected": "#F44336",      # red
+    "ghosted": "#9E9E9E",       # grey
+    "applied": "#607D8B",       # blue-grey
+}
 
-    entry_ids = [e["id"] for e in entries]
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    subject = f"Charon Digest - {today}"
+# Display order for status grouping (most important first)
+STATUS_ORDER = [
+    "interviewing", "offered", "responded", "acknowledged",
+    "applied", "ghosted", "rejected",
+]
 
+
+def _build_html_digest(apps: list[dict], today: str) -> str:
+    """Build an HTML digest showing all application statuses."""
+    # Group by status
+    by_status: dict[str, list[dict]] = {}
+    for app in apps:
+        by_status.setdefault(app["status"], []).append(app)
+
+    # Summary counts
+    total = len(apps)
+    counts = {s: len(by_status.get(s, [])) for s in STATUS_ORDER if s in by_status}
+    summary_parts = []
+    for s, c in counts.items():
+        color = STATUS_COLOR.get(s, "#607D8B")
+        summary_parts.append(f'<strong style="color:{color}">{c}</strong> {s}')
+    summary_line = ", ".join(summary_parts)
+
+    # Build table rows
+    rows = ""
+    for i, app in enumerate(apps):
+        bg = "#f8f9fa" if i % 2 == 0 else "#ffffff"
+        status = app["status"]
+        emoji = STATUS_EMOJI.get(status, "\U0001f4e7")
+        color = STATUS_COLOR.get(status, "#607D8B")
+        applied = app.get("applied_at", "")[:10]
+        rows += f'''<tr style="background-color:{bg}">
+            <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#212121">{app["company"]}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#212121;font-size:13px">{app["role"]}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0">
+                <span style="color:{color};font-weight:bold">{emoji} {status.upper()}</span>
+            </td>
+            <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#888;font-size:12px">{applied}</td>
+        </tr>'''
+
+    return f'''<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background-color:#1a1a2e;font-family:Consolas,'Courier New',monospace">
+    <div style="max-width:700px;margin:20px auto;background-color:#16213e;border-radius:8px;overflow:hidden;border:1px solid #0f3460">
+        <div style="background:linear-gradient(135deg,#0f3460,#1a1a2e);padding:24px;text-align:center;border-bottom:2px solid #e94560">
+            <h1 style="color:#e94560;margin:0;font-size:28px;letter-spacing:3px">\u2620\ufe0f CHARON</h1>
+            <p style="color:#a0a0b0;margin:6px 0 0;font-size:14px">Daily Digest &mdash; {today}</p>
+        </div>
+        <div style="padding:20px 24px;color:#d0d0d0;font-size:14px;line-height:1.6">
+            <p style="color:#a0a0b0;margin:0 0 16px">
+                Tracking <strong style="color:#e0e0e0">{total}</strong> applications &mdash; {summary_line}
+            </p>
+            <table style="width:100%;border-collapse:collapse;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0">
+                <tr style="background-color:#263238;color:#ffffff">
+                    <th style="padding:10px 12px;text-align:left">Company</th>
+                    <th style="padding:10px 12px;text-align:left">Role</th>
+                    <th style="padding:10px 12px;text-align:left">Status</th>
+                    <th style="padding:10px 12px;text-align:left">Applied</th>
+                </tr>
+                {rows}
+            </table>
+        </div>
+        <div style="background-color:#0f3460;padding:16px;text-align:center;border-top:1px solid #1a1a2e">
+            <p style="color:#606080;margin:0;font-size:12px">\u2693 Generated by Charon &mdash; Getting you to the other side.</p>
+        </div>
+    </div>
+</body>
+</html>'''
+
+
+def _build_plaintext_digest(apps: list[dict], today: str) -> str:
+    """Build a plain text digest showing all application statuses."""
     lines = [
         "=" * 60,
         "  CHARON - Daily Digest",
         f"  {today}",
         "=" * 60,
         "",
+        f"  Tracking {len(apps)} application(s)",
+        "",
     ]
 
-    # Group entries by type
-    by_type: dict[str, list[dict]] = {}
-    for entry in entries:
-        etype = entry.get("entry_type", "other")
-        by_type.setdefault(etype, []).append(entry)
+    # Group by status for display
+    by_status: dict[str, list[dict]] = {}
+    for app in apps:
+        by_status.setdefault(app["status"], []).append(app)
 
-    # Responses section (Phase 5 — will go at top when implemented)
-    responses = by_type.pop("response", [])
-    if responses:
-        lines.append("=== RESPONSES RECEIVED ===")
-        lines.append("")
-        for r in responses:
-            lines.append(f"  [!] {r['summary']}")
-        lines.append("")
-
-    # Ghosted section
-    ghosted = by_type.pop("ghosted", [])
-    if ghosted:
-        lines.append("=== GHOSTED ===")
-        lines.append("")
-        for g in ghosted:
-            lines.append(f"  [X] {g['summary']}")
-        lines.append("")
-
-    # Application updates
-    applications = by_type.pop("application", [])
-    if applications:
-        lines.append("=== Applications ===")
-        lines.append("")
-        for a in applications:
-            lines.append(f"  [>] {a['summary']}")
-        lines.append("")
-
-    # Activity section
-    lines.append("=== Today's Activity ===")
-    lines.append("")
-
-    type_labels = {
-        "ghostbust": "Ghost Job Analysis",
-        "redflags": "Red Flag Scan",
-        "dossier": "Company Dossier",
-        "hunt": "Full Hunt",
-        "watch": "Watchlist",
+    status_markers = {
+        "interviewing": "[>>>]", "offered": "[!!!]", "responded": "[<->]",
+        "acknowledged": "[<-]", "applied": "[->]", "ghosted": "[X]", "rejected": "[X]",
     }
 
-    for etype, type_entries in by_type.items():
-        label = type_labels.get(etype, etype.title())
-        lines.append(f"--- {label} ---")
-        for entry in type_entries:
-            lines.append(f"  {entry['summary']}")
-            # Include score details if available
-            detail = entry.get("detail_json")
-            if detail:
-                try:
-                    d = json.loads(detail) if isinstance(detail, str) else detail
-                    if isinstance(d, dict):
-                        score = d.get("ghost_score") or d.get("redflag_score") or d.get("weighted_score")
-                        if score is not None:
-                            lines.append(f"    Score: {score}")
-                except (json.JSONDecodeError, TypeError):
-                    pass
+    for status in STATUS_ORDER:
+        group = by_status.get(status, [])
+        if not group:
+            continue
+        lines.append(f"=== {status.upper()} ({len(group)}) ===")
+        lines.append("")
+        marker = status_markers.get(status, "[ ]")
+        for app in group:
+            lines.append(f"  {marker} {app['company']}: {app['role']}")
         lines.append("")
 
     lines.append("-" * 60)
     lines.append("Generated by Charon - Getting you to the other side.")
+    return "\n".join(lines)
 
-    body = "\n".join(lines)
-    return subject, body, entry_ids
+
+def build_digest() -> tuple[str, str, str]:
+    """Build the digest from current application statuses.
+
+    Returns (subject, plaintext, html). Empty strings if no apps.
+    """
+    apps = get_applications()
+    if not apps:
+        return "", "", ""
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    subject = f"\u2620\ufe0f Charon Digest - {today}"
+
+    # Sort by status priority, then by company name
+    status_rank = {s: i for i, s in enumerate(STATUS_ORDER)}
+    apps.sort(key=lambda a: (status_rank.get(a["status"], 99), a["company"].lower()))
+
+    plaintext = _build_plaintext_digest(apps, today)
+    html = _build_html_digest(apps, today)
+
+    return subject, plaintext, html
 
 
 def send_digest(profile: dict[str, Any]) -> bool:
@@ -119,7 +178,6 @@ def send_digest(profile: dict[str, Any]) -> bool:
     mail_port = notif.get("mail_port", 587)
     mail_from = notif.get("mail_from", "")
     mail_to_raw = notif.get("mail_to", "")
-    # Support single string or list of addresses
     if isinstance(mail_to_raw, list):
         mail_to_list = [addr.strip() for addr in mail_to_raw if addr and addr.strip()]
     elif isinstance(mail_to_raw, str) and mail_to_raw:
@@ -135,18 +193,17 @@ def send_digest(profile: dict[str, Any]) -> bool:
             "Mail not configured. Set mail_server, mail_from, and mail_to in profile."
         )
 
-    # Build digest after validation (so config errors surface even when empty)
-    subject, body, entry_ids = build_digest()
+    subject, plaintext, html = build_digest()
 
-    if not body:
+    if not plaintext:
         return False
 
-    # Build email
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = mail_from
     msg["To"] = mail_to
-    msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg.attach(MIMEText(plaintext, "plain", "utf-8"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
 
     try:
         with smtplib.SMTP(mail_server, mail_port, timeout=30) as server:
@@ -164,12 +221,10 @@ def send_digest(profile: dict[str, Any]) -> bool:
     except OSError as e:
         raise DigestError(f"Connection failed: {e}. Check mail_server and mail_port.")
 
-    # Mark entries as sent
-    mark_digest_sent(entry_ids)
     return True
 
 
 def preview_digest() -> str:
     """Generate digest preview without sending. Returns the body text."""
-    _, body, _ = build_digest()
-    return body
+    _, plaintext, _ = build_digest()
+    return plaintext
