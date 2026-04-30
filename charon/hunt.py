@@ -24,6 +24,16 @@ Consider:
 - Would this role give them experience that transfers to their target roles?
 - How much overlap is there in tools, techniques, and responsibilities?
 
+CRITICAL — Security is NOT a monolith. Distinguish between disciplines:
+- Incident response / DFIR / SOC is NOT the same as cloud security architecture
+- DevSecOps / CI-CD pipeline security is NOT the same as detection engineering
+- Infrastructure-as-code (Terraform, CloudFormation) is NOT incident response
+- A role heavy on cloud architecture, IaC, or production automation is a different \
+career track from threat analysis, IR, or detection engineering
+- Score based on the SPECIFIC discipline match, not generic "security" overlap
+- If the posting's core discipline differs from all target roles, cap the score at 50 \
+even if there is surface-level keyword overlap
+
 Return JSON:
 {
     "alignment_score": <0-100, how closely the posting matches target roles>,
@@ -35,7 +45,8 @@ Return JSON:
 }
 
 Be honest. A general IT role is not a security role. A SOC analyst is not a pen tester. \
-Scoring should reflect genuine skill and career path overlap, not keyword matching."""
+A cloud security architect is not an incident responder. \
+Scoring should reflect genuine DISCIPLINE and career path overlap, not keyword matching."""
 
 
 def analyze_role_alignment(posting_text: str, target_roles: list[str]) -> dict[str, Any]:
