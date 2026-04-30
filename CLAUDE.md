@@ -10,16 +10,25 @@
 
 Charon is a security-forward CLI tool for job seekers. Metasploit-style aesthetic, dark ferryman theme. Python 3.11+, Click/Typer, Rich, Claude API.
 
-## Build Phases
+## Active Plan
+
+**v2 is the current roadmap. See `ROADMAP.md` for the master plan, phase status, acceptance criteria, and decisions.** Always read it at the start of a new session and confirm the current phase with the user before starting work.
+
+`CHANGELOG.md` tracks shipped versions. `docs/archive/REQUIREMENTS_v1.md` (after Phase 5.5 cleanup) holds the v1 historical build plan.
+
+## Build Phases (v1 — historical, all shipped at v0.5.0)
 
 Build sequentially. Each phase must be functional and testable before proceeding.
 
-- **Phase 0**: Scaffolding (repo structure, profile, DB, output helpers)
-- **Phase 1**: `ghostbust` (ghost job detection)
-- **Phase 2**: `redflags` (toxic workplace signals)
-- **Phase 3**: `dossier` (company research + scoring)
-- **Phase 3.5**: `hunt` (pipeline orchestration)
-- **Phase 4**: `watch` + `digest` (watchlist, crawler, email)
+- **Phase 0**: Scaffolding (repo structure, profile, DB, output helpers) — shipped
+- **Phase 1**: `ghostbust` (ghost job detection) — shipped
+- **Phase 2**: `redflags` (toxic workplace signals) — shipped
+- **Phase 3**: `dossier` (company research + scoring) — shipped
+- **Phase 3.5**: `hunt` (pipeline orchestration) — shipped
+- **Phase 4**: `watch` + `digest` (watchlist, crawler, email) — shipped
+- **Phase 5**: `apply` + `inbox` (application tracking, IMAP scanning) — shipped
+
+For Phases 5.5+ (v2 work), see `ROADMAP.md`.
 
 ## Security Requirements
 
