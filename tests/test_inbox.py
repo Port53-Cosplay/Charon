@@ -86,8 +86,12 @@ class TestClassificationToStatus:
     def test_rejection_maps_to_rejected(self):
         assert CLASSIFICATION_TO_STATUS["rejection"] == "rejected"
 
-    def test_acknowledgment_maps_to_responded(self):
-        assert CLASSIFICATION_TO_STATUS["acknowledgment"] == "responded"
+    def test_acknowledgment_maps_to_acknowledged(self):
+        # HOWTO.md distinguishes 'acknowledged' (machine auto-receipt) from
+        # 'responded' (actual human reply). Acknowledgment classifications
+        # come from auto-emails like "thanks for applying" — they are
+        # acknowledged, not responded.
+        assert CLASSIFICATION_TO_STATUS["acknowledgment"] == "acknowledged"
 
     def test_other_not_mapped(self):
         assert "other" not in CLASSIFICATION_TO_STATUS

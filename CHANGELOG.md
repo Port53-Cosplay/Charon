@@ -6,6 +6,14 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 Active work toward v2 Phase 6 (`gather`). See `ROADMAP.md` for phase plan.
 
+## [0.5.2] — 2026-04-30
+
+Patch release. Three pre-existing test failures cleaned up before v2 work begins. Full suite now green: 187/187 passing.
+
+### Fixed
+- `_build_imap_search` now early-returns `[]` when no useful search criteria can be extracted from tracked applications (no domains, no companies, no roles). Previously it appended 8 generic confirmation-pattern queries regardless, which would match unrelated mail when there were no actual applications to attribute matches to.
+- `test_acknowledgment_maps_to_responded` was asserting against pre-distinction behavior. Renamed to `test_acknowledgment_maps_to_acknowledged` and updated assertion to match the documented (and correct) mapping. HOWTO.md treats `acknowledged` (machine auto-receipt) and `responded` (human reply) as distinct statuses.
+
 ## [0.5.1] — 2026-04-30
 
 Pre-v2 cleanup (Phase 5.5). No code changes; doc and metadata only.
@@ -56,6 +64,7 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Pickle-Pixel/Charon/releases/tag/v0.5.0

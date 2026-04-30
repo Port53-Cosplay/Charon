@@ -123,6 +123,13 @@ def _build_imap_search(applications: list[dict[str, Any]], days: int) -> list[st
         if app.get("role"):
             roles.add(app["role"])
 
+    # Confirmation-pattern queries are only meaningful when there's at least
+    # one tracked application to attribute matches to. With no useful data
+    # extracted, scanning a 7-day window for generic "thanks for applying"
+    # subjects would produce false positives from unrelated senders.
+    if not domains and not companies and not roles:
+        return []
+
     since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%d-%b-%Y")
 
     queries = []
