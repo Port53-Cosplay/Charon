@@ -165,6 +165,18 @@ Record decisions here as they're made. Format: short, dated, with rationale.
 **Decision:** v2 CLI commands use ferryman-themed names (`gather`, `judge`, `forge`, `petition`, `provision`, `manifest`) where the metaphor is intuitive. `enrich` stays plain. Internal module names stay descriptive (`discover.py`, `screen.py`, `tailor.py`, `letter.py`, `dashboard.py`).
 **Rationale:** Consistent with existing themed commands like `toll`. Theming the UX layer keeps the user-facing experience cohesive without making the codebase confusing for navigation. Phase names and internal table names stay descriptive.
 
+### ADR-006 — ATS-first discovery, no aggregator scraping
+**Date:** 2026-04-30
+**Decision:** v2 discovery uses public ATS APIs (Greenhouse, Lever, Ashby, Workday) as the primary mechanism, polling a curated employer list in `config/companies.yaml`. JobSpy and aggregator-board scraping are out of scope for v2.0.
+**Rationale:** Smoke tests of `python-jobspy` against the four planned boards showed 3/4 broken at probe time (ZipRecruiter 403, Glassdoor API error, Google Jobs returns 0). Indeed worked but with poor relevance for niche security queries — "AI red team" returned generic threat-intelligence jobs. RSS-feed alternatives proved equally dead: Dice, BuiltIn, isecjobs, NinjaJobs all have URLs that *look* like RSS endpoints but actually serve HTML, not feeds. By contrast, the four major employer ATSs all expose clean public JSON APIs designed for embedding company job boards on their own sites. No anti-bot defenses, no scraping middleware, structured data with full descriptions. Probing 140+ candidate employers confirmed strong coverage (47 verified) across the target categories (security product, GRC, audit, AI safety, offensive). The tradeoff: ATS-first requires a curated employer list and misses companies you haven't added. For a personal pivot into security/audit/compliance, that's the right tradeoff — known good employers beat random aggregator noise.
+**Implications:**
+- No JobSpy dependency.
+- No LinkedIn (out per ADR-001 anyway; LinkedIn ATS scraping is ToS-hot regardless).
+- No aggregator boards in v2.0; reconsider only if a real RSS feed materializes.
+- Adapter quality is per-ATS, not per-employer (one Greenhouse adapter handles all 29 Greenhouse employers). Maintenance burden scales with ATS platforms, not employer count.
+- Rippling ATS support deferred — two known employers (BARR, BlackKite) are commented out in companies.yaml awaiting an adapter.
+- iCIMS skipped — federal/cleared roles dominate iCIMS surface, out of scope per user preference.
+
 ---
 
 ## 8. Phase Plan
@@ -205,46 +217,60 @@ Phases are sequential. Each must meet its acceptance criteria before the next be
 ### Phase 6 — `gather` (the funnel input) `[ ]`
 **Target version:** v0.6.0
 **Complexity:** L
-**Goal:** Charon gathers jobs without the user typing URLs. Souls at the riverbank.
+**Goal:** Charon gathers jobs from a curated employer list via public ATS APIs. Souls at the riverbank.
+
+**Architecture:** ATS-first. See ADR-006 for the rationale (replaced the original JobSpy-based plan after smoke testing).
 
 **Scope:**
-- New module: `charon/discover.py` (CLI command name: `gather`)
-- Wraps `python-jobspy` for board scraping (Indeed, Glassdoor, ZipRecruiter, Google Jobs — LinkedIn off)
-- Workday tenant registry: `config/workday.yaml` (built from scratch)
-- Direct-site registry: `config/sites.yaml` (built from scratch)
-- New profile section: `gather:` (queries, locations, boards, blocked companies)
-- New SQLite table: `discoveries` (id, source, url, company, role, location, posted_at, snippet, discovered_at, dedupe_hash, screened_status)
+- New package: `charon/gather/` with one adapter per ATS:
+  - `gather/greenhouse.py` — `boards-api.greenhouse.io/v1/boards/<slug>/jobs?content=true`
+  - `gather/lever.py` — `api.lever.co/v0/postings/<slug>?mode=json`
+  - `gather/ashby.py` — `api.ashbyhq.com/posting-api/job-board/<slug>`
+  - `gather/workday.py` — POST to `<tenant>.<wd>.myworkdayjobs.com/wday/cxs/<tenant>/<site>/jobs`
+- Single registry: `config/companies.yaml` (already exists, 47 verified entries)
+- New SQLite table: `discoveries` (id, ats, slug, company, role, location, url, description, posted_at, discovered_at, dedupe_hash, tier, category, screened_status)
+- Auto-detect ATS + slug from any URL pasted via `--add` (Greenhouse/Lever/Ashby/Workday URL patterns are all distinctive)
 - Dedupe by URL + by company+role+location fuzzy match
 - Skip companies in `applied` table (already in pipeline)
 - Skip companies in `blocked` profile list
+- New profile section: `gather:` (rate limits per ATS, blocked companies, optional category filter)
 
 **CLI:**
 ```
-charon gather                          # run all configured searches
-charon gather --query "AI red team"    # one-off query (overrides profile)
-charon gather --board workday          # specific source only
-charon gather --since 7d               # only postings newer than N days
-charon gather --dry-run                # show what would run, don't execute
-charon gather --list                   # show pending unjudged discoveries
+charon gather                          # poll all configured employers
+charon gather --ats greenhouse         # one platform
+charon gather --slug datadog           # one employer
+charon gather --add <url>              # auto-detect ATS + slug from any careers/job URL
+charon gather --add datadog --ats greenhouse   # explicit fallback when auto-detect fails
+charon gather --list                   # show configured employers grouped by ATS
+charon gather --dry-run                # preview, don't write to DB
 ```
 
 **Acceptance criteria:**
-- [ ] `charon gather --query "X"` returns ≥1 result from ≥2 sources
-- [ ] All discoveries written to `discoveries` table with required fields populated
-- [ ] LinkedIn never queried (verify in JobSpy call args)
-- [ ] Dedupe prevents same URL appearing twice across runs
-- [ ] Companies in `applied` table excluded from results
-- [ ] `config/workday.yaml` has ≥10 Workday tenants relevant to security/AI roles
-- [ ] `config/sites.yaml` has ≥5 direct career sites (CrowdStrike, Rapid7, Palo Alto, etc.)
-- [ ] Tests cover: dedupe logic, profile blocked-company filter, board exclusion, dry-run
+- [ ] `charon gather --slug datadog` writes Datadog's open jobs to the `discoveries` table
+- [ ] All four ATS adapters tested against captured-fixture responses (no live network in tests)
+- [ ] `--add <url>` correctly auto-detects ATS + slug for boards.greenhouse.io, jobs.lever.co, jobs.ashbyhq.com, and *.myworkdayjobs.com URLs
+- [ ] LinkedIn never queried (no LinkedIn code paths exist)
+- [ ] Dedupe prevents the same URL appearing twice across runs
+- [ ] Companies already in `applied` table excluded from results
+- [ ] All 47 employers in `config/companies.yaml` poll successfully (or fail gracefully with logged reason)
+- [ ] Per-ATS rate limit honored (default: 1 req/sec, configurable via profile)
 - [ ] HOWTO.md updated with `gather` workflow
 - [ ] CHANGELOG entry under v0.6.0
 
-**Dependencies:** Phase 5.5 complete
+**Dependencies:** Phase 5.5 complete (done at v0.5.1)
+
 **Risks:**
-- JobSpy upstream stability (issue per ApplyPilot's user reports — 403s, model errors). Mitigation: catch failures per source, continue with others.
-- Workday tenant URLs change. Mitigation: store tenant slug, retry on 404 with diagnostic.
-- ATS sites change CSS frequently. Mitigation: defer CSS-heavy extraction to Phase 7.
+- ATS slugs change (e.g. greynoise → greynoiseintelligence). Mitigation: version-control companies.yaml; fail loud on 404 with the offending slug logged so the user can edit and re-run.
+- Workday tenant URLs change. Mitigation: same — fail loud, surface the bad config row in error output.
+- Rate-limited if running too aggressively across 47 employers (~6000 jobs total possible per run). Mitigation: per-ATS rate-limit defaults; profile override.
+- Companies move ATS (e.g. acquisition or replatforming). Mitigation: log unexpected 404s; user updates companies.yaml when they notice.
+
+**Deferred to later phases:**
+- Rippling adapter (BARR Advisory + Black Kite already documented in commented-out section of companies.yaml). Push to v0.6.x patch when DeAnna decides she wants those employers active.
+- iCIMS adapter — skipped per user preference (federal-only roles at Coalfire, mostly enterprise/clearance work).
+- Aggregator boards (Dice, isecjobs, BuiltIn, NinjaJobs) — they have URLs that look like RSS endpoints but actually serve HTML. Defer indefinitely; revisit if a real feed surfaces.
+- 6 employers in TODO block of companies.yaml require manual ATS investigation before they can move into an active section: Snyk, Anchore, Pangea, AuditBoard, Prescient Assurance, Palisade Research.
 
 ---
 
@@ -472,6 +498,9 @@ Update this after every phase ships. Last entry on top.
 
 | Date | Version | Phase | Status | Notes |
 |---|---|---|---|---|
+| 2026-04-30 | 0.5.3 | 6 (scoping) | architecture finalized | ATS-first per ADR-006. companies.yaml seeded with 47 verified employers. Ready to begin Phase 6 implementation in next session. |
+| 2026-04-30 | 0.5.2 | 5.5 cleanup | shipped | Three pre-existing test failures fixed. Suite green at 187/187. |
+| 2026-04-30 | 0.5.1 | 5.5 | shipped | Pre-v2 cleanup: ROADMAP, CHANGELOG, LICENSE, README rewrite, REQUIREMENTS archived. |
 | 2026-04-30 | 0.5.0 | (baseline) | tagged | Pre-v2 baseline. All v1 phases shipped. |
 | 2026-04-30 | — | Plan | drafted | This document created |
 

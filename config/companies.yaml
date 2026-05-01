@@ -1,0 +1,185 @@
+# Charon — gather source list
+#
+# Curated employer registry for Phase 6 (`charon gather`).
+# Every entry has: name, tier, category, notes, and ATS-specific config.
+#
+# Categories (for downstream tailoring/scoring):
+#   grc, audit, appsec, offsec, cloud_security, endpoint, identity,
+#   threat_intel, tprm, supply_chain, ai_security, ai_research,
+#   security_product_general
+#
+# Priority tiers (metadata for downstream scoring, scraper does not use):
+#   tier_1 — GRC platforms, audit firms, bug bounty platforms (best conversion fit)
+#   tier_2 — mid-size security product, identity, pen test firms
+#   tier_3 — top-tier security products and AI labs (low conversion for new entrants)
+#
+# Verification status (as of 2026-04-30): every slug below was probed against the
+# corresponding public ATS API and returned a non-empty job list. The TODO block
+# at the bottom lists employers whose ATS could not be auto-detected — those
+# require manual investigation before they can be added here.
+#
+# ARCHITECTURE TODO (post-MVP): once this list grows past ~50 employers,
+# consider a hybrid: dedicated per-company adapters for tier_1, plus a generic
+# Greenhouse/Lever keyword-search adapter for tier_2/tier_3 (lower-frequency,
+# broader sweep). See ROADMAP.md.
+
+gather:
+
+  # ─── Greenhouse ──────────────────────────────────────────────────────────
+  greenhouse:
+    # GRC / compliance / audit
+    - { slug: hyperproof,           name: "Hyperproof",          tier: tier_1, category: grc,                       notes: "Compliance ops platform" }
+    - { slug: logicgate,            name: "LogicGate",           tier: tier_1, category: grc,                       notes: "GRC platform" }
+    - { slug: thoropass,            name: "Thoropass",           tier: tier_1, category: grc,                       notes: "Compliance + audit, integrated" }
+    - { slug: align,                name: "A-LIGN",              tier: tier_1, category: audit,                     notes: "Audit firm. Verified: 195 'A-LIGN' mentions in job content; PCI QSA / ISO / FedRAMP roles. Greenhouse, not Workday." }
+
+    # Bug bounty platforms (tier_1 per spec)
+    - { slug: bugcrowd,             name: "Bugcrowd",            tier: tier_1, category: offsec,                    notes: "Bug bounty platform" }
+
+    # Threat intel / TPRM / OSINT
+    - { slug: censys,               name: "Censys",              tier: tier_2, category: threat_intel,              notes: "Internet scanning, attack surface" }
+    - { slug: greynoiseintelligence, name: "GreyNoise",          tier: tier_2, category: threat_intel,              notes: "Slug correction: greynoiseintelligence (not greynoise)" }
+    - { slug: recordedfuture,       name: "Recorded Future",     tier: tier_2, category: threat_intel,              notes: "Strong analyst-role fit" }
+    - { slug: securityscorecard,    name: "SecurityScorecard",   tier: tier_2, category: tprm,                      notes: "Security ratings / TPRM" }
+
+    # AppSec / supply chain
+    - { slug: veracode,             name: "Veracode",            tier: tier_2, category: appsec,                    notes: "AppSec/SAST" }
+    - { slug: endorlabs,            name: "Endor Labs",          tier: tier_2, category: supply_chain,              notes: "Open-source dependency security" }
+    - { slug: chainguard,           name: "Chainguard",          tier: tier_2, category: supply_chain,              notes: "Container / supply chain security" }
+    - { slug: trufflesecurity,      name: "Truffle Security",    tier: tier_2, category: appsec,                    notes: "Secrets detection / AI tooling" }
+
+    # Cloud security / endpoint / SIEM
+    - { slug: wizinc,               name: "Wiz",                 tier: tier_3, category: cloud_security,            notes: "Top-tier cloud security" }
+    - { slug: orcasecurity,         name: "Orca Security",       tier: tier_2, category: cloud_security,            notes: "Cloud security" }
+    - { slug: cloudflare,           name: "Cloudflare",          tier: tier_3, category: security_product_general,  notes: "Broad infra+security; high volume" }
+    - { slug: datadog,              name: "Datadog",             tier: tier_3, category: security_product_general,  notes: "Observability + security; large board" }
+    - { slug: sumologic,            name: "Sumo Logic",          tier: tier_2, category: security_product_general,  notes: "Cloud SIEM / observability" }
+    - { slug: tanium,               name: "Tanium",              tier: tier_2, category: endpoint,                  notes: "Endpoint mgmt + security" }
+
+    # Identity
+    - { slug: okta,                 name: "Okta",                tier: tier_3, category: identity,                  notes: "Includes Auth0 jobs since Okta acquired" }
+    - { slug: yubico,               name: "Yubico",              tier: tier_2, category: identity,                  notes: "Hardware identity. Some roles also on Lever." }
+
+    # Offensive / pen test (boutiques)
+    - { slug: bishopfox,            name: "Bishop Fox",          tier: tier_2, category: offsec,                    notes: "Pen test boutique" }
+    - { slug: synack,               name: "Synack",              tier: tier_2, category: offsec,                    notes: "Crowdsourced pen test" }
+    - { slug: praetorian,           name: "Praetorian",          tier: tier_2, category: offsec,                    notes: "Offensive security" }
+    - { slug: specterops,           name: "SpecterOps",          tier: tier_2, category: offsec,                    notes: "Offensive + BloodHound" }
+
+    # AI security / AI labs
+    - { slug: hiddenlayer,          name: "HiddenLayer",         tier: tier_2, category: ai_security,               notes: "AI red team postings here" }
+    - { slug: anthropic,            name: "Anthropic",           tier: tier_3, category: ai_research,               notes: "Low conversion for new entrants without senior research credentials" }
+    - { slug: scaleai,              name: "Scale AI",            tier: tier_3, category: ai_research,               notes: "AI/ML, security-adjacent" }
+    - { slug: deepmind,             name: "Google DeepMind",     tier: tier_3, category: ai_research,               notes: "AI safety adjacent" }
+
+  # ─── Lever ───────────────────────────────────────────────────────────────
+  lever:
+    # Audit / GRC
+    - { slug: coalfire,             name: "Coalfire",            tier: tier_1, category: audit,                     notes: "Audit firm. Federal/cleared roles use a separate iCIMS instance — not included here per no-federal preference." }
+    - { slug: secureframe,          name: "Secureframe",         tier: tier_1, category: grc,                       notes: "GRC platform" }
+
+    # Cloud security
+    - { slug: sysdig,               name: "Sysdig",              tier: tier_2, category: cloud_security,            notes: "Cloud + container security" }
+
+    # Identity
+    - { slug: yubico,               name: "Yubico",              tier: tier_2, category: identity,                  notes: "Some roles only listed on Lever (others on Greenhouse)" }
+
+    # AI safety research orgs (verified working — DeAnna's note re: bespoke scrapers
+    # was for Palisade Research; Apollo and METR DO use Lever)
+    - { slug: apolloresearch,       name: "Apollo Research",     tier: tier_3, category: ai_safety,                 notes: "AI safety research; small org, high signal" }
+    - { slug: metr,                 name: "METR",                tier: tier_3, category: ai_safety,                 notes: "AI safety evaluations org (formerly ARC Evals)" }
+
+  # ─── Ashby ───────────────────────────────────────────────────────────────
+  ashby:
+    # GRC
+    - { slug: vanta,                name: "Vanta",               tier: tier_1, category: grc,                       notes: "GRC + automated SOC 2" }
+    - { slug: drata,                name: "Drata",               tier: tier_1, category: grc,                       notes: "Continuous compliance" }
+
+    # Bug bounty
+    - { slug: hackerone,            name: "HackerOne",           tier: tier_1, category: offsec,                    notes: "Bug bounty platform" }
+
+    # Identity
+    - { slug: 1password,            name: "1Password",           tier: tier_2, category: identity,                  notes: "Password / identity" }
+
+    # AppSec
+    - { slug: semgrep,              name: "Semgrep",             tier: tier_2, category: appsec,                    notes: "SAST + custom rules" }
+
+    # AI security / AI labs
+    - { slug: lakera,               name: "Lakera",              tier: tier_2, category: ai_security,               notes: "LLM security guardrails" }
+    - { slug: openai,               name: "OpenAI",              tier: tier_3, category: ai_research,               notes: "Low conversion for new entrants. Has a real security team (Preparedness, Trust)." }
+    - { slug: perplexity,           name: "Perplexity",          tier: tier_3, category: ai_research,               notes: "AI search / agents — security-adjacent" }
+
+  # ─── Workday (per-tenant) ────────────────────────────────────────────────
+  workday:
+    - slug: schellman
+      name: "Schellman"
+      tier: tier_1
+      category: audit
+      notes: "Audit firm — SOC 2 / ISO / PCI"
+      workday: { tenant: schellman, wd: wd1, site: Careers }
+
+    - slug: crowdstrike
+      name: "CrowdStrike"
+      tier: tier_3
+      category: endpoint
+      notes: "Top-tier endpoint security; ~540 open roles"
+      workday: { tenant: crowdstrike, wd: wd5, site: crowdstrikecareers }
+
+    - slug: cisco
+      name: "Cisco (incl. Splunk)"
+      tier: tier_3
+      category: security_product_general
+      notes: "Huge board (~975 jobs). Splunk roles now under Cisco. Use 'judge' aggressively to filter."
+      workday: { tenant: cisco, wd: wd5, site: cisco_careers }
+
+    - slug: bitsight
+      name: "BitSight"
+      tier: tier_2
+      category: tprm
+      notes: "Security ratings / TPRM. Sample role: Principal Vulnerability Researcher."
+      workday: { tenant: bitsight, wd: wd1, site: Bitsight }
+
+  # ─── Rippling ATS (disabled — adapter not yet implemented) ──────────────
+  # Rippling has its own ATS at {company}.rippling-ats.com and ats.rippling.com.
+  # Public API surface unverified. These employers were detected on Rippling
+  # but cannot be polled until a Rippling adapter is added. Kept commented out
+  # so they don't appear active in `gather` output. Uncomment once adapter
+  # exists and slugs are verified.
+  #
+  # rippling:
+  #   - slug: barradvisory
+  #     name: "BARR Advisory"
+  #     tier: tier_1
+  #     category: audit
+  #     notes: "Audit firm. Detected on Rippling ATS; adapter pending."
+  #     url: "https://ats.rippling.com/barradvisory"  # verify when building adapter
+  #
+  #   - slug: blackkite
+  #     name: "Black Kite"
+  #     tier: tier_2
+  #     category: tprm
+  #     notes: "Third-party risk. Confirmed Rippling ATS; adapter pending."
+  #     url: "https://black-kite.rippling-ats.com/"
+
+# ─── TODO: manual investigation needed ──────────────────────────────────────
+# These employers were requested but their ATS could not be auto-detected via
+# careers-page inspection. They may use proprietary systems, JS-rendered SPAs
+# that hide the ATS, or have moved their job listings. Each needs a human to
+# (a) manually visit the careers page, (b) click an "Apply" button, and
+# (c) note where the form actually lives. Then add to the appropriate adapter
+# section above with verified slug.
+#
+# - Snyk           — careers page is JS-rendered; ATS endpoint hidden
+# - Anchore        — uses email submission ("Submit Resume" -> mailto), no ATS
+# - Pangea         — careers page is JS-rendered SPA
+# - AuditBoard     — no ATS detected; possibly proprietary or partner-managed
+# - Prescient Assurance — careers page returns 404 / DNS issue
+# - Palisade Research — known small org, likely posts via custom careers page
+
+# ─── Bonus AI-research orgs (commented out, optional to enable) ─────────────
+# Found during verification probes but not in the original spec.
+# DeepMind and Perplexity are now active in their respective sections above.
+# Cohere remains commented out — enable if useful.
+#
+#   ashby:
+#     - { slug: cohere, name: "Cohere", tier: tier_3, category: ai_research, notes: "Enterprise LLM" }

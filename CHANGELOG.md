@@ -4,7 +4,24 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Active work toward v2 Phase 6 (`gather`). See `ROADMAP.md` for phase plan.
+Phase 6 implementation (`gather` ATS adapters). See `ROADMAP.md` for phase plan.
+
+## [0.5.3] — 2026-04-30
+
+Phase 6 design iteration. No runtime code changes — config and planning only. Sets up the foundation for Phase 6 implementation in the next session.
+
+### Added
+- `config/companies.yaml` — curated employer registry for Phase 6 (`gather`). 47 active entries: Greenhouse (29), Lever (6), Ashby (8), Workday (4). Every slug verified against the public ATS API. Each entry has `tier` (priority_tier metadata) and `category` (role-type) fields for downstream scoring/tailoring. Includes a Rippling section commented out (BARR Advisory + Black Kite, awaiting adapter) and a TODO block of 6 employers requiring manual ATS investigation (Snyk, Anchore, Pangea, AuditBoard, Prescient Assurance, Palisade Research).
+- ROADMAP.md ADR-006 documents the architectural pivot to ATS-first discovery, replacing the originally planned JobSpy-based design.
+
+### Changed
+- ROADMAP.md Phase 6 rewritten around per-ATS adapters (Greenhouse, Lever, Ashby, Workday). New `charon/gather/` package layout with one module per ATS. Single config file replaces the previously planned `workday.yaml` + `sites.yaml` split.
+- ROADMAP.md Status Tracker now reflects shipped 0.5.1 / 0.5.2 / 0.5.3 milestones.
+
+### Investigated and rejected
+- `python-jobspy` for aggregator-board scraping. Smoke test: ZipRecruiter 403 (Cloudflare), Glassdoor API error, Google Jobs returns 0; only Indeed worked, with poor relevance for niche security queries. Removed from Phase 6 scope.
+- RSS feeds for Dice, BuiltIn, isecjobs.com, NinjaJobs. URLs that look like RSS endpoints (`/rss`, `/feed`) actually serve HTML, not feeds. Deferred indefinitely.
+- First2Apply-style headless-browser scraping. Architecture is technically sound but reintroduces the autonomous-browser concerns rejected in ADR-001. Out of scope.
 
 ## [0.5.2] — 2026-04-30
 
@@ -64,7 +81,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Pickle-Pixel/Charon/releases/tag/v0.5.0
