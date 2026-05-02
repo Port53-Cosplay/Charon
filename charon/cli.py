@@ -42,10 +42,13 @@ from charon.inbox import InboxError
 from charon.gather import (
     GatherError,
     DEFAULT_RATE_LIMIT_SECONDS,
+    detect_ats,
+    gather_employer,
     gather_registry,
     list_employers,
     load_registry,
 )
+from charon.db import get_applied_companies
 
 
 @click.group()
@@ -1623,6 +1626,9 @@ def inbox_cmd(scan: bool, setup: bool, show_status: bool, days: int) -> None:
 @cli.command("gather")
 @click.option("--ats", help="Limit to one ATS (e.g. greenhouse, lever, ashby, workday).")
 @click.option("--slug", help="Limit to one employer slug from companies.yaml.")
+@click.option("--add", "add_target",
+              help="One-shot: gather a single URL or slug not in companies.yaml. "
+                   "Pass a URL to auto-detect ATS, or a slug with --ats.")
 @click.option("--list", "list_employers_flag", is_flag=True, help="List configured employers grouped by ATS.")
 @click.option("--dry-run", is_flag=True, help="Preview what would be discovered without writing to DB.")
 @click.option("--rate-limit", type=float, default=DEFAULT_RATE_LIMIT_SECONDS,
@@ -1630,11 +1636,79 @@ def inbox_cmd(scan: bool, setup: bool, show_status: bool, days: int) -> None:
 def gather_cmd(
     ats: str | None,
     slug: str | None,
+    add_target: str | None,
     list_employers_flag: bool,
     dry_run: bool,
     rate_limit: float,
 ) -> None:
     """Gather job postings from configured employers. Souls at the riverbank."""
+    # ── --add: one-shot for an employer not in the registry ─────────
+    if add_target:
+        if "://" in add_target:
+            detected = detect_ats(add_target)
+            if not detected:
+                print_error(
+                    "Could not detect ATS from URL. Recognized patterns:\n"
+                    "  Greenhouse: boards.greenhouse.io/<slug>\n"
+                    "  Lever:      jobs.lever.co/<slug>\n"
+                    "  Ashby:      jobs.ashbyhq.com/<slug>\n"
+                    "  Workday:    <tenant>.<wd>.myworkdayjobs.com/<site>/...\n"
+                    "Or pass a slug with --ats: charon gather --add <slug> --ats greenhouse"
+                )
+                return
+            ats_name, entry = detected
+        else:
+            if not ats:
+                print_error("--add with a slug requires --ats <name>.")
+                return
+            if ats == "workday":
+                print_error(
+                    "Workday --add requires a full URL (need tenant + wd + site). "
+                    "Paste a URL like https://<tenant>.<wd>.myworkdayjobs.com/<site>/..."
+                )
+                return
+            ats_name = ats
+            entry = {"slug": add_target, "name": add_target}
+
+        print_banner()
+        section_header("GATHER (ONE-SHOT)")
+        label = "DRY RUN" if dry_run else "LIVE"
+        print_info(f"[{label}] Detected: {ats_name}/{entry['slug']}")
+        console.print()
+
+        skip = get_applied_companies()
+        try:
+            summary = gather_employer(
+                ats_name, entry, dry_run=dry_run, skip_companies=skip
+            )
+        except GatherError as e:
+            print_error(str(e))
+            return
+
+        if summary.get("error"):
+            print_error(summary["error"])
+            return
+        if summary.get("skipped") == -1:
+            print_warning(
+                f"{entry['name']} is already in your applications table — skipped."
+            )
+            return
+
+        new = summary["new"]
+        dupes = summary["dupes"]
+        fetched = summary["fetched"]
+        skipped = max(0, summary.get("skipped", 0))
+        console.print(
+            f"  [good]+{new} new[/good] / "
+            f"[dim]{dupes} dupes[/dim] / "
+            f"{fetched} total"
+            + (f" [warning]({skipped} skipped)[/warning]" if skipped else "")
+        )
+        if dry_run:
+            console.print()
+            print_info("Dry run - no rows were written to the discoveries table.")
+        return
+
     try:
         registry = load_registry()
     except GatherError as e:

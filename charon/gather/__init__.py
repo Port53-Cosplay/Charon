@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -118,6 +119,70 @@ def make_dedupe_hash(ats: str, url: str) -> str:
     """SHA-256 hash of (ats, normalized url). Stable across runs."""
     payload = f"{ats}|{normalize_url(url)}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+# ── URL auto-detection ───────────────────────────────────────────────
+
+
+_LANG_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}$")
+
+
+def detect_ats(url: str) -> tuple[str, dict[str, Any]] | None:
+    """Recognize an ATS URL and return (ats_name, entry).
+
+    The returned entry is the minimum shape `gather_employer` needs:
+    `{slug, name}` for Greenhouse/Lever/Ashby, plus a `workday` block
+    for Workday. Returns None if the URL doesn't match any known ATS.
+    """
+    if not url or "://" not in url:
+        return None
+
+    parsed = urlsplit(url.strip())
+    host = (parsed.hostname or "").lower()
+    parts = [p for p in parsed.path.split("/") if p]
+
+    # Greenhouse — boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>
+    if host in {"boards.greenhouse.io", "job-boards.greenhouse.io"}:
+        if parts:
+            slug = parts[0]
+            return "greenhouse", {"slug": slug, "name": slug}
+    # Greenhouse custom subdomain — <slug>.greenhouse.io
+    if host.endswith(".greenhouse.io") and host not in {"boards.greenhouse.io", "job-boards.greenhouse.io"}:
+        slug = host.split(".")[0]
+        if slug and slug != "boards-api":
+            return "greenhouse", {"slug": slug, "name": slug}
+
+    # Lever — jobs.lever.co/<slug>
+    if host == "jobs.lever.co":
+        if parts:
+            slug = parts[0]
+            return "lever", {"slug": slug, "name": slug}
+
+    # Ashby — jobs.ashbyhq.com/<slug> or <slug>.ashbyhq.com
+    if host == "jobs.ashbyhq.com":
+        if parts:
+            slug = parts[0]
+            return "ashby", {"slug": slug, "name": slug}
+    if host.endswith(".ashbyhq.com") and host != "jobs.ashbyhq.com":
+        slug = host.split(".")[0]
+        if slug and slug != "api":
+            return "ashby", {"slug": slug, "name": slug}
+
+    # Workday — <tenant>.<wd>.myworkdayjobs.com/[<lang>/]<site>[/job/...]
+    if host.endswith(".myworkdayjobs.com"):
+        host_parts = host.split(".")
+        if len(host_parts) >= 4:
+            tenant, wd = host_parts[0], host_parts[1]
+            site_parts = parts[1:] if parts and _LANG_RE.match(parts[0]) else parts
+            if site_parts:
+                site = site_parts[0]
+                return "workday", {
+                    "slug": tenant,
+                    "name": tenant,
+                    "workday": {"tenant": tenant, "wd": wd, "site": site},
+                }
+
+    return None
 
 
 # ── orchestration ────────────────────────────────────────────────────
