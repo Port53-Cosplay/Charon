@@ -39,6 +39,13 @@ from charon.digest import DigestError, build_digest, send_digest, preview_digest
 from charon.ai import AIError
 from charon.apply import ApplyError, track_application, update_status, check_ghosted, get_stats, list_applications
 from charon.inbox import InboxError
+from charon.gather import (
+    GatherError,
+    DEFAULT_RATE_LIMIT_SECONDS,
+    gather_registry,
+    list_employers,
+    load_registry,
+)
 
 
 @click.group()
@@ -1611,6 +1618,147 @@ def inbox_cmd(scan: bool, setup: bool, show_status: bool, days: int) -> None:
             console.print()
 
         print_success(f"Found {len(results)} response(s). Queued for digest.")
+
+
+@cli.command("gather")
+@click.option("--ats", help="Limit to one ATS (e.g. greenhouse, lever, ashby, workday).")
+@click.option("--slug", help="Limit to one employer slug from companies.yaml.")
+@click.option("--list", "list_employers_flag", is_flag=True, help="List configured employers grouped by ATS.")
+@click.option("--dry-run", is_flag=True, help="Preview what would be discovered without writing to DB.")
+@click.option("--rate-limit", type=float, default=DEFAULT_RATE_LIMIT_SECONDS,
+              help=f"Seconds between employer fetches (default: {DEFAULT_RATE_LIMIT_SECONDS}).")
+def gather_cmd(
+    ats: str | None,
+    slug: str | None,
+    list_employers_flag: bool,
+    dry_run: bool,
+    rate_limit: float,
+) -> None:
+    """Gather job postings from configured employers. Souls at the riverbank."""
+    try:
+        registry = load_registry()
+    except GatherError as e:
+        print_error(str(e))
+        return
+
+    if list_employers_flag:
+        section_header("CONFIGURED EMPLOYERS")
+        for ats_name, entries in registry.items():
+            if not isinstance(entries, list) or not entries:
+                continue
+            console.print(f"\n  [header]{ats_name}[/header] ({len(entries)} employers)")
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                tier = entry.get("tier", "")
+                category = entry.get("category", "")
+                tag = f"[dim]{tier}/{category}[/dim]" if tier or category else ""
+                console.print(f"    [info]{entry.get('slug', '?'):<24}[/info] {entry.get('name', '?'):<28} {tag}")
+        total = sum(len(v) for v in registry.values() if isinstance(v, list))
+        console.print(f"\n  [dim]{total} total employers across {len(registry)} ATS platforms[/dim]")
+        return
+
+    pairs = list_employers(registry, ats=ats)
+    if slug:
+        pairs = [(a, e) for a, e in pairs if e.get("slug") == slug]
+
+    if not pairs:
+        scope = []
+        if ats:
+            scope.append(f"ats={ats}")
+        if slug:
+            scope.append(f"slug={slug}")
+        if scope:
+            print_error(f"No employers in registry match {' '.join(scope)}.")
+        else:
+            print_error("Registry is empty.")
+        return
+
+    print_banner()
+    section_header("GATHER")
+    label = "DRY RUN" if dry_run else "LIVE"
+    print_info(f"[{label}] Polling {len(pairs)} employer(s)...")
+    if rate_limit > 0:
+        print_info(f"Rate limit: {rate_limit}s between employers")
+    console.print()
+
+    summaries: list[dict] = []
+
+    def on_progress(summary: dict) -> None:
+        summaries.append(summary)
+        slug_disp = summary["slug"]
+        name = summary["name"]
+        ats_name = summary["ats"]
+
+        if summary.get("error"):
+            console.print(f"  [danger][X][/danger] {ats_name}/{slug_disp:<22} {name}")
+            console.print(f"      [dim]{summary['error']}[/dim]")
+            return
+
+        if summary.get("skipped") == -1:
+            console.print(f"  [dim][~] {ats_name}/{slug_disp:<22} {name} (in applications, skipped)[/dim]")
+            return
+
+        new = summary["new"]
+        dupes = summary["dupes"]
+        fetched = summary["fetched"]
+        skipped = max(0, summary.get("skipped", 0))
+
+        if new > 0:
+            style = "good"
+            marker = "[+]"
+        elif fetched == 0:
+            style = "dim"
+            marker = "[ ]"
+        else:
+            style = "info"
+            marker = "[=]"
+
+        line = (
+            f"  [{style}]{marker}[/{style}] {ats_name}/{slug_disp:<22} "
+            f"{name:<28} "
+            f"[good]+{new}[/good] new / "
+            f"[dim]{dupes} dupes[/dim] / "
+            f"{fetched} total"
+        )
+        if skipped:
+            line += f" [warning]({skipped} skipped)[/warning]"
+        console.print(line)
+
+    try:
+        gather_registry(
+            ats=ats,
+            slug=slug,
+            dry_run=dry_run,
+            rate_limit_seconds=rate_limit,
+            on_progress=on_progress,
+        )
+    except GatherError as e:
+        print_error(str(e))
+        return
+    except KeyboardInterrupt:
+        print_warning("Interrupted. Partial results may have been written.")
+        return
+
+    console.print()
+    section_header("GATHER SUMMARY")
+    total_fetched = sum(s["fetched"] for s in summaries)
+    total_new = sum(s["new"] for s in summaries)
+    total_dupes = sum(s["dupes"] for s in summaries)
+    errors = sum(1 for s in summaries if s.get("error"))
+    employer_skips = sum(1 for s in summaries if s.get("skipped") == -1)
+
+    console.print(f"  [good]New discoveries:[/good]  {total_new}")
+    console.print(f"  [info]Already known:[/info]    {total_dupes}")
+    console.print(f"  [dim]Total fetched:[/dim]    {total_fetched}")
+    if employer_skips:
+        console.print(f"  [warning]Employers skipped:[/warning] {employer_skips} (in applications)")
+    if errors:
+        console.print(f"  [danger]Errors:[/danger]           {errors}")
+
+    if dry_run:
+        console.print()
+        print_info("Dry run - no rows were written to the discoveries table.")
 
 
 @cli.command("daily")

@@ -61,6 +61,28 @@ CREATE TABLE IF NOT EXISTS applications (
 
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 CREATE INDEX IF NOT EXISTS idx_applications_company ON applications(company);
+
+CREATE TABLE IF NOT EXISTS discoveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ats TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    company TEXT NOT NULL,
+    role TEXT NOT NULL,
+    location TEXT,
+    url TEXT NOT NULL,
+    description TEXT,
+    posted_at TEXT,
+    discovered_at TEXT NOT NULL,
+    dedupe_hash TEXT NOT NULL UNIQUE,
+    tier TEXT,
+    category TEXT,
+    screened_status TEXT NOT NULL DEFAULT 'new'
+);
+
+CREATE INDEX IF NOT EXISTS idx_discoveries_ats ON discoveries(ats);
+CREATE INDEX IF NOT EXISTS idx_discoveries_slug ON discoveries(slug);
+CREATE INDEX IF NOT EXISTS idx_discoveries_company ON discoveries(company);
+CREATE INDEX IF NOT EXISTS idx_discoveries_screened ON discoveries(screened_status);
 """
 
 
@@ -390,6 +412,141 @@ def get_application_stats() -> dict[str, int]:
             "SELECT status, COUNT(*) as count FROM applications GROUP BY status"
         ).fetchall()
         return {row["status"]: row["count"] for row in rows}
+    finally:
+        conn.close()
+
+
+VALID_DISCOVERY_STATUSES = {"new", "enriched", "ready", "rejected", "applied"}
+
+
+def add_discovery(
+    ats: str,
+    slug: str,
+    company: str,
+    role: str,
+    url: str,
+    dedupe_hash: str,
+    location: str | None = None,
+    description: str | None = None,
+    posted_at: str | None = None,
+    tier: str | None = None,
+    category: str | None = None,
+) -> int | None:
+    """Insert a discovery. Returns the row ID, or None if dedupe_hash already exists."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO discoveries "
+            "(ats, slug, company, role, location, url, description, posted_at, "
+            "discovered_at, dedupe_hash, tier, category, screened_status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+            (
+                ats,
+                slug,
+                company,
+                role,
+                location,
+                url,
+                description,
+                posted_at,
+                datetime.now(timezone.utc).isoformat(),
+                dedupe_hash,
+                tier,
+                category,
+            ),
+        )
+        conn.commit()
+        return cursor.lastrowid if cursor.rowcount > 0 else None
+    finally:
+        conn.close()
+
+
+def discovery_exists(dedupe_hash: str) -> bool:
+    """Check whether a discovery with this dedupe_hash already exists."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM discoveries WHERE dedupe_hash = ? LIMIT 1",
+            (dedupe_hash,),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def get_discoveries(
+    ats: str | None = None,
+    slug: str | None = None,
+    status: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve discoveries with optional filters."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+    if slug:
+        clauses.append("slug = ?")
+        params.append(slug)
+    if status:
+        clauses.append("screened_status = ?")
+        params.append(status)
+
+    sql = "SELECT * FROM discoveries"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY discovered_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_discovery(discovery_id: int) -> dict[str, Any] | None:
+    """Retrieve a single discovery by ID."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM discoveries WHERE id = ?", (discovery_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_discovery_counts() -> dict[str, int]:
+    """Return discovery counts per ATS."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT ats, COUNT(*) as count FROM discoveries GROUP BY ats"
+        ).fetchall()
+        return {row["ats"]: row["count"] for row in rows}
+    finally:
+        conn.close()
+
+
+def get_applied_companies() -> set[str]:
+    """Return the set of companies (lowercased) currently in the applications table.
+
+    Used by `gather` to skip employers already in the user's pipeline.
+    Excludes terminal statuses (rejected, ghosted) so the user can re-discover
+    employers after a closed-out application.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT company FROM applications "
+            "WHERE status NOT IN ('rejected', 'ghosted')"
+        ).fetchall()
+        return {row["company"].lower() for row in rows if row["company"]}
     finally:
         conn.close()
 
