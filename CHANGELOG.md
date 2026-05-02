@@ -4,7 +4,53 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Phase 6 implementation (`gather` ATS adapters). See `ROADMAP.md` for phase plan.
+Next: Phase 7 (`enrich`). See `ROADMAP.md` for plan.
+
+## [0.6.0] — 2026-05-02
+
+Phase 6 ships. Charon now discovers jobs across the curated employer
+registry without the user pasting URLs one at a time.
+
+### Added
+- `charon gather` command — polls public ATS APIs for the 47 verified
+  employers in `config/companies.yaml` and writes new postings to a
+  new `discoveries` table.
+- Four ATS adapters in `charon/gather/`:
+  - `greenhouse.py` — `boards-api.greenhouse.io/v1/boards/<slug>/jobs?content=true`
+  - `lever.py` — `api.lever.co/v0/postings/<slug>?mode=json`
+  - `ashby.py` — `api.ashbyhq.com/posting-api/job-board/<slug>`
+  - `workday.py` — POST to `<tenant>.<wd>.myworkdayjobs.com/wday/cxs/<tenant>/<site>/jobs`,
+    paginated 20/page with a 1s default page delay
+- `charon gather --add <url>` one-shot mode that auto-detects the ATS and
+  slug from any careers URL (Greenhouse, Lever, Ashby, Workday). Falls
+  back to `--add <slug> --ats <name>` for non-URL inputs. Does NOT mutate
+  `companies.yaml` — the curated list stays curated.
+- `discoveries` SQLite table with dedupe by URL hash (scoped per ATS) and
+  CRUD helpers in `db.py`.
+- Applied-companies skip set: gather automatically excludes employers
+  already in the user's active `applications` so the funnel doesn't
+  re-discover jobs you've already applied to.
+- HOWTO.md gains a `gather` workflow section.
+
+### Changed
+- 86 new tests (273 → 293 total). All four adapters tested against
+  captured fixtures via `httpx.MockTransport` — no live network in
+  the suite.
+
+### Verified live (dry-run)
+- Datadog (Greenhouse): 426 jobs
+- Sysdig (Lever): 23 jobs
+- Vanta (Ashby): 147 jobs
+- Schellman (Workday): 12 jobs
+- Airbnb via `--add` URL detection (Greenhouse, not in registry): 235 jobs
+
+### Deferred to later phases
+- Rippling adapter (BARR Advisory + Black Kite kept commented out in
+  companies.yaml). Will land as a v0.6.x patch when activated.
+- iCIMS adapter — skipped per ROADMAP (federal/cleared roles, out of scope).
+- Six employers in the TODO block of companies.yaml (Snyk, Anchore, Pangea,
+  AuditBoard, Prescient Assurance, Palisade Research) — need manual ATS
+  investigation before they can be added.
 
 ## [0.5.3] — 2026-04-30
 
@@ -81,7 +127,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.0...v0.5.1

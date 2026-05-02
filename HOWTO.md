@@ -163,6 +163,45 @@ charon inbox --status
 charon inbox --setup
 ```
 
+### Gather Jobs from ATS Boards
+
+`charon gather` polls public ATS APIs (Greenhouse, Lever, Ashby, Workday) for
+the curated employer list in `config/companies.yaml` and writes new postings
+to the `discoveries` table. No LinkedIn, no aggregator scraping.
+
+```bash
+# See who's configured
+charon gather --list
+
+# Poll one employer
+charon gather --slug datadog
+charon gather --slug vanta --dry-run     # preview without writing
+
+# Poll one ATS
+charon gather --ats greenhouse
+
+# Poll everything
+charon gather
+
+# One-shot for an employer not in companies.yaml
+# (does NOT add it to the registry; just runs that adapter once)
+charon gather --add https://boards.greenhouse.io/airbnb
+charon gather --add https://jobs.lever.co/sysdig --dry-run
+charon gather --add https://crowdstrike.wd5.myworkdayjobs.com/en-US/crowdstrikecareers
+
+# Slug + ATS fallback when URL doesn't auto-detect
+charon gather --add datadog --ats greenhouse
+```
+
+Notes:
+- Companies already in your `applications` table (active statuses only) are
+  skipped automatically — no point re-discovering jobs you've applied to.
+- Dedupe is by URL hash, scoped per ATS. Re-running is safe.
+- Workday descriptions are intentionally left blank in this phase. Phase 7
+  (`enrich`, not yet shipped) will fill in full descriptions.
+- The registry tracks ~47 verified employers. To add more permanently, edit
+  `config/companies.yaml` directly with `slug`, `name`, `tier`, `category`.
+
 ### Company Watchlist
 
 ```bash

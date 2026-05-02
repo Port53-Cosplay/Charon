@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "charon-jobs"
-version = "0.5.3"
+version = "0.6.0"
 description = "Getting you to the other side. A CLI tool that evaluates job postings and researches companies against your personal values."
 readme = "README.md"
 license = { text = "MIT" }
