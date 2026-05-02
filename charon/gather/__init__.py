@@ -35,7 +35,7 @@ class GatherError(Exception):
 # doesn't crash the package import.
 ADAPTERS: dict[str, str] = {
     "greenhouse": "charon.gather.greenhouse",
-    # "lever": "charon.gather.lever",      # Phase 6 follow-up
+    "lever": "charon.gather.lever",
     # "ashby": "charon.gather.ashby",       # Phase 6 follow-up
     # "workday": "charon.gather.workday",   # Phase 6 follow-up
 }

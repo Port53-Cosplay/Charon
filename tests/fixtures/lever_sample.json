@@ -1,0 +1,41 @@
+[
+  {
+    "id": "0001-aaaa-bbbb-cccc",
+    "text": "Senior Detection Engineer",
+    "hostedUrl": "https://jobs.lever.co/example/0001-aaaa-bbbb-cccc",
+    "applyUrl": "https://jobs.lever.co/example/0001-aaaa-bbbb-cccc/apply",
+    "categories": {
+      "team": "Security",
+      "location": "Remote - North America",
+      "department": "Engineering",
+      "commitment": "Full-time"
+    },
+    "createdAt": 1745529600000,
+    "descriptionPlain": "We are hiring a Senior Detection Engineer to build out our SIEM and detection coverage.",
+    "description": "<p>We are hiring...</p>",
+    "additionalPlain": "Comp range: 180k - 220k.",
+    "additional": "<p>Comp range...</p>",
+    "lists": [
+      {"text": "Responsibilities", "content": "<ul><li>Build detections</li><li>Tune EDR</li></ul>"},
+      {"text": "Requirements", "content": "<ul><li>5+ years SOC</li></ul>"}
+    ]
+  },
+  {
+    "id": "0002-dddd-eeee-ffff",
+    "text": "Application Security Engineer",
+    "hostedUrl": "https://jobs.lever.co/example/0002-dddd-eeee-ffff",
+    "categories": {
+      "team": "Security",
+      "allLocations": ["Remote", "New York"],
+      "commitment": "Full-time"
+    },
+    "createdAt": 1745270400000,
+    "descriptionPlain": "Help secure our app stack.",
+    "lists": []
+  },
+  {
+    "id": "0003-no-url",
+    "text": "Skipped because no URL",
+    "categories": {"location": "Remote"}
+  }
+]
