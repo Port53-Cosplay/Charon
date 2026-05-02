@@ -339,12 +339,14 @@ class TestGatherRegistry:
         assert seen == ["beta"]
 
     def test_unimplemented_ats_reports_error_not_crash(self, monkeypatch, tmp_path):
+        # Use 'rippling' — known unimplemented per ROADMAP, deferred to a
+        # future patch release.
         custom = tmp_path / "companies.yaml"
         custom.write_text(
             "gather:\n"
-            "  workday:\n"
-            "    - slug: schellman\n"
-            "      name: Schellman\n",
+            "  rippling:\n"
+            "    - slug: barradvisory\n"
+            "      name: BARR Advisory\n",
             encoding="utf-8",
         )
         monkeypatch.setenv("CHARON_REGISTRY", str(custom))

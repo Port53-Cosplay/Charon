@@ -1,0 +1,10 @@
+{
+  "total": 25,
+  "jobPostings": [
+    {"title": "P20", "externalPath": "/job/P20"},
+    {"title": "P21", "externalPath": "/job/P21"},
+    {"title": "P22", "externalPath": "/job/P22"},
+    {"title": "P23", "externalPath": "/job/P23"},
+    {"title": "P24", "externalPath": "/job/P24"}
+  ]
+}

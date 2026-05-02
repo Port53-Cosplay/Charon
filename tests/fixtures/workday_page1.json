@@ -1,0 +1,51 @@
+{
+  "total": 25,
+  "jobPostings": [
+    {
+      "title": "Senior Security Engineer",
+      "externalPath": "/job/USA-Remote/Senior-Security-Engineer_R12345",
+      "locationsText": "USA-Remote",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["R12345"]
+    },
+    {
+      "title": "GRC Analyst",
+      "externalPath": "/job/Tampa-FL/GRC-Analyst_R12346",
+      "locationsText": "Tampa, FL",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": ["R12346"]
+    },
+    {
+      "title": "Detection Engineer",
+      "externalPath": "/job/Remote/Detection-Engineer_R12347",
+      "locationsText": "Remote",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": ["R12347"]
+    },
+    {
+      "title": "Skipped — no externalPath",
+      "locationsText": "Remote",
+      "postedOn": "Posted Today"
+    },
+    {"title": null, "externalPath": "/job/x"},
+    {
+      "title": "P5",
+      "externalPath": "/job/P5",
+      "locationsText": "Remote"
+    },
+    {"title": "P6", "externalPath": "/job/P6"},
+    {"title": "P7", "externalPath": "/job/P7"},
+    {"title": "P8", "externalPath": "/job/P8"},
+    {"title": "P9", "externalPath": "/job/P9"},
+    {"title": "P10", "externalPath": "/job/P10"},
+    {"title": "P11", "externalPath": "/job/P11"},
+    {"title": "P12", "externalPath": "/job/P12"},
+    {"title": "P13", "externalPath": "/job/P13"},
+    {"title": "P14", "externalPath": "/job/P14"},
+    {"title": "P15", "externalPath": "/job/P15"},
+    {"title": "P16", "externalPath": "/job/P16"},
+    {"title": "P17", "externalPath": "/job/P17"},
+    {"title": "P18", "externalPath": "/job/P18"},
+    {"title": "P19", "externalPath": "/job/P19"}
+  ]
+}

@@ -37,7 +37,7 @@ ADAPTERS: dict[str, str] = {
     "greenhouse": "charon.gather.greenhouse",
     "lever": "charon.gather.lever",
     "ashby": "charon.gather.ashby",
-    # "workday": "charon.gather.workday",   # Phase 6 follow-up
+    "workday": "charon.gather.workday",
 }
 
 DEFAULT_RATE_LIMIT_SECONDS = 1.0
