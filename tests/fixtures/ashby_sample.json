@@ -1,0 +1,52 @@
+{
+  "apiVersion": "2",
+  "jobs": [
+    {
+      "id": "abc-001",
+      "title": "Senior Security Engineer",
+      "jobUrl": "https://jobs.ashbyhq.com/example/abc-001",
+      "applyUrl": "https://jobs.ashbyhq.com/example/abc-001/application",
+      "location": "Remote, North America",
+      "secondaryLocations": [],
+      "department": "Security",
+      "team": "Detection",
+      "isRemote": true,
+      "publishedAt": "2026-04-25T18:30:00Z",
+      "updatedAt": "2026-04-26T10:00:00Z",
+      "employmentType": "FullTime",
+      "descriptionPlain": "Build and tune our detection coverage. SIEM, EDR, cloud telemetry.",
+      "descriptionHtml": "<p>Build and tune our detection coverage.</p>"
+    },
+    {
+      "id": "abc-002",
+      "title": "GRC Analyst",
+      "jobUrl": "https://jobs.ashbyhq.com/example/abc-002",
+      "location": null,
+      "secondaryLocations": [
+        {"locationName": "New York"},
+        {"locationName": "London"}
+      ],
+      "isRemote": false,
+      "publishedAt": "2026-04-22T09:00:00Z",
+      "descriptionPlain": "Own the SOC 2 program."
+    },
+    {
+      "id": "abc-003",
+      "title": "Remote-only Role",
+      "jobUrl": "https://jobs.ashbyhq.com/example/abc-003",
+      "location": null,
+      "secondaryLocations": [],
+      "isRemote": true,
+      "publishedAt": "2026-04-15T08:00:00Z",
+      "descriptionPlain": ""
+    },
+    {
+      "id": "abc-004",
+      "title": "HTML-only description",
+      "jobUrl": "https://jobs.ashbyhq.com/example/abc-004",
+      "location": "San Francisco",
+      "publishedAt": "2026-04-10T12:00:00Z",
+      "descriptionHtml": "<p>HTML <strong>only</strong> here.</p><ul><li>Item</li></ul>"
+    }
+  ]
+}
