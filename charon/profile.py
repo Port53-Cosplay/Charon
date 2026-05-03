@@ -76,6 +76,11 @@ DEFAULT_PROFILE = {
         "mount": "secret",
         "secret_prefix": "charon",
     },
+    "enrich": {
+        "model": "claude-haiku-4-5",
+        "skip_threshold": 500,
+        "rate_limit_seconds": 1.0,
+    },
 }
 
 REQUIRED_KEYS = {"values", "dealbreakers", "yellow_flags", "green_flags"}
@@ -197,6 +202,21 @@ def validate_profile(profile: dict[str, Any]) -> None:
         if ghost_days is not None:
             if not isinstance(ghost_days, (int, float)) or ghost_days < 1:
                 raise ProfileError("applications.ghosted_after_days must be a positive number")
+
+    # Validate enrich config
+    enrich_cfg = profile.get("enrich", {})
+    if isinstance(enrich_cfg, dict):
+        model = enrich_cfg.get("model")
+        if model is not None and not isinstance(model, str):
+            raise ProfileError("enrich.model must be a string")
+        threshold = enrich_cfg.get("skip_threshold")
+        if threshold is not None:
+            if not isinstance(threshold, (int, float)) or threshold < 0:
+                raise ProfileError("enrich.skip_threshold must be a non-negative number")
+        rate = enrich_cfg.get("rate_limit_seconds")
+        if rate is not None:
+            if not isinstance(rate, (int, float)) or rate < 0:
+                raise ProfileError("enrich.rate_limit_seconds must be a non-negative number")
 
     # Validate notifications mail_to (string or list)
     notif = profile.get("notifications", {})

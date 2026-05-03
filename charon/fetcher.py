@@ -75,8 +75,8 @@ def validate_url(url: str) -> str:
     return url
 
 
-def fetch_url(url: str) -> str:
-    """Fetch a URL and extract readable text content."""
+def fetch_html(url: str) -> str:
+    """Fetch a URL and return raw HTML. Validated, size-capped, redirect-limited."""
     url = validate_url(url)
 
     try:
@@ -87,7 +87,7 @@ def fetch_url(url: str) -> str:
         ) as client:
             response = client.get(
                 url,
-                headers={"User-Agent": "Charon/0.1 (Job Posting Analyzer)"},
+                headers={"User-Agent": "Charon/0.7 (Job Posting Analyzer)"},
             )
             response.raise_for_status()
 
@@ -99,12 +99,11 @@ def fetch_url(url: str) -> str:
                     "The ferryman's boat has a weight limit."
                 )
 
-            # Check actual size
             content = response.text
             if len(content) > MAX_RESPONSE_SIZE:
                 raise FetchError("Response too large. The ferryman's boat has a weight limit.")
 
-            return extract_text(content)
+            return content
 
     except httpx.TimeoutException:
         raise FetchError("Request timed out. The other side didn't answer.")
@@ -112,6 +111,11 @@ def fetch_url(url: str) -> str:
         raise FetchError(f"HTTP {e.response.status_code}. The gates are closed.")
     except httpx.RequestError as e:
         raise FetchError(f"Connection failed: {type(e).__name__}. The river is impassable.")
+
+
+def fetch_url(url: str) -> str:
+    """Fetch a URL and extract readable text content."""
+    return extract_text(fetch_html(url))
 
 
 # Patterns indicating a closed/expired job posting (case-insensitive)

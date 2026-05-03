@@ -48,7 +48,8 @@ from charon.gather import (
     list_employers,
     load_registry,
 )
-from charon.db import get_applied_companies
+from charon.db import get_applied_companies, get_enrichment_counts
+from charon.enrich import EnrichError, enrich_batch, enrich_one_id
 
 
 @click.group()
@@ -1833,6 +1834,164 @@ def gather_cmd(
     if dry_run:
         console.print()
         print_info("Dry run - no rows were written to the discoveries table.")
+
+
+@cli.command("enrich")
+@click.option("--id", "discovery_id", type=int, help="Enrich a single discovery by ID.")
+@click.option("--all", "enrich_all", is_flag=True, help="Enrich all unenriched discoveries.")
+@click.option("--ats", help="Limit batch to one ATS (e.g. workday).")
+@click.option("--force", is_flag=True, help="Re-enrich even already-enriched discoveries.")
+@click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
+@click.option("--rate-limit", type=float, default=None,
+              help="Seconds between fetches (default from profile, fallback 1.0).")
+@click.option("--stats", is_flag=True, help="Show enrichment tier counts and exit.")
+def enrich_cmd(
+    discovery_id: int | None,
+    enrich_all: bool,
+    ats: str | None,
+    force: bool,
+    limit: int | None,
+    rate_limit: float | None,
+    stats: bool,
+) -> None:
+    """Enrich discoveries with full descriptions. JSON-LD then ATS CSS then LLM."""
+    if stats:
+        counts = get_enrichment_counts()
+        if not counts:
+            print_info("No discoveries yet. Run 'charon gather' first.")
+            return
+        section_header("ENRICHMENT TIER COUNTS")
+        order = ["unenriched", "skipped", "jsonld", "ats_css", "ai_fallback", "failed"]
+        styles = {
+            "unenriched": "dim",
+            "skipped": "dim",
+            "jsonld": "good",
+            "ats_css": "info",
+            "ai_fallback": "warning",
+            "failed": "danger",
+        }
+        for tier in order:
+            if tier in counts:
+                style = styles.get(tier, "info")
+                console.print(f"  [{style}]{tier:<14}[/{style}] {counts[tier]}")
+        # Surface unknown tiers if any (forward-compat)
+        for tier, n in counts.items():
+            if tier not in order:
+                console.print(f"  [dim]{tier:<14}[/dim] {n}")
+        return
+
+    if not discovery_id and not enrich_all:
+        print_error("Provide --id <N>, --all, or --stats.")
+        return
+
+    try:
+        prof = load_profile()
+    except ProfileError as e:
+        print_error(f"Profile error: {e}")
+        return
+
+    if discovery_id is not None:
+        section_header(f"ENRICH #{discovery_id}")
+        try:
+            result = enrich_one_id(discovery_id, profile=prof, force=force)
+        except EnrichError as e:
+            print_error(str(e))
+            return
+
+        tier = result["tier"]
+        desc = result.get("full_description") or ""
+        _print_enrich_line(result)
+
+        if desc:
+            console.print()
+            preview = desc[:600] + ("…" if len(desc) > 600 else "")
+            panel(f"Description ({len(desc)} chars, {tier})", preview, "info")
+        return
+
+    if enrich_all:
+        section_header("ENRICH BATCH")
+        scope = []
+        if ats:
+            scope.append(f"ats={ats}")
+        if force:
+            scope.append("force")
+        if limit:
+            scope.append(f"limit={limit}")
+        if scope:
+            print_info("Scope: " + " ".join(scope))
+
+        from charon.db import get_unenriched_discoveries, get_discoveries
+        targets = get_discoveries(ats=ats, limit=limit) if force else get_unenriched_discoveries(ats=ats, limit=limit)
+        if not targets:
+            print_info("Nothing to enrich.")
+            return
+        print_info(f"Processing {len(targets)} discoveries...")
+        console.print()
+
+        tier_totals = {"skipped": 0, "jsonld": 0, "ats_css": 0, "ai_fallback": 0, "failed": 0}
+
+        def on_progress(result: dict) -> None:
+            tier_totals[result["tier"]] = tier_totals.get(result["tier"], 0) + 1
+            _print_enrich_line(result)
+
+        try:
+            enrich_batch(
+                ats=ats,
+                force=force,
+                limit=limit,
+                profile=prof,
+                rate_limit_seconds=rate_limit,
+                on_progress=on_progress,
+            )
+        except KeyboardInterrupt:
+            print_warning("Interrupted. Partial results written.")
+            return
+
+        console.print()
+        section_header("ENRICH SUMMARY")
+        for t, n in tier_totals.items():
+            if n:
+                style = {
+                    "skipped": "dim",
+                    "jsonld": "good",
+                    "ats_css": "info",
+                    "ai_fallback": "warning",
+                    "failed": "danger",
+                }.get(t, "info")
+                console.print(f"  [{style}]{t:<14}[/{style}] {n}")
+
+
+def _print_enrich_line(result: dict) -> None:
+    """One-line per-discovery progress for enrich."""
+    tier = result["tier"]
+    style = {
+        "skipped": "dim",
+        "jsonld": "good",
+        "ats_css": "info",
+        "ai_fallback": "warning",
+        "failed": "danger",
+    }.get(tier, "info")
+    marker = {
+        "skipped": "[~]",
+        "jsonld": "[+]",
+        "ats_css": "[+]",
+        "ai_fallback": "[+]",
+        "failed": "[X]",
+    }.get(tier, "[?]")
+    company = result.get("company") or ""
+    role = result.get("role") or ""
+    label = f"{company}: {role}" if company else (result.get("source_url") or "")
+    desc = result.get("full_description") or ""
+    if tier == "failed":
+        err = result.get("error", "")
+        console.print(f"  [{style}]{marker}[/{style}] [{tier:<11}] {label}")
+        if err:
+            console.print(f"      [dim]{err}[/dim]")
+    else:
+        console.print(
+            f"  [{style}]{marker}[/{style}] [{tier:<11}] {label} "
+            f"[dim]({len(desc)} chars)[/dim]"
+        )
 
 
 @cli.command("daily")

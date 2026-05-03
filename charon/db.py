@@ -88,6 +88,9 @@ CREATE INDEX IF NOT EXISTS idx_discoveries_screened ON discoveries(screened_stat
 
 MIGRATIONS = [
     "ALTER TABLE applications ADD COLUMN dossier_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN full_description TEXT",
+    "ALTER TABLE discoveries ADD COLUMN enrichment_tier TEXT",
+    "ALTER TABLE discoveries ADD COLUMN enriched_at TEXT",
 ]
 
 
@@ -529,6 +532,75 @@ def get_discovery_counts() -> dict[str, int]:
             "SELECT ats, COUNT(*) as count FROM discoveries GROUP BY ats"
         ).fetchall()
         return {row["ats"]: row["count"] for row in rows}
+    finally:
+        conn.close()
+
+
+VALID_ENRICHMENT_TIERS = {"skipped", "jsonld", "ats_css", "ai_fallback", "failed"}
+
+
+def update_discovery_enrichment(
+    discovery_id: int,
+    tier: str,
+    full_description: str | None,
+) -> bool:
+    """Record enrichment results on a discovery. Returns True if updated."""
+    if tier not in VALID_ENRICHMENT_TIERS:
+        raise ValueError(
+            f"Unknown enrichment tier '{tier}'. Valid: {sorted(VALID_ENRICHMENT_TIERS)}"
+        )
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET full_description = ?, enrichment_tier = ?, "
+            "enriched_at = ? WHERE id = ?",
+            (
+                full_description,
+                tier,
+                datetime.now(timezone.utc).isoformat(),
+                discovery_id,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_unenriched_discoveries(
+    ats: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Discoveries that haven't been enriched yet (enrichment_tier IS NULL)."""
+    clauses = ["enrichment_tier IS NULL"]
+    params: list[Any] = []
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+
+    sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY discovered_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_enrichment_counts() -> dict[str, int]:
+    """Return enrichment counts per tier (NULL counted as 'unenriched')."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT COALESCE(enrichment_tier, 'unenriched') AS tier, COUNT(*) AS count "
+            "FROM discoveries GROUP BY enrichment_tier"
+        ).fetchall()
+        return {row["tier"]: row["count"] for row in rows}
     finally:
         conn.close()
 
