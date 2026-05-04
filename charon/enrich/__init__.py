@@ -135,6 +135,9 @@ def enrich_one_id(
 
     result = enrich_discovery(discovery, profile=profile, force=force)
     update_discovery_enrichment(discovery_id, result["tier"], result.get("full_description"))
+    result["discovery_id"] = discovery_id
+    result["company"] = discovery.get("company")
+    result["role"] = discovery.get("role")
     return result
 
 

@@ -4,7 +4,50 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Next: Phase 7 (`enrich`). See `ROADMAP.md` for plan.
+Next: Phase 8 (`judge`). See `ROADMAP.md` for plan.
+
+## [0.7.0] — 2026-05-03
+
+Phase 7 ships. Discoveries can now be cheaply enriched with full descriptions
+via a three-tier cascade — most jobs cost $0 because tier 1 catches them.
+
+### Added
+- `charon enrich` command. `--id N` for one, `--all` for unenriched batch,
+  `--ats <name>` slice, `--force` re-enrich, `--limit`, `--rate-limit`,
+  `--stats` for tier-hit-rate dashboard.
+- Three-tier extraction in `charon/enrich/`:
+  - `jsonld.py` — schema.org JobPosting from `<script type="application/ld+json">`.
+    Generic, free, catches Workday and most SEO-conscious careers pages.
+  - `ats_css.py` — per-ATS selector library (Greenhouse, Lever, Ashby, Workday).
+  - `llm.py` — pluggable model routing. Bare names use the native Anthropic SDK;
+    the `openrouter:vendor/model` prefix routes through OpenRouter's
+    OpenAI-compatible API via httpx. No new SDK dependency. Default model is
+    `claude-haiku-4-5` per ADR-003 (mechanical stages route to cheaper models).
+- `discoveries.full_description`, `enrichment_tier`, `enriched_at` columns
+  via migrations. Tiers: `skipped | jsonld | ats_css | ai_fallback | failed`.
+  `skipped` means the gather adapter already populated `description` with
+  >= 500 chars (Greenhouse / Lever / Ashby), so no fetch is needed.
+- `enrich` profile section with `model`, `skip_threshold`,
+  `rate_limit_seconds`. Validated.
+- HOWTO.md gains an `enrich` workflow section.
+
+### Changed
+- `charon/fetcher.py` refactored: `fetch_html(url)` returns raw HTML;
+  `fetch_url(url)` is now `extract_text(fetch_html(url))`. All existing
+  callers behave identically.
+- 41 new tests (293 → 334 total) covering each tier with captured fixtures
+  and the cascade orchestrator end-to-end with mocked `fetch_html`.
+  OpenRouter HTTP path tested via `httpx.MockTransport`.
+
+### Verified live
+- Schellman (Workday): all 12 jobs enriched via tier 1 (JSON-LD).
+  Zero LLM calls, zero failures, zero token cost. Average extracted
+  description: ~8000 chars.
+
+### Deferred to later phases
+- iCIMS CSS selectors — skipped per ROADMAP "no federal" preference.
+- Tier-hit-rate metrics emitted to digest — could land in the daily
+  scanner work in Phase 11.
 
 ## [0.6.0] — 2026-05-02
 
@@ -127,7 +170,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.1...v0.5.2

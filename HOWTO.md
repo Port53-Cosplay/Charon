@@ -202,6 +202,46 @@ Notes:
 - The registry tracks ~47 verified employers. To add more permanently, edit
   `config/companies.yaml` directly with `slug`, `name`, `tier`, `category`.
 
+### Enrich Discoveries
+
+`charon enrich` fills in `discoveries.full_description` via a three-tier cascade:
+
+1. **JSON-LD** — parse schema.org `JobPosting` from the page's structured data. Free, generic, catches Workday and most SEO-conscious careers pages.
+2. **ATS-specific CSS** — per-ATS selectors for the description region. Free, runs only if tier 1 misses.
+3. **LLM** — last resort. Sends cleaned page text to a chat model and asks for the description. Default `claude-haiku-4-5`. Override via profile.
+
+```bash
+# One discovery
+charon enrich --id 5
+
+# All unenriched
+charon enrich --all
+
+# Slice by ATS (Workday is the main use case — Greenhouse/Lever/Ashby usually
+# already have descriptions populated by the gather step and get marked 'skipped')
+charon enrich --all --ats workday
+
+# Re-enrich everything (e.g. after changing the model)
+charon enrich --all --force
+
+# See tier hit rates
+charon enrich --stats
+```
+
+**Picking a model.** Default is `claude-haiku-4-5` via the native Anthropic SDK. To swap:
+
+```yaml
+# in ~/.charon/profile.yaml
+enrich:
+  model: openrouter:google/gemini-flash-2-0   # cheaper
+  # model: openrouter:deepseek/deepseek-chat   # also cheap
+  # model: claude-sonnet-4-5                   # higher quality, more $
+  skip_threshold: 500           # skip enrich if source description >= this many chars
+  rate_limit_seconds: 1.0       # politeness delay between page fetches
+```
+
+OpenRouter routing needs an API key. Either set `OPENROUTER_API_KEY` env var, or store it in Vault at `<secret_prefix>/openrouter-api` (key `api_key`).
+
 ### Company Watchlist
 
 ```bash

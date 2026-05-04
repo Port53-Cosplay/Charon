@@ -1904,7 +1904,7 @@ def enrich_cmd(
 
         if desc:
             console.print()
-            preview = desc[:600] + ("…" if len(desc) > 600 else "")
+            preview = desc[:600] + ("..." if len(desc) > 600 else "")
             panel(f"Description ({len(desc)} chars, {tier})", preview, "info")
         return
 
