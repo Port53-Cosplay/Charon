@@ -302,7 +302,8 @@ charon gather --dry-run                # preview, don't write to DB
 
 ---
 
-### Phase 8 — `judge` (batch filtering) `[ ]`
+### Phase 8 — `judge` (batch filtering) `[X]`
+**Shipped:** v0.8.0 (2026-05-04)
 **Target version:** v0.8.0
 **Complexity:** M
 **Goal:** Run existing pipeline (ghostbust → redflags → role_align) on enriched discoveries automatically. The Three Judges of the Underworld decide who crosses.
@@ -324,16 +325,17 @@ charon judge --list rejected          # list jobs that failed (with reasons)
 ```
 
 **Acceptance criteria:**
-- [ ] Each discovery scored with all three analyses (the three judges)
-- [ ] Combined score formula documented and matches `hunt`'s logic
-- [ ] Failure reason logged on rejection (e.g. "ghost score 85 > threshold")
-- [ ] Discoveries above combined threshold marked `screened_status='ready'`
-- [ ] Below threshold marked `screened_status='rejected'`
-- [ ] Tests cover: threshold gating, rejudge flag, failure reason logging
-- [ ] CHANGELOG entry under v0.8.0
+- [X] Each discovery scored with all three analyses (the three judges)
+- [X] Combined score formula documented and matches `hunt`'s logic (minus dossier)
+- [X] Failure reason logged on rejection
+- [X] Discoveries above combined threshold marked `screened_status='ready'`
+- [X] Below threshold marked `screened_status='rejected'`
+- [X] Tests cover: threshold gating, rejudge flag, failure reason logging, AI-error handling
+- [X] Bulk-run guardrail with cost estimate prompts before >50 judgements
+- [X] CHANGELOG entry under v0.8.0
 
 **Dependencies:** Phase 7 complete
-**Risks:** Token cost on batch runs. Mitigation: warn before judging >50 jobs at once; daily ops scanner caps at N per day.
+**Risks:** Token cost on batch runs. Mitigation: warn before judging >50 jobs at once (`judge.bulk_warn_at`); daily ops scanner caps at N per day (Phase 11).
 
 ---
 
@@ -500,6 +502,7 @@ Update this after every phase ships. Last entry on top.
 
 | Date | Version | Phase | Status | Notes |
 |---|---|---|---|---|
+| 2026-05-04 | 0.8.0 | 8 | shipped | `charon judge` runs the three v1 analyzers in batch on enriched discoveries. 359 tests. Bulk-run guardrail. Live: Schellman #1 judged at combined 75.0 (READY). |
 | 2026-05-03 | 0.7.0 | 7 | shipped | Three-tier enrichment cascade (JSON-LD → ATS CSS → LLM with pluggable model routing). 334 tests. Live test: 12/12 Schellman jobs enriched at tier 1, $0 token spend. |
 | 2026-05-02 | 0.6.0 | 6 | shipped | All four ATS adapters live (Greenhouse, Lever, Ashby, Workday) + `--add <url>` auto-detect. 293 tests, 47 employers verified. Funnel input is online. |
 | 2026-04-30 | 0.5.3 | 6 (scoping) | architecture finalized | ATS-first per ADR-006. companies.yaml seeded with 47 verified employers. Ready to begin Phase 6 implementation in next session. |

@@ -91,6 +91,13 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN full_description TEXT",
     "ALTER TABLE discoveries ADD COLUMN enrichment_tier TEXT",
     "ALTER TABLE discoveries ADD COLUMN enriched_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN ghost_score REAL",
+    "ALTER TABLE discoveries ADD COLUMN redflag_score REAL",
+    "ALTER TABLE discoveries ADD COLUMN alignment_score REAL",
+    "ALTER TABLE discoveries ADD COLUMN combined_score REAL",
+    "ALTER TABLE discoveries ADD COLUMN judgement_reason TEXT",
+    "ALTER TABLE discoveries ADD COLUMN judgement_detail TEXT",
+    "ALTER TABLE discoveries ADD COLUMN judged_at TEXT",
 ]
 
 
@@ -601,6 +608,93 @@ def get_enrichment_counts() -> dict[str, int]:
             "FROM discoveries GROUP BY enrichment_tier"
         ).fetchall()
         return {row["tier"]: row["count"] for row in rows}
+    finally:
+        conn.close()
+
+
+def update_discovery_judgement(
+    discovery_id: int,
+    *,
+    ghost_score: float,
+    redflag_score: float,
+    alignment_score: float,
+    combined_score: float,
+    screened_status: str,
+    judgement_reason: str,
+    judgement_detail: dict[str, Any] | None = None,
+) -> bool:
+    """Persist judge results on a discovery. Returns True if updated."""
+    if screened_status not in {"ready", "rejected"}:
+        raise ValueError(
+            f"screened_status must be 'ready' or 'rejected', got '{screened_status}'."
+        )
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET "
+            "  ghost_score = ?, redflag_score = ?, alignment_score = ?, "
+            "  combined_score = ?, screened_status = ?, "
+            "  judgement_reason = ?, judgement_detail = ?, judged_at = ? "
+            "WHERE id = ?",
+            (
+                ghost_score,
+                redflag_score,
+                alignment_score,
+                combined_score,
+                screened_status,
+                judgement_reason,
+                json.dumps(judgement_detail) if judgement_detail is not None else None,
+                datetime.now(timezone.utc).isoformat(),
+                discovery_id,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_unjudged_discoveries(
+    ats: str | None = None,
+    require_enriched: bool = True,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Discoveries that haven't been judged yet (judged_at IS NULL).
+
+    By default also requires enrichment_tier IS NOT NULL — judging without
+    a description is pointless. Set require_enriched=False to override.
+    """
+    clauses = ["judged_at IS NULL"]
+    params: list[Any] = []
+    if require_enriched:
+        clauses.append("enrichment_tier IS NOT NULL")
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+
+    sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY discovered_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_judged_counts() -> dict[str, int]:
+    """Counts of discoveries by screened_status (after judging)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT screened_status, COUNT(*) AS count FROM discoveries "
+            "WHERE judged_at IS NOT NULL GROUP BY screened_status"
+        ).fetchall()
+        return {row["screened_status"]: row["count"] for row in rows}
     finally:
         conn.close()
 

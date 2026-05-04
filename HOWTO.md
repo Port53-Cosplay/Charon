@@ -242,6 +242,52 @@ enrich:
 
 OpenRouter routing needs an API key. Either set `OPENROUTER_API_KEY` env var, or store it in Vault at `<secret_prefix>/openrouter-api` (key `api_key`).
 
+### Judge Discoveries
+
+After `gather` and `enrich`, `charon judge` runs the existing v1 analyzers
+(ghostbust, redflags, role_alignment) on each discovery and assigns a
+combined score. Discoveries above the threshold are marked `ready`;
+the rest are `rejected` with a one-line reason.
+
+```bash
+# One discovery
+charon judge --id 5
+
+# All unjudged (must be enriched first)
+charon judge --all
+
+# Slice by ATS
+charon judge --all --ats workday
+
+# Tougher threshold for this run
+charon judge --all --threshold 75
+
+# Force re-judge after editing your profile (e.g. new dealbreakers)
+charon judge --rejudge --id 5
+charon judge --rejudge --all
+
+# Browse the funnel
+charon judge --list ready          # everything that passed
+charon judge --list rejected       # everything that failed (with reasons)
+charon judge --stats               # counts by status
+```
+
+**Cost.** Each judgement is three Claude Sonnet calls — roughly $0.02-$0.05
+per discovery. Charon warns before judging more than 50 at once and shows a
+cost estimate. Override the prompt with `--yes`, or change the warn threshold
+in your profile:
+
+```yaml
+# in ~/.charon/profile.yaml
+judge:
+  ready_threshold: 60        # combined score required to mark `ready`
+  bulk_warn_at: 50           # confirmation prompt above this many at once
+```
+
+**The combined score** is `((100 - ghost) + (100 - redflag) + alignment) / 3`,
+all on a 0-100 scale where higher is better. Dossier (Phase 9) is not part of
+the combined score — it runs per-job, when you decide to actually apply.
+
 ### Company Watchlist
 
 ```bash

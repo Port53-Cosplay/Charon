@@ -81,6 +81,10 @@ DEFAULT_PROFILE = {
         "skip_threshold": 500,
         "rate_limit_seconds": 1.0,
     },
+    "judge": {
+        "ready_threshold": 60,
+        "bulk_warn_at": 50,
+    },
 }
 
 REQUIRED_KEYS = {"values", "dealbreakers", "yellow_flags", "green_flags"}
@@ -217,6 +221,18 @@ def validate_profile(profile: dict[str, Any]) -> None:
         if rate is not None:
             if not isinstance(rate, (int, float)) or rate < 0:
                 raise ProfileError("enrich.rate_limit_seconds must be a non-negative number")
+
+    # Validate judge config
+    judge_cfg = profile.get("judge", {})
+    if isinstance(judge_cfg, dict):
+        threshold = judge_cfg.get("ready_threshold")
+        if threshold is not None:
+            if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 100:
+                raise ProfileError("judge.ready_threshold must be a number between 0 and 100")
+        warn_at = judge_cfg.get("bulk_warn_at")
+        if warn_at is not None:
+            if not isinstance(warn_at, int) or warn_at < 1:
+                raise ProfileError("judge.bulk_warn_at must be a positive integer")
 
     # Validate notifications mail_to (string or list)
     notif = profile.get("notifications", {})

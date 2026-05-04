@@ -48,8 +48,15 @@ from charon.gather import (
     list_employers,
     load_registry,
 )
-from charon.db import get_applied_companies, get_enrichment_counts
+from charon.db import get_applied_companies, get_enrichment_counts, get_judged_counts
 from charon.enrich import EnrichError, enrich_batch, enrich_one_id
+from charon.screen import (
+    DEFAULT_BULK_WARN_AT,
+    JudgeError,
+    judge_batch,
+    judge_one_id,
+    list_by_status,
+)
 
 
 @click.group()
@@ -1992,6 +1999,188 @@ def _print_enrich_line(result: dict) -> None:
             f"  [{style}]{marker}[/{style}] [{tier:<11}] {label} "
             f"[dim]({len(desc)} chars)[/dim]"
         )
+
+
+@cli.command("judge")
+@click.option("--id", "discovery_id", type=int, help="Judge a single discovery by ID.")
+@click.option("--all", "judge_all", is_flag=True, help="Judge all unjudged enriched discoveries.")
+@click.option("--ats", help="Limit batch to one ATS.")
+@click.option("--rejudge", is_flag=True, help="Re-run judges even on already-judged discoveries.")
+@click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
+@click.option("--threshold", type=float, default=None,
+              help="Override ready_threshold (default from profile, fallback 60).")
+@click.option("--list", "list_status", type=click.Choice(["ready", "rejected"]),
+              help="List judged discoveries by status.")
+@click.option("--stats", is_flag=True, help="Show judged counts and exit.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
+def judge_cmd(
+    discovery_id: int | None,
+    judge_all: bool,
+    ats: str | None,
+    rejudge: bool,
+    limit: int | None,
+    threshold: float | None,
+    list_status: str | None,
+    stats: bool,
+    yes: bool,
+) -> None:
+    """The Three Judges weigh each discovery. ghost + redflag + role_alignment."""
+    if stats:
+        counts = get_judged_counts()
+        if not counts:
+            print_info("No judged discoveries yet.")
+            return
+        section_header("JUDGED COUNTS")
+        for status, count in sorted(counts.items()):
+            style = {"ready": "good", "rejected": "danger"}.get(status, "info")
+            console.print(f"  [{style}]{status:<10}[/{style}] {count}")
+        return
+
+    if list_status:
+        rows = list_by_status(list_status, ats=ats, limit=limit)
+        if not rows:
+            print_info(f"No discoveries with status '{list_status}'.")
+            return
+        section_header(f"DISCOVERIES — {list_status.upper()}")
+        for r in rows:
+            score = r.get("combined_score") or 0
+            style = "good" if list_status == "ready" else "danger"
+            console.print(
+                f"  [{style}]#{r['id']:<5}[/{style}] {score:5.1f}  "
+                f"{r['company']:<24} {r['role']}"
+            )
+            if list_status == "rejected" and r.get("judgement_reason"):
+                console.print(f"       [dim]{r['judgement_reason']}[/dim]")
+        console.print(f"\n  [dim]{len(rows)} discoveries[/dim]")
+        return
+
+    if not discovery_id and not judge_all:
+        print_error("Provide --id <N>, --all, --list ready/rejected, or --stats.")
+        return
+
+    try:
+        prof = load_profile()
+    except ProfileError as e:
+        print_error(f"Profile error: {e}")
+        return
+
+    if discovery_id is not None:
+        section_header(f"JUDGE #{discovery_id}")
+        try:
+            result = judge_one_id(discovery_id, profile=prof, threshold=threshold, rejudge=rejudge)
+        except JudgeError as e:
+            print_error(str(e))
+            return
+
+        if result.get("skipped_reason"):
+            print_warning(result["skipped_reason"])
+        elif result.get("error") and "no description" in (result.get("error") or "").lower():
+            print_warning(
+                f"#{discovery_id} has no usable description. Run: "
+                f"charon enrich --id {discovery_id}"
+            )
+            return
+
+        _print_judge_line(result, threshold=threshold)
+        return
+
+    if judge_all:
+        from charon.db import get_unjudged_discoveries, get_discoveries
+        targets = (
+            get_discoveries(ats=ats, limit=limit)
+            if rejudge
+            else get_unjudged_discoveries(ats=ats, limit=limit)
+        )
+        if not targets:
+            print_info("Nothing to judge. Run 'charon enrich --all' first if needed.")
+            return
+
+        # Bulk-run guardrail
+        warn_at = (prof.get("judge") or {}).get("bulk_warn_at", DEFAULT_BULK_WARN_AT)
+        if len(targets) > warn_at and not yes:
+            print_warning(
+                f"About to judge {len(targets)} discoveries — "
+                f"roughly ${0.02 * len(targets):.2f}-${0.05 * len(targets):.2f} on Sonnet."
+            )
+            if not click.confirm("Proceed?", default=False):
+                print_info("Aborted. Use --yes to skip this prompt.")
+                return
+
+        section_header("JUDGE BATCH")
+        scope = []
+        if ats:
+            scope.append(f"ats={ats}")
+        if rejudge:
+            scope.append("rejudge")
+        if limit:
+            scope.append(f"limit={limit}")
+        if threshold is not None:
+            scope.append(f"threshold={threshold}")
+        if scope:
+            print_info("Scope: " + " ".join(scope))
+        print_info(f"Processing {len(targets)} discoveries...")
+        console.print()
+
+        tier_totals = {"ready": 0, "rejected": 0}
+
+        def on_progress(result: dict) -> None:
+            tier_totals[result.get("screened_status", "rejected")] = (
+                tier_totals.get(result.get("screened_status", "rejected"), 0) + 1
+            )
+            _print_judge_line(result, threshold=threshold)
+
+        try:
+            judge_batch(
+                ats=ats,
+                rejudge=rejudge,
+                limit=limit,
+                threshold=threshold,
+                profile=prof,
+                on_progress=on_progress,
+            )
+        except KeyboardInterrupt:
+            print_warning("Interrupted. Partial results written.")
+            return
+
+        console.print()
+        section_header("JUDGE SUMMARY")
+        for status, n in tier_totals.items():
+            if n:
+                style = {"ready": "good", "rejected": "danger"}[status]
+                console.print(f"  [{style}]{status:<10}[/{style}] {n}")
+
+
+def _print_judge_line(result: dict, threshold: float | None = None) -> None:
+    """One-line per-discovery progress for judge."""
+    status = result.get("screened_status") or "?"
+    style = {"ready": "good", "rejected": "danger"}.get(status, "warning")
+    marker = {"ready": "[+]", "rejected": "[X]"}.get(status, "[?]")
+
+    company = result.get("company") or ""
+    role = result.get("role") or ""
+    label = f"{company}: {role}" if company else f"#{result.get('discovery_id', '?')}"
+
+    combined = result.get("combined_score")
+    ghost = result.get("ghost_score")
+    redflag = result.get("redflag_score")
+    align = result.get("alignment_score")
+
+    if combined is None:
+        # Skipped path (already-judged or no description)
+        console.print(f"  [{style}]{marker}[/{style}] [{status:<8}] {label}")
+        if result.get("skipped_reason"):
+            console.print(f"      [dim]{result['skipped_reason']}[/dim]")
+        return
+
+    console.print(
+        f"  [{style}]{marker}[/{style}] [{status:<8}] "
+        f"[bold]{combined:5.1f}[/bold]  "
+        f"G:{ghost:.0f} R:{redflag:.0f} A:{align:.0f}  "
+        f"{label}"
+    )
+    reason = result.get("judgement_reason")
+    if status == "rejected" and reason:
+        console.print(f"      [dim]{reason}[/dim]")
 
 
 @cli.command("daily")

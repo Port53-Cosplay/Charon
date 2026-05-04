@@ -4,7 +4,45 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Next: Phase 8 (`judge`). See `ROADMAP.md` for plan.
+Next: Phase 9 (`forge` + `petition`). See `ROADMAP.md` for plan.
+
+## [0.8.0] — 2026-05-04
+
+Phase 8 ships. Discoveries can now be auto-scored by the existing v1
+analyzers in batch mode. The Three Judges of the Underworld decide who crosses.
+
+### Added
+- `charon judge` command. `--id N` for one, `--all` for unjudged batch,
+  `--ats <name>` slice, `--rejudge` to re-run, `--limit`, `--threshold`,
+  `--list ready/rejected`, `--stats` for status counts. Bulk-run guardrail
+  prompts before judging more than `judge.bulk_warn_at` discoveries (default
+  50) with a cost estimate.
+- New module `charon/screen.py` with `judge_discovery`, `judge_one_id`,
+  `judge_batch`, `compute_combined`, `list_by_status`. Reuses the existing
+  `analyze_ghostbust`, `analyze_redflags`, and `analyze_role_alignment`
+  functions — no new prompts.
+- `discoveries` table gains `ghost_score`, `redflag_score`, `alignment_score`,
+  `combined_score`, `judgement_reason`, `judgement_detail` (full analyzer
+  JSON), `judged_at`. Migrations are additive; existing rows simply have
+  `judged_at IS NULL` until judge runs.
+- Combined score formula: `((100-ghost) + (100-redflag) + alignment) / 3`.
+  Mirrors v1 hunt's averaging minus the dossier dimension (dossier is
+  expensive and runs per-job in Phase 9).
+- `judge` profile section with `ready_threshold` (default 60) and
+  `bulk_warn_at` (default 50). Validated.
+- HOWTO.md gains a `judge` workflow section.
+
+### Verified live
+- Schellman #1 ("Senior Associate, ISO"): ghost 15, redflag 45,
+  alignment 85, combined 75.0 → ready. Single judge call, ~$0.05 spent.
+  Full analyzer detail (signals, dealbreakers, yellow/green flags,
+  role-alignment overlap) preserved in `judgement_detail` JSON.
+
+### Tests
+- 25 new tests (334 → 359 total) covering combined-score formula,
+  threshold gating, full_description preference over description,
+  no-target-roles fallback, AI-error handling, DB writes, force flag,
+  ATS filtering, list_by_status filters, stats counts.
 
 ## [0.7.0] — 2026-05-03
 
@@ -170,7 +208,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.2...v0.5.3
