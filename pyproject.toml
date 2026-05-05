@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "charon-jobs"
-version = "0.8.0"
+version = "0.8.5"
 description = "Getting you to the other side. A CLI tool that evaluates job postings and researches companies against your personal values."
 readme = "README.md"
 license = { text = "MIT" }
@@ -19,6 +19,8 @@ dependencies = [
     "pyyaml>=6.0",
     "yfinance>=0.2.36",
     "hvac>=2.1",
+    "pypdf>=4.0",
+    "python-docx>=1.0",
 ]
 
 [project.optional-dependencies]

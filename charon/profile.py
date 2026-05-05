@@ -83,8 +83,16 @@ DEFAULT_PROFILE = {
     },
     "judge": {
         "ready_threshold": 60,
+        "alignment_floor": 50,
         "bulk_warn_at": 50,
+        "weights": {
+            "ghost": 0.15,            # invert: low=good
+            "redflag": 0.20,          # invert: low=good
+            "role_alignment": 0.25,   # what you want to do
+            "resume_match": 0.40,     # what you've done — heaviest by default
+        },
     },
+    "resume_path": "",  # set to your resume file or directory; analyzer is skipped if unset
 }
 
 REQUIRED_KEYS = {"values", "dealbreakers", "yellow_flags", "green_flags"}
@@ -229,10 +237,33 @@ def validate_profile(profile: dict[str, Any]) -> None:
         if threshold is not None:
             if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 100:
                 raise ProfileError("judge.ready_threshold must be a number between 0 and 100")
+        floor = judge_cfg.get("alignment_floor")
+        if floor is not None:
+            if not isinstance(floor, (int, float)) or not 0 <= floor <= 100:
+                raise ProfileError("judge.alignment_floor must be a number between 0 and 100")
         warn_at = judge_cfg.get("bulk_warn_at")
         if warn_at is not None:
             if not isinstance(warn_at, int) or warn_at < 1:
                 raise ProfileError("judge.bulk_warn_at must be a positive integer")
+        weights = judge_cfg.get("weights")
+        if weights is not None:
+            if not isinstance(weights, dict):
+                raise ProfileError("judge.weights must be a mapping")
+            valid_keys = {"ghost", "redflag", "role_alignment", "resume_match"}
+            unknown = set(weights.keys()) - valid_keys
+            if unknown:
+                raise ProfileError(
+                    f"Unknown judge.weights key(s): {', '.join(unknown)}. "
+                    f"Valid: {', '.join(sorted(valid_keys))}"
+                )
+            for k, v in weights.items():
+                if not isinstance(v, (int, float)) or v < 0:
+                    raise ProfileError(f"judge.weights.{k} must be a non-negative number")
+
+    # Validate resume_path (string, optional — empty disables resume_match analyzer)
+    resume_path = profile.get("resume_path")
+    if resume_path is not None and not isinstance(resume_path, str):
+        raise ProfileError("resume_path must be a string")
 
     # Validate notifications mail_to (string or list)
     notif = profile.get("notifications", {})

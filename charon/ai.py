@@ -58,8 +58,9 @@ def query_claude(
 
         return response.content[0].text
 
-    except KeyboardInterrupt:
-        raise AIError("Cancelled. The ferryman respects your wishes.")
+    # KeyboardInterrupt is intentionally NOT caught — it must propagate up
+    # so batch loops in screen.py / enrich/__init__.py terminate immediately
+    # rather than swallowing Ctrl+C as a per-row "AI error" and continuing.
     except anthropic.AuthenticationError:
         raise AIError("Invalid API key. The ferryman rejects your coin.")
     except anthropic.RateLimitError:
@@ -108,8 +109,8 @@ def query_claude_web_search(
 
         return "\n".join(text_parts)
 
-    except KeyboardInterrupt:
-        raise AIError("Cancelled. The ferryman respects your wishes.")
+    # KeyboardInterrupt intentionally NOT caught — must propagate. See
+    # rationale on query_claude above.
     except anthropic.AuthenticationError:
         raise AIError("Invalid API key. The ferryman rejects your coin.")
     except anthropic.RateLimitError:

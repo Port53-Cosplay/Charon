@@ -98,6 +98,7 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN judgement_reason TEXT",
     "ALTER TABLE discoveries ADD COLUMN judgement_detail TEXT",
     "ALTER TABLE discoveries ADD COLUMN judged_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN resume_match_score REAL",
 ]
 
 
@@ -622,6 +623,7 @@ def update_discovery_judgement(
     screened_status: str,
     judgement_reason: str,
     judgement_detail: dict[str, Any] | None = None,
+    resume_match_score: float | None = None,
 ) -> bool:
     """Persist judge results on a discovery. Returns True if updated."""
     if screened_status not in {"ready", "rejected"}:
@@ -633,13 +635,14 @@ def update_discovery_judgement(
         cursor = conn.execute(
             "UPDATE discoveries SET "
             "  ghost_score = ?, redflag_score = ?, alignment_score = ?, "
-            "  combined_score = ?, screened_status = ?, "
+            "  resume_match_score = ?, combined_score = ?, screened_status = ?, "
             "  judgement_reason = ?, judgement_detail = ?, judged_at = ? "
             "WHERE id = ?",
             (
                 ghost_score,
                 redflag_score,
                 alignment_score,
+                resume_match_score,
                 combined_score,
                 screened_status,
                 judgement_reason,
@@ -647,6 +650,34 @@ def update_discovery_judgement(
                 datetime.now(timezone.utc).isoformat(),
                 discovery_id,
             ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def update_discovery_classification(
+    discovery_id: int,
+    *,
+    screened_status: str,
+    combined_score: float,
+    judgement_reason: str,
+) -> bool:
+    """Update only the gating outcome on a discovery — leaves analyzer
+    detail and per-component scores untouched. Used by `judge --reclassify`
+    after tuning thresholds, when no AI calls were made.
+    """
+    if screened_status not in {"ready", "rejected"}:
+        raise ValueError(
+            f"screened_status must be 'ready' or 'rejected', got '{screened_status}'."
+        )
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET combined_score = ?, screened_status = ?, "
+            "judgement_reason = ? WHERE id = ?",
+            (combined_score, screened_status, judgement_reason, discovery_id),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -677,6 +708,49 @@ def get_unjudged_discoveries(
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_company_judgement_summary(
+    ats: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate judged-discovery stats per company.
+
+    Returns rows with: company, total, ready, rejected, avg_combined,
+    avg_ghost, avg_redflag, avg_alignment, avg_resume_match (or None).
+
+    Sorted by ready DESC, then total DESC. Useful for spotting patterns
+    like 'every Apollo posting flagged' vs 'one bad Coalfire listing.'
+    """
+    clauses = ["judged_at IS NOT NULL"]
+    params: list[Any] = []
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+    where = " WHERE " + " AND ".join(clauses)
+
+    sql = f"""
+        SELECT
+          company,
+          COUNT(*) AS total,
+          SUM(CASE WHEN screened_status = 'ready' THEN 1 ELSE 0 END) AS ready,
+          SUM(CASE WHEN screened_status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+          AVG(combined_score) AS avg_combined,
+          AVG(ghost_score) AS avg_ghost,
+          AVG(redflag_score) AS avg_redflag,
+          AVG(alignment_score) AS avg_alignment,
+          AVG(resume_match_score) AS avg_resume_match
+        FROM discoveries
+        {where}
+        GROUP BY company
+        ORDER BY ready DESC, total DESC, company ASC
+    """
 
     conn = get_connection()
     try:

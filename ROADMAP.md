@@ -339,6 +339,53 @@ charon judge --list rejected          # list jobs that failed (with reasons)
 
 ---
 
+### Phase 8.5 — Resume match + tuning [X]
+**Shipped:** v0.8.5 (2026-05-05)
+**Complexity:** M
+**Goal:** Sharpen the funnel before Phase 9 spends real money on per-job
+materials. Add evidence-based fit scoring, give the user knobs to tune the
+gate, and fix two failure modes observed in Lever's first live run.
+
+**Scope:**
+- Fourth analyzer: `resume_match` reads a configured resume (md/txt/pdf/docx)
+  and scores postings on what the candidate has *actually done* vs what the
+  posting requires. Catches charitable role_alignment scores on
+  industry-adjacent but skill-mismatched roles (e.g. Sales Solutions
+  Engineer at a security company).
+- Weighted combined-score formula in `profile.judge.weights` with sensible
+  defaults skewed toward resume_match.
+- `judge.alignment_floor` hard-reject gate. Prevents combined score from
+  saving postings whose alignment is near zero.
+- `charon judge --reclassify` for free re-gating of stored scores. Tune
+  thresholds without paying for analyzer calls.
+- `charon judge --status ready/rejected` filter on rejudge — re-score
+  just the survivors after tuning instead of re-running everything.
+- `charon judge --by-company` aggregation view for spotting patterns
+  across multiple postings from the same employer.
+- Ctrl+C bug fix: `ai.py` was swallowing the signal as an AIError; now
+  propagates so batch loops actually stop.
+
+**Acceptance criteria:**
+- [X] Resume analyzer reads .md/.txt/.pdf/.docx
+- [X] Configurable via `profile.resume_path`; analyzer skipped cleanly when unset
+- [X] Weighted combined formula with profile-driven weights; falls back gracefully for legacy rows
+- [X] alignment_floor blocks low-alignment postings regardless of combined
+- [X] --reclassify is free and idempotent; preserves judgement_detail
+- [X] --status filter on rejudge picks only matching rows
+- [X] --by-company aggregates across judged rows; pure SQL
+- [X] Ctrl+C aborts batch loops; regression tests pin the behavior
+- [X] Live verification: Lever 92 → 14 ready (after floor) → 6 ready (after resume_match)
+- [X] CHANGELOG entry under v0.8.5
+- [X] HOWTO sections for new flags
+
+**Dependencies:** Phase 8 complete
+**Risks:** Resume analyzer prompt may be too strict on edge cases (career
+pivots, transferable skills underweighted). Mitigation: match_type categories
+(direct/adjacent/stretch/mismatch) make scoring transparent so prompt can be
+tuned with --reclassify on existing scores.
+
+---
+
 ### Phase 9 — `forge` and `petition` `[ ]`
 **Target version:** v0.9.0
 **Complexity:** L
@@ -502,6 +549,7 @@ Update this after every phase ships. Last entry on top.
 
 | Date | Version | Phase | Status | Notes |
 |---|---|---|---|---|
+| 2026-05-05 | 0.8.5 | 8.5 | shipped | Resume match analyzer + weights + alignment_floor + reclassify + by-company + Ctrl+C fix. 392 tests. Live: Lever 92 → 14 (floor) → 6 ready (resume_match). |
 | 2026-05-04 | 0.8.0 | 8 | shipped | `charon judge` runs the three v1 analyzers in batch on enriched discoveries. 359 tests. Bulk-run guardrail. Live: Schellman #1 judged at combined 75.0 (READY). |
 | 2026-05-03 | 0.7.0 | 7 | shipped | Three-tier enrichment cascade (JSON-LD → ATS CSS → LLM with pluggable model routing). 334 tests. Live test: 12/12 Schellman jobs enriched at tier 1, $0 token spend. |
 | 2026-05-02 | 0.6.0 | 6 | shipped | All four ATS adapters live (Greenhouse, Lever, Ashby, Workday) + `--add <url>` auto-detect. 293 tests, 47 employers verified. Funnel input is online. |

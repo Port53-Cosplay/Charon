@@ -266,27 +266,83 @@ charon judge --all --threshold 75
 charon judge --rejudge --id 5
 charon judge --rejudge --all
 
+# Re-judge ONLY the currently-ready ones (cheaper than --rejudge --all)
+charon judge --rejudge --status ready --ats lever
+
+# Free re-gating after tuning thresholds (no AI calls)
+charon judge --reclassify
+
 # Browse the funnel
 charon judge --list ready          # everything that passed
 charon judge --list rejected       # everything that failed (with reasons)
 charon judge --stats               # counts by status
+charon judge --by-company          # aggregates per company
 ```
 
-**Cost.** Each judgement is three Claude Sonnet calls — roughly $0.02-$0.05
-per discovery. Charon warns before judging more than 50 at once and shows a
-cost estimate. Override the prompt with `--yes`, or change the warn threshold
-in your profile:
+**Cost.** Each judgement is 3-4 Claude Sonnet calls — roughly $0.02-$0.07
+per discovery (4th call is the resume analyzer when configured). Charon warns
+before judging more than 50 at once and shows a cost estimate.
+
+**Tuning gates without paying.** Once a discovery has been judged once, its
+component scores are stored. `charon judge --reclassify` re-applies the
+ready/rejected gating with the current profile values — useful after editing
+`ready_threshold`, `alignment_floor`, or `weights`. Free, instant.
 
 ```yaml
 # in ~/.charon/profile.yaml
+resume_path: ~/.charon/resume.md   # or a directory; first md/txt/docx/pdf wins
 judge:
   ready_threshold: 60        # combined score required to mark `ready`
+  alignment_floor: 50        # hard reject if alignment_score < this
   bulk_warn_at: 50           # confirmation prompt above this many at once
+  weights:                   # how the four components blend
+    ghost: 0.15              # invert: low=good
+    redflag: 0.20            # invert: low=good
+    role_alignment: 0.25     # what you want to do
+    resume_match: 0.40       # what you've actually done — heaviest by default
 ```
 
-**The combined score** is `((100 - ghost) + (100 - redflag) + alignment) / 3`,
-all on a 0-100 scale where higher is better. Dossier (Phase 9) is not part of
-the combined score — it runs per-job, when you decide to actually apply.
+**The combined score** is a weighted blend of the four components on a 0-100
+scale (higher is better):
+
+```
+combined = (
+    w_g * (100 - ghost_score) +
+    w_r * (100 - redflag_score) +
+    w_a * alignment_score +
+    w_m * resume_match_score
+) / sum(weights)
+```
+
+Rows judged before `resume_match` was introduced fall back to a 3-component
+formula automatically. The dossier dimension is NOT part of the combined
+score — dossier runs per-job in Phase 9, when you decide to actually apply.
+
+**Resume match analyzer.** When `resume_path` is set, the 4th analyzer
+compares the posting's stated requirements against your actual resume.
+Different from `role_alignment`: that compares against your aspirational
+`target_roles`. Resume match catches the case where a posting is at a
+security company and gets a charitable role_alignment score, but the
+day-to-day work doesn't match your background (classic example: a Sales
+Solutions Engineer scoring 75 alignment + 25 resume match = correctly
+rejected). Supports `.md`, `.txt`, `.pdf`, `.docx`.
+
+**By-company view.** `charon judge --by-company` aggregates judged rows
+per employer — total / ready / rejected counts plus average scores per
+component. Useful for spotting whether a flagged company is a one-bad-
+listing accident or a consistent pattern.
+
+**Re-judge survivors.** After tuning prompts or adding the resume
+analyzer, you can re-score just the currently-ready discoveries instead
+of every row:
+
+```bash
+charon judge --rejudge --status ready --ats lever
+```
+
+That re-runs all analyzers on each currently-ready row and may flip some
+to rejected. Cheaper than `--rejudge --all` because the rejected pile
+stays rejected.
 
 ### Company Watchlist
 

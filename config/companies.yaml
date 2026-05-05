@@ -105,7 +105,9 @@ gather:
     - { slug: semgrep,              name: "Semgrep",             tier: tier_2, category: appsec,                    notes: "SAST + custom rules" }
 
     # AI security / AI labs
-    - { slug: lakera,               name: "Lakera",              tier: tier_2, category: ai_security,               notes: "LLM security guardrails" }
+    # NOTE: Lakera was on Ashby as 'lakera' but the slug now returns 404.
+    # Likely moved ATS or rebranded the public slug. Moved to TODO block.
+    # - { slug: lakera,               name: "Lakera",              tier: tier_2, category: ai_security,               notes: "LLM security guardrails" }
     - { slug: openai,               name: "OpenAI",              tier: tier_3, category: ai_research,               notes: "Low conversion for new entrants. Has a real security team (Preparedness, Trust)." }
     - { slug: perplexity,           name: "Perplexity",          tier: tier_3, category: ai_research,               notes: "AI search / agents — security-adjacent" }
 
@@ -175,6 +177,8 @@ gather:
 # - AuditBoard     — no ATS detected; possibly proprietary or partner-managed
 # - Prescient Assurance — careers page returns 404 / DNS issue
 # - Palisade Research — known small org, likely posts via custom careers page
+# - Lakera         — was on Ashby as 'lakera', slug now 404s as of 2026-05-05;
+#                    careers page hides the ATS endpoint behind JS
 
 # ─── Bonus AI-research orgs (commented out, optional to enable) ─────────────
 # Found during verification probes but not in the original spec.

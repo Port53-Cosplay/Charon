@@ -48,7 +48,12 @@ from charon.gather import (
     list_employers,
     load_registry,
 )
-from charon.db import get_applied_companies, get_enrichment_counts, get_judged_counts
+from charon.db import (
+    get_applied_companies,
+    get_company_judgement_summary,
+    get_enrichment_counts,
+    get_judged_counts,
+)
 from charon.enrich import EnrichError, enrich_batch, enrich_one_id
 from charon.screen import (
     DEFAULT_BULK_WARN_AT,
@@ -56,6 +61,7 @@ from charon.screen import (
     judge_batch,
     judge_one_id,
     list_by_status,
+    reclassify_batch,
 )
 
 
@@ -2006,11 +2012,19 @@ def _print_enrich_line(result: dict) -> None:
 @click.option("--all", "judge_all", is_flag=True, help="Judge all unjudged enriched discoveries.")
 @click.option("--ats", help="Limit batch to one ATS.")
 @click.option("--rejudge", is_flag=True, help="Re-run judges even on already-judged discoveries.")
+@click.option("--reclassify", is_flag=True,
+              help="Re-apply the ready/rejected gating to existing scores. No AI calls. "
+                   "Use after tuning ready_threshold or alignment_floor.")
+@click.option("--status", "status_filter", type=click.Choice(["ready", "rejected"]),
+              help="Limit batch to discoveries currently in this status. "
+                   "Most useful with --rejudge to re-score just the survivors.")
 @click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
 @click.option("--threshold", type=float, default=None,
               help="Override ready_threshold (default from profile, fallback 60).")
 @click.option("--list", "list_status", type=click.Choice(["ready", "rejected"]),
               help="List judged discoveries by status.")
+@click.option("--by-company", "by_company", is_flag=True,
+              help="Aggregate stats per company across judged discoveries.")
 @click.option("--stats", is_flag=True, help="Show judged counts and exit.")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
 def judge_cmd(
@@ -2018,9 +2032,12 @@ def judge_cmd(
     judge_all: bool,
     ats: str | None,
     rejudge: bool,
+    reclassify: bool,
+    status_filter: str | None,
     limit: int | None,
     threshold: float | None,
     list_status: str | None,
+    by_company: bool,
     stats: bool,
     yes: bool,
 ) -> None:
@@ -2034,6 +2051,52 @@ def judge_cmd(
         for status, count in sorted(counts.items()):
             style = {"ready": "good", "rejected": "danger"}.get(status, "info")
             console.print(f"  [{style}]{status:<10}[/{style}] {count}")
+        return
+
+    if by_company:
+        rows = get_company_judgement_summary(ats=ats)
+        if not rows:
+            print_info("No judged discoveries yet.")
+            return
+        section_header("JUDGED — BY COMPANY")
+        # Header
+        console.print(
+            "  [header]"
+            f"{'Company':<28} "
+            f"{'Total':>5} "
+            f"{'Ready':>5} "
+            f"{'Rej':>5}  "
+            f"{'Comb':>5} "
+            f"{'Ghst':>5} "
+            f"{'RFlg':>5} "
+            f"{'Algn':>5} "
+            f"{'Rsme':>5}"
+            "[/header]"
+        )
+        for r in rows:
+            ready = r["ready"] or 0
+            rejected = r["rejected"] or 0
+            total = r["total"] or 0
+            ratio = ready / total if total else 0
+            row_style = "good" if ratio >= 0.5 else ("warning" if ratio >= 0.2 else "dim")
+
+            def fmt(v):
+                return f"{v:>5.1f}" if isinstance(v, (int, float)) else f"{'-':>5}"
+
+            console.print(
+                f"  [{row_style}]"
+                f"{(r['company'] or '?')[:28]:<28} "
+                f"{total:>5} "
+                f"{ready:>5} "
+                f"{rejected:>5}  "
+                f"{fmt(r['avg_combined'])} "
+                f"{fmt(r['avg_ghost'])} "
+                f"{fmt(r['avg_redflag'])} "
+                f"{fmt(r['avg_alignment'])} "
+                f"{fmt(r['avg_resume_match'])}"
+                f"[/{row_style}]"
+            )
+        console.print(f"\n  [dim]{len(rows)} companies[/dim]")
         return
 
     if list_status:
@@ -2054,14 +2117,68 @@ def judge_cmd(
         console.print(f"\n  [dim]{len(rows)} discoveries[/dim]")
         return
 
-    if not discovery_id and not judge_all:
-        print_error("Provide --id <N>, --all, --list ready/rejected, or --stats.")
+    # --rejudge without --id implies batch mode — same as --all with rejudge=True
+    if rejudge and not discovery_id and not judge_all:
+        judge_all = True
+
+    if not discovery_id and not judge_all and not reclassify:
+        print_error(
+            "Provide --id <N>, --all, --rejudge, --reclassify, "
+            "--list ready/rejected, --by-company, or --stats."
+        )
         return
 
     try:
         prof = load_profile()
     except ProfileError as e:
         print_error(f"Profile error: {e}")
+        return
+
+    # ── --reclassify: free re-gating of existing scores ─────────────
+    if reclassify:
+        section_header("RECLASSIFY")
+        print_info("Re-applying gating logic to stored scores. No AI calls.")
+        if threshold is not None:
+            print_info(f"Override threshold: {threshold}")
+        cfg = prof.get("judge") or {}
+        floor = cfg.get("alignment_floor", 50)
+        thresh = threshold if threshold is not None else cfg.get("ready_threshold", 60)
+        print_info(f"Active gates: ready_threshold={thresh}, alignment_floor={floor}")
+        console.print()
+
+        changed_count = 0
+        unchanged_count = 0
+
+        def on_progress(result: dict) -> None:
+            nonlocal changed_count, unchanged_count
+            if result["changed"]:
+                changed_count += 1
+                old = result["previous_status"]
+                new = result["screened_status"]
+                style = "warning" if old != new else "info"
+                marker = "[!]"
+                console.print(
+                    f"  [{style}]{marker}[/{style}] [{old} -> {new}] "
+                    f"#{result['discovery_id']} {result.get('company','')}: "
+                    f"{result.get('role','')}"
+                )
+                console.print(f"      [dim]{result['judgement_reason']}[/dim]")
+            else:
+                unchanged_count += 1
+
+        results = reclassify_batch(
+            ats=ats,
+            limit=limit,
+            threshold=threshold,
+            profile=prof,
+            on_progress=on_progress,
+        )
+
+        console.print()
+        section_header("RECLASSIFY SUMMARY")
+        console.print(f"  [warning]Changed:[/warning]   {changed_count}")
+        console.print(f"  [dim]Unchanged:[/dim] {unchanged_count}")
+        console.print(f"  [dim]Total:[/dim]     {len(results)}")
         return
 
     if discovery_id is not None:
@@ -2087,10 +2204,15 @@ def judge_cmd(
     if judge_all:
         from charon.db import get_unjudged_discoveries, get_discoveries
         targets = (
-            get_discoveries(ats=ats, limit=limit)
+            get_discoveries(ats=ats, status=status_filter, limit=limit)
             if rejudge
             else get_unjudged_discoveries(ats=ats, limit=limit)
         )
+        if status_filter and not rejudge:
+            print_warning(
+                "--status is ignored without --rejudge. Unjudged rows have no "
+                "ready/rejected status yet."
+            )
         if not targets:
             print_info("Nothing to judge. Run 'charon enrich --all' first if needed.")
             return
@@ -2099,7 +2221,7 @@ def judge_cmd(
         warn_at = (prof.get("judge") or {}).get("bulk_warn_at", DEFAULT_BULK_WARN_AT)
         if len(targets) > warn_at and not yes:
             print_warning(
-                f"About to judge {len(targets)} discoveries — "
+                f"About to judge {len(targets)} discoveries - "
                 f"roughly ${0.02 * len(targets):.2f}-${0.05 * len(targets):.2f} on Sonnet."
             )
             if not click.confirm("Proceed?", default=False):
@@ -2112,6 +2234,8 @@ def judge_cmd(
             scope.append(f"ats={ats}")
         if rejudge:
             scope.append("rejudge")
+        if status_filter:
+            scope.append(f"status={status_filter}")
         if limit:
             scope.append(f"limit={limit}")
         if threshold is not None:
@@ -2133,6 +2257,7 @@ def judge_cmd(
             judge_batch(
                 ats=ats,
                 rejudge=rejudge,
+                status=status_filter,
                 limit=limit,
                 threshold=threshold,
                 profile=prof,
@@ -2164,6 +2289,7 @@ def _print_judge_line(result: dict, threshold: float | None = None) -> None:
     ghost = result.get("ghost_score")
     redflag = result.get("redflag_score")
     align = result.get("alignment_score")
+    resume = result.get("resume_match_score")
 
     if combined is None:
         # Skipped path (already-judged or no description)
@@ -2172,10 +2298,14 @@ def _print_judge_line(result: dict, threshold: float | None = None) -> None:
             console.print(f"      [dim]{result['skipped_reason']}[/dim]")
         return
 
+    score_str = f"G:{ghost:.0f} R:{redflag:.0f} A:{align:.0f}"
+    if resume is not None:
+        score_str += f" Rs:{resume:.0f}"
+
     console.print(
         f"  [{style}]{marker}[/{style}] [{status:<8}] "
         f"[bold]{combined:5.1f}[/bold]  "
-        f"G:{ghost:.0f} R:{redflag:.0f} A:{align:.0f}  "
+        f"{score_str}  "
         f"{label}"
     )
     reason = result.get("judgement_reason")

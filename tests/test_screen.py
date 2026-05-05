@@ -15,10 +15,13 @@ from charon.db import (
 from charon.screen import (
     JudgeError,
     compute_combined,
+    compute_combined_weighted,
     judge_batch,
     judge_discovery,
     judge_one_id,
     list_by_status,
+    reclassify_batch,
+    reclassify_one,
 )
 
 
@@ -28,7 +31,7 @@ PROFILE = {
     "yellow_flags": ["fast-paced"],
     "green_flags": ["async-first"],
     "target_roles": ["AI red team", "AppSec"],
-    "judge": {"ready_threshold": 60},
+    "judge": {"ready_threshold": 60, "alignment_floor": 50},
 }
 
 
@@ -309,6 +312,50 @@ class TestJudgeBatch:
         results = judge_batch(ats="workday", profile=PROFILE)
         assert all(r["discovery_id"] == wd for r in results)
 
+    def test_rejudge_with_status_ready_filter(self, monkeypatch):
+        # Seed three discoveries; pre-judge so each gets a different status
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=90)  # ready
+        a = _seed_enriched(dedupe_hash="sf-a")
+        judge_one_id(a, profile=PROFILE)
+        assert get_discovery(a)["screened_status"] == "ready"
+
+        _patch_analyzers(monkeypatch, ghost=85, redflag=85, alignment=10)  # rejected (alignment floor)
+        b = _seed_enriched(dedupe_hash="sf-b",
+                           url="https://x.wd1.myworkdayjobs.com/x/y/2")
+        judge_one_id(b, profile=PROFILE)
+        assert get_discovery(b)["screened_status"] == "rejected"
+
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=90)  # ready
+        c = _seed_enriched(dedupe_hash="sf-c",
+                           url="https://x.wd1.myworkdayjobs.com/x/y/3")
+        judge_one_id(c, profile=PROFILE)
+        assert get_discovery(c)["screened_status"] == "ready"
+
+        # Track which IDs the analyzers see during rejudge
+        seen_ids = []
+        original = screen.analyze_ghostbust
+        def track(text):
+            seen_ids.append(text[:20])  # crude per-call marker
+            return original(text)
+        # Re-stub with a tracker
+        _patch_analyzers(monkeypatch, ghost=20, redflag=20, alignment=85)
+        original = screen.analyze_ghostbust
+        def with_tracking(text):
+            seen_ids.append("called")
+            return original(text)
+        monkeypatch.setattr(screen, "analyze_ghostbust", with_tracking)
+
+        # Rejudge ONLY the ready ones (a and c), skip the rejected (b)
+        results = judge_batch(profile=PROFILE, rejudge=True, status="ready")
+
+        assert len(results) == 2
+        result_ids = {r["discovery_id"] for r in results}
+        assert a in result_ids
+        assert c in result_ids
+        assert b not in result_ids
+        # ghostbust should have been called exactly twice (once per ready row)
+        assert len(seen_ids) == 2
+
     def test_rejudge_picks_up_judged(self, monkeypatch):
         _patch_analyzers(monkeypatch)
         a = _seed_enriched(dedupe_hash="rj-a")
@@ -355,6 +402,303 @@ class TestListByStatus:
 
 
 # ── stats ────────────────────────────────────────────────────────────
+
+
+class TestAlignmentFloor:
+    def test_low_alignment_rejected_even_when_combined_passes(self, monkeypatch):
+        # ghost=10, redflag=20, alignment=25
+        # combined = (90+80+25)/3 = 65 → above 60 threshold
+        # but alignment 25 < floor 50 → rejected
+        _patch_analyzers(monkeypatch, ghost=10, redflag=20, alignment=25)
+        d = {"full_description": "x" * 500}
+        result = judge_discovery(d, profile=PROFILE)
+        assert result["screened_status"] == "rejected"
+        assert "alignment 25 < floor 50" in result["judgement_reason"]
+
+    def test_alignment_at_floor_passes_through_combined_check(self, monkeypatch):
+        # alignment=50 (at floor), combined = (90+80+50)/3 = 73.3 → ready
+        _patch_analyzers(monkeypatch, ghost=10, redflag=20, alignment=50)
+        d = {"full_description": "x" * 500}
+        result = judge_discovery(d, profile=PROFILE)
+        assert result["screened_status"] == "ready"
+
+    def test_floor_override_via_profile(self, monkeypatch):
+        # floor=70, alignment=65 → rejected even though combined would pass
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=65)
+        # combined = (90+90+65)/3 = 81.7 — well above 60
+        strict_profile = dict(PROFILE)
+        strict_profile["judge"] = dict(PROFILE["judge"])
+        strict_profile["judge"]["alignment_floor"] = 70
+
+        d = {"full_description": "x" * 500}
+        result = judge_discovery(d, profile=strict_profile)
+        assert result["screened_status"] == "rejected"
+        assert "floor 70" in result["judgement_reason"]
+
+
+class TestReclassify:
+    def test_reclassify_changes_status_after_floor_change(self, monkeypatch):
+        """Old run let alignment=25 ready through (no floor); new floor rejects it."""
+        # Seed without the floor in the scenario
+        no_floor_profile = dict(PROFILE)
+        no_floor_profile["judge"] = {"ready_threshold": 60, "alignment_floor": 0}
+
+        _patch_analyzers(monkeypatch, ghost=10, redflag=20, alignment=25)
+        new_id = _seed_enriched(dedupe_hash="rc-1")
+        judge_one_id(new_id, profile=no_floor_profile)
+
+        row = get_discovery(new_id)
+        assert row["screened_status"] == "ready"  # passed without floor
+
+        # Now apply a stricter profile (floor=50) and reclassify
+        new = reclassify_one(row, profile=PROFILE)  # floor=50
+        assert new is not None
+        assert new["screened_status"] == "rejected"
+        assert "floor 50" in new["judgement_reason"]
+
+    def test_reclassify_preserves_judgement_detail(self, monkeypatch):
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=85)
+        new_id = _seed_enriched(dedupe_hash="rc-2")
+        judge_one_id(new_id, profile=PROFILE)
+
+        row_before = get_discovery(new_id)
+        detail_before = row_before["judgement_detail"]
+        assert detail_before is not None  # full analyzer JSON written
+
+        # Reclassify with a tougher floor — should change status
+        strict_profile = dict(PROFILE)
+        strict_profile["judge"] = {"ready_threshold": 60, "alignment_floor": 90}
+        reclassify_batch(profile=strict_profile)
+
+        row_after = get_discovery(new_id)
+        # Detail must NOT have been clobbered to NULL
+        assert row_after["judgement_detail"] == detail_before
+        # But status should reflect the new floor
+        assert row_after["screened_status"] == "rejected"
+
+    def test_reclassify_no_ai_calls(self, monkeypatch):
+        """reclassify_batch must not call any analyzer."""
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=80)
+        new_id = _seed_enriched(dedupe_hash="rc-3")
+        judge_one_id(new_id, profile=PROFILE)
+
+        # Replace analyzers with bombs
+        def boom(*a, **kw):
+            raise AssertionError("reclassify must not call analyzers")
+        monkeypatch.setattr(screen, "analyze_ghostbust", boom)
+        monkeypatch.setattr(screen, "analyze_redflags", boom)
+        monkeypatch.setattr(screen, "analyze_role_alignment", boom)
+
+        # Run reclassify — must not raise
+        results = reclassify_batch(profile=PROFILE)
+        assert any(r["discovery_id"] == new_id for r in results)
+
+    def test_reclassify_skips_unjudged(self, monkeypatch):
+        new_id = _seed_enriched(dedupe_hash="rc-4")
+        # Don't judge — leave unjudged
+        results = reclassify_batch(profile=PROFILE)
+        assert all(r["discovery_id"] != new_id for r in results)
+
+    def test_reclassify_threshold_override(self, monkeypatch):
+        _patch_analyzers(monkeypatch, ghost=20, redflag=20, alignment=70)
+        # combined = (80+80+70)/3 = 76.7 — passes default threshold 60
+        new_id = _seed_enriched(dedupe_hash="rc-5")
+        judge_one_id(new_id, profile=PROFILE)
+        assert get_discovery(new_id)["screened_status"] == "ready"
+
+        # Tighten threshold to 80 — should now flip to rejected
+        reclassify_batch(profile=PROFILE, threshold=80)
+        assert get_discovery(new_id)["screened_status"] == "rejected"
+
+
+class TestComputeCombinedWeighted:
+    def test_three_components_no_weights_equal_to_old_formula(self):
+        # Without weights, falls back to equal averaging across given components
+        old = compute_combined(20, 15, 80)
+        new = compute_combined_weighted(
+            ghost=20, redflag=15, alignment=80, resume_match=None, weights=None,
+        )
+        assert old == new
+
+    def test_four_components_no_weights_average(self):
+        # ghost=20, redflag=15, alignment=80, resume_match=70
+        # = (80 + 85 + 80 + 70) / 4 = 78.75
+        result = compute_combined_weighted(
+            ghost=20, redflag=15, alignment=80, resume_match=70, weights=None,
+        )
+        assert result == pytest.approx(78.8, abs=0.1)
+
+    def test_weights_shift_score(self):
+        # Heavily weight resume_match; resume_match=20 should drag combined down
+        weights = {"ghost": 0.0, "redflag": 0.0, "role_alignment": 0.1, "resume_match": 0.9}
+        # Components: g=100-20=80, r=100-15=85, a=80, rm=20
+        # weighted: (0*80 + 0*85 + 0.1*80 + 0.9*20) / 1.0 = 26
+        result = compute_combined_weighted(
+            ghost=20, redflag=15, alignment=80, resume_match=20, weights=weights,
+        )
+        assert result == pytest.approx(26.0, abs=0.1)
+
+    def test_zero_weights_falls_back_to_equal(self):
+        # All zero weights → equal weighting fallback
+        weights = {"ghost": 0.0, "redflag": 0.0, "role_alignment": 0.0, "resume_match": 0.0}
+        result = compute_combined_weighted(
+            ghost=0, redflag=0, alignment=100, resume_match=100, weights=weights,
+        )
+        # Should fall back to equal: (100+100+100+100)/4 = 100
+        assert result == 100.0
+
+    def test_legacy_row_no_resume_match_uses_three_components(self):
+        weights = {"ghost": 0.15, "redflag": 0.20, "role_alignment": 0.25, "resume_match": 0.40}
+        # resume_match=None → only the first three weights apply
+        # Components: g=100-20=80, r=100-15=85, a=80
+        # active weights: 0.15, 0.20, 0.25 (sum=0.60)
+        # weighted: (0.15*80 + 0.20*85 + 0.25*80) / 0.60
+        # = (12 + 17 + 20) / 0.60 = 49/0.60 = 81.67
+        result = compute_combined_weighted(
+            ghost=20, redflag=15, alignment=80, resume_match=None, weights=weights,
+        )
+        assert result == pytest.approx(81.7, abs=0.1)
+
+
+class TestResumeMatchIntegration:
+    def test_judge_discovery_calls_resume_analyzer_when_text_passed(self, monkeypatch):
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=80)
+        captured = {}
+
+        def fake_resume(posting, resume):
+            captured["posting"] = posting[:30]
+            captured["resume"] = resume[:30]
+            return {
+                "match_score": 65,
+                "confidence": "medium",
+                "match_type": "adjacent",
+                "overlap": ["EDR experience"],
+                "gaps": ["No AI/ML"],
+                "transferable": [],
+                "summary": "Adjacent fit.",
+            }
+        monkeypatch.setattr(screen, "analyze_resume_match", fake_resume)
+
+        d = {"full_description": "x" * 500}
+        result = judge_discovery(d, profile=PROFILE, resume_text="MY RESUME TEXT")
+
+        assert result["resume_match_score"] == 65.0
+        assert "MY RESUME" in captured["resume"]
+        # Detail should include resume_match block
+        assert "resume_match" in result["judgement_detail"]
+
+    def test_judge_discovery_skips_resume_when_text_none(self, monkeypatch):
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=80)
+
+        def boom(*a, **kw):
+            raise AssertionError("resume analyzer should not run when resume_text is None")
+        monkeypatch.setattr(screen, "analyze_resume_match", boom)
+
+        d = {"full_description": "x" * 500}
+        result = judge_discovery(d, profile=PROFILE, resume_text=None)
+        assert result["resume_match_score"] is None
+        assert "resume_match" not in (result["judgement_detail"] or {})
+
+    def test_judge_batch_loads_resume_once(self, tmp_path, monkeypatch):
+        # Write a fake resume file
+        resume_file = tmp_path / "r.md"
+        resume_file.write_text("# Test Resume\n\nSecurity Analyst, 5 years EDR.", encoding="utf-8")
+
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=80)
+
+        load_count = {"n": 0}
+        original_load = screen.load_resume_text
+
+        def counting_load(path):
+            load_count["n"] += 1
+            return original_load(path)
+        monkeypatch.setattr(screen, "load_resume_text", counting_load)
+
+        analyze_count = {"n": 0}
+        def fake_resume(posting, resume):
+            analyze_count["n"] += 1
+            return {
+                "match_score": 70, "confidence": "high", "match_type": "adjacent",
+                "overlap": [], "gaps": [], "transferable": [], "summary": "x",
+            }
+        monkeypatch.setattr(screen, "analyze_resume_match", fake_resume)
+
+        # Seed two enriched discoveries
+        a = _seed_enriched(dedupe_hash="rm-batch-1")
+        b = _seed_enriched(dedupe_hash="rm-batch-2",
+                           url="https://x.wd1.myworkdayjobs.com/x/y/2")
+
+        profile_with_resume = dict(PROFILE)
+        profile_with_resume["resume_path"] = str(resume_file)
+
+        judge_batch(profile=profile_with_resume)
+
+        # Resume loaded ONCE for the batch, analyzer called per discovery
+        assert load_count["n"] == 1
+        assert analyze_count["n"] == 2
+
+    def test_judge_batch_no_resume_path_skips_loading(self, monkeypatch):
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=80)
+
+        def boom_load(path):
+            raise AssertionError("load_resume_text should not be called when resume_path is empty")
+        monkeypatch.setattr(screen, "load_resume_text", boom_load)
+
+        def boom_analyze(*a, **kw):
+            raise AssertionError("analyze_resume_match should not be called")
+        monkeypatch.setattr(screen, "analyze_resume_match", boom_analyze)
+
+        new_id = _seed_enriched(dedupe_hash="no-resume-1")
+        # PROFILE has no resume_path → batch must not attempt to load
+        results = judge_batch(profile=PROFILE)
+        assert len(results) >= 1
+
+
+class TestKeyboardInterruptPropagates:
+    """Ctrl+C must abort the batch loop — not get swallowed as an AIError
+    that marks one row rejected and moves on. Regression test for the bug
+    where ai.py converted KeyboardInterrupt into AIError."""
+
+    def test_keyboard_interrupt_propagates_through_judge_discovery(self, monkeypatch):
+        def cancel(text):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(screen, "analyze_ghostbust", cancel)
+        # Other analyzers shouldn't be reached
+        def boom(*a, **kw):
+            raise AssertionError("Should not be reached after KeyboardInterrupt")
+        monkeypatch.setattr(screen, "analyze_redflags", boom)
+        monkeypatch.setattr(screen, "analyze_role_alignment", boom)
+
+        d = {"full_description": "x" * 500}
+        with pytest.raises(KeyboardInterrupt):
+            judge_discovery(d, profile=PROFILE)
+
+    def test_keyboard_interrupt_aborts_batch(self, monkeypatch):
+        # Two enriched rows; first call raises KeyboardInterrupt
+        a = _seed_enriched(dedupe_hash="ki-a")
+        b = _seed_enriched(dedupe_hash="ki-b",
+                           url="https://x.wd1.myworkdayjobs.com/x/y/2")
+
+        call_count = {"n": 0}
+        def maybe_cancel(text):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise KeyboardInterrupt
+            return {"ghost_score": 0, "confidence": "high", "signals": [], "summary": ""}
+        monkeypatch.setattr(screen, "analyze_ghostbust", maybe_cancel)
+        monkeypatch.setattr(screen, "analyze_redflags", lambda t, p: {
+            "redflag_score": 0, "confidence": "high",
+            "dealbreakers_found": [], "yellow_flags_found": [], "green_flags_found": [],
+            "summary": "",
+        })
+        monkeypatch.setattr(screen, "analyze_role_alignment", lambda t, r: {"alignment_score": 80})
+
+        with pytest.raises(KeyboardInterrupt):
+            judge_batch(profile=PROFILE)
+
+        # Only the first analyzer call should have happened — the loop
+        # must NOT have advanced to the second row
+        assert call_count["n"] == 1
 
 
 class TestStats:

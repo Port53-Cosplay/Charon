@@ -35,6 +35,9 @@ Thumbs.db
 profile.yaml
 charon.db
 dossiers/
+resume/
+*.docx
+*.pdf
 
 # Secrets
 .env

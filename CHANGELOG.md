@@ -6,6 +6,86 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 Next: Phase 9 (`forge` + `petition`). See `ROADMAP.md` for plan.
 
+## [0.8.5] — 2026-05-05
+
+Phase 8.5 ships. Adds a fourth analyzer (resume match), tunable weights, the
+alignment floor, the by-company aggregation view, the no-AI reclassify path,
+and a Ctrl+C bug fix. Together these turn the funnel from "things that look
+plausible" into "things you could actually credibly apply for."
+
+### Added
+
+- **Resume match analyzer.** New module `charon/resume_match.py`. Scores how
+  closely a posting matches the candidate's *actual* resume (what they've
+  done) rather than aspirational `target_roles` (what they want to do).
+  Returns score 0-100, match type (direct/adjacent/stretch/mismatch),
+  cited overlap and gaps. Prompt is hardened against injection in both the
+  resume and the posting.
+- **Resume format support.** `.md` / `.txt` read directly; `.pdf` via
+  `pypdf>=4.0`; `.docx` via `python-docx>=1.0`. Both new deps. Configured
+  via `profile.resume_path` (file or directory; if directory, picks newest
+  by extension preference: md > txt > docx > pdf). Empty path disables the
+  analyzer cleanly.
+- **Weighted combined score.** `profile.judge.weights` controls how the four
+  components blend. Default skews toward resume_match (0.40) so evidence-
+  based fit dominates aspirational alignment. Falls back to equal averaging
+  if weights unset, and to 3-component formula for rows judged before
+  resume_match existed.
+- **`charon judge --by-company`** aggregation view. Shows per-company:
+  total / ready / rejected counts plus avg combined / ghost / redflag /
+  alignment / resume scores. Surfaces patterns like "every Apollo
+  posting flagged" vs "one bad Coalfire listing" at a glance. Pure SQL,
+  no AI.
+- **`--status ready/rejected` filter** on judge batches. Combine with
+  `--rejudge` to re-score only the survivors after tuning prompts /
+  thresholds / adding the resume analyzer. Cheaper than re-judging
+  everything.
+- **`charon judge --reclassify`.** Re-applies the gating logic
+  (alignment_floor, ready_threshold, weights) to stored scores. **No AI
+  calls.** Free, instant. Use after tuning thresholds without paying to
+  re-run analyzers.
+- **`judge.alignment_floor`** (default 50). Hard reject when
+  `alignment_score < floor` regardless of combined score. Prevents the
+  "sales role greenlit because ghost+redflag are clean" failure mode.
+- **`update_discovery_classification`** DB helper that updates only the
+  gating outcome (status / combined / reason) without touching the full
+  analyzer detail JSON. Used by reclassify.
+- **`get_company_judgement_summary`** SQL aggregator backing `--by-company`.
+
+### Fixed
+
+- **Ctrl+C now actually cancels batch loops.** `ai.py` was catching
+  `KeyboardInterrupt` and converting it into an `AIError`, which the batch
+  loops were treating as a per-row failure and continuing. Removed the
+  conversion in both `query_claude` and `query_claude_web_search` so the
+  signal propagates to the CLI's interrupt handler. Two regression tests
+  pin the behavior.
+- **Lakera Ashby slug returns 404.** Commented out in `companies.yaml` and
+  added to the manual-investigation TODO. The slug appears to have changed
+  or moved off Ashby; the public careers page hides the new ATS endpoint
+  behind JS rendering.
+
+### Verified live (2026-05-05)
+
+- 92 Lever discoveries gathered, 92 enriched (all `skipped` — Lever
+  populates descriptions at gather time), 92 judged at 3 components ($3-5).
+- 21 ready under old 3-component formula → 14 ready after applying
+  alignment_floor=50 via `--reclassify` (free) → **6 ready** after
+  `--rejudge --status ready` ran resume_match across the 14 survivors
+  (~$1.50). Resume analyzer specifically caught the "Sales Solutions
+  Engineer at a security company" case as a clear mismatch (cited
+  missing GRC framework experience, missing cloud infrastructure
+  expertise, no customer-facing technical sales background).
+- 33 new tests (359 → 392 total). All four analyzers' integration paths
+  covered, plus the formula, floor, reclassify, status filter, by-company
+  aggregation, and the Ctrl+C regression.
+
+### Documentation
+
+- HOWTO.md gains sections for the resume analyzer, weights, by-company,
+  the alignment floor, and reclassify.
+- ROADMAP.md gets a Phase 8.5 entry and Status Tracker update.
+
 ## [0.8.0] — 2026-05-04
 
 Phase 8 ships. Discoveries can now be auto-scored by the existing v1
@@ -208,7 +288,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.0...v0.8.5
 [0.8.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.5.3...v0.6.0
