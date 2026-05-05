@@ -4,7 +4,44 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Next: Phase 9.3 (`provision` wrapper + `offerings` command), then Phase 10 (`manifest` dashboard).
+Next: Phase 10 (`manifest` HTML dashboard).
+
+## [0.9.6] — 2026-05-05
+
+Phase 9.3 closes Phase 9. Two convenience commands ride on top of the
+existing forge + petition plumbing.
+
+### Added
+
+- **`charon provision`** — runs forge then petition for a discovery (or
+  for the whole ready pile via `--ready`). Petition runs even if forge
+  errors — the failures are independent. Same flag surface as forge:
+  `--id N | --ready | --ats | --force | --model | --limit | --yes`.
+  Bulk-warn at >20 with cost estimate (forge + petition = 2 calls per
+  discovery, so the warning threshold and estimate reflect that).
+- **`charon offerings`** — shows or opens the materials folder.
+  - `charon offerings` (default) lists every discovery with an
+    offerings folder, sorted by combined score, with F/P markers
+    showing forged + petitioned status.
+  - `charon offerings --id N` shows the folder path and lists the
+    files inside (with sizes).
+  - `charon offerings --id N --open` launches your file manager to
+    that folder via `click.launch`.
+
+### Tests
+
+- 11 new tests (426 → 438 total) covering provision orchestration
+  (single, batch, skip-when-complete, --force) and offerings
+  (--list default, --list after provision, --id detail, missing
+  offerings, unknown id). AI calls mocked at the `tailor._generate`
+  seam — no live network in suite.
+
+### Phase 9 complete
+
+The funnel now ends at clickable materials. Each ready discovery can
+become a folder with `resume.md`, `cover_letter.md`, and the audit
+files for both. Phase 10 (`manifest` dashboard) is next; that's the
+one where everything renders in a browser instead of a CLI.
 
 ## [0.9.5] — 2026-05-05
 
@@ -433,7 +470,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.0...v0.9.5
 [0.9.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.5...v0.9.0
 [0.8.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.0...v0.8.5

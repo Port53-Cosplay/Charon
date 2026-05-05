@@ -455,6 +455,47 @@ forge:
   offerings_dir: ~/.charon/offerings
 ```
 
+### Provision (Both Materials at Once)
+
+`charon provision` is the convenience wrapper — it runs forge + petition
+for a discovery in sequence, so you get both the resume and the cover
+letter in one command.
+
+```bash
+# One ready discovery — produces resume.md AND cover_letter.md
+charon provision --id 2607
+
+# All ready discoveries that are missing materials (forge OR petition)
+charon provision --ready
+
+# Slice / cap / model override
+charon provision --ready --ats lever
+charon provision --ready --force          # regenerate everything
+charon provision --id 2607 --model claude-sonnet-4-20250514
+```
+
+The two stages are independent — petition still runs even if forge
+errors. The bulk-warn fires above 20 discoveries with a cost estimate
+that reflects 2 calls per discovery (~$0.04-$0.10 each on Haiku).
+
+### Browse Offerings
+
+`charon offerings` lets you see and open the materials you've generated.
+
+```bash
+# Default: list everything you have
+charon offerings
+
+# One discovery's folder
+charon offerings --id 2607
+
+# Open the folder in your file manager
+charon offerings --id 2607 --open
+```
+
+The `F` and `P` markers in the list view tell you whether each discovery
+has been forged, petitioned, or both.
+
 ### Company Watchlist
 
 ```bash

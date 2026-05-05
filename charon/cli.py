@@ -2693,6 +2693,252 @@ def _print_petition_result(result: dict, terse: bool = False) -> None:
             )
 
 
+@cli.command("provision")
+@click.option("--id", "discovery_id", type=int, help="Provision a single discovery (forge + petition).")
+@click.option("--ready", "provision_ready", is_flag=True,
+              help="Provision all ready discoveries that are missing materials.")
+@click.option("--ats", help="Limit batch to one ATS.")
+@click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
+@click.option("--force", is_flag=True, help="Overwrite existing materials.")
+@click.option("--model", "model_override", default=None,
+              help="Override forge.model for this run.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
+def provision_cmd(
+    discovery_id: int | None,
+    provision_ready: bool,
+    ats: str | None,
+    limit: int | None,
+    force: bool,
+    model_override: str | None,
+    yes: bool,
+) -> None:
+    """Forge a resume + write a cover letter for ready discoveries. The full provisions."""
+    if not discovery_id and not provision_ready:
+        print_error("Provide --id <N> or --ready.")
+        return
+
+    try:
+        prof = load_profile()
+    except ProfileError as e:
+        print_error(f"Profile error: {e}")
+        return
+
+    if not (prof.get("resume_path") or "").strip():
+        print_error("No resume configured. Set profile.resume_path.")
+        return
+
+    from charon.db import (
+        get_discovery,
+        get_ready_discoveries,
+        update_discovery_forged,
+        update_discovery_petitioned,
+    )
+
+    # ── single ──────────────────────────────────────────────────
+    if discovery_id is not None:
+        discovery = get_discovery(discovery_id)
+        if discovery is None:
+            print_error(f"No discovery with id {discovery_id}.")
+            return
+        section_header(f"PROVISION #{discovery_id}")
+        _provision_one(
+            discovery, prof, model_override, force,
+            update_discovery_forged, update_discovery_petitioned,
+        )
+        return
+
+    # ── batch ───────────────────────────────────────────────────
+    if provision_ready:
+        # "Missing materials" = either forge OR petition hasn't run
+        all_ready = get_ready_discoveries(ats=ats, limit=limit)
+        if force:
+            targets = all_ready
+        else:
+            targets = [
+                d for d in all_ready
+                if not d.get("forged_at") or not d.get("petition_at")
+            ]
+        if not targets:
+            print_info(
+                "Nothing to provision - all ready discoveries already have "
+                "both materials. Use --force to regenerate."
+            )
+            return
+
+        if len(targets) > 20 and not yes:
+            est_low = 0.04 * len(targets)
+            est_high = 0.10 * len(targets)
+            print_warning(
+                f"About to provision {len(targets)} discoveries (forge + petition each) - "
+                f"roughly ${est_low:.2f}-${est_high:.2f} on Haiku."
+            )
+            if not click.confirm("Proceed?", default=False):
+                print_info("Aborted. Use --yes to skip this prompt.")
+                return
+
+        section_header("PROVISION BATCH")
+        print_info(f"Processing {len(targets)} discoveries (forge + petition each)...")
+        console.print()
+
+        for d in targets:
+            try:
+                _provision_one(
+                    d, prof, model_override, force,
+                    update_discovery_forged, update_discovery_petitioned,
+                )
+            except KeyboardInterrupt:
+                print_warning("Interrupted. Partial results written.")
+                return
+            console.print()
+
+
+def _provision_one(
+    discovery: dict,
+    prof: dict,
+    model_override: str | None,
+    force: bool,
+    update_forged,
+    update_petitioned,
+) -> None:
+    """Run forge + petition for a single discovery, recording each."""
+    company = discovery.get("company", "?")
+    role = discovery.get("role", "?")
+    discovery_id = discovery.get("id")
+
+    print_info(f"#{discovery_id} {company}: {role}")
+
+    # forge
+    try:
+        forge_result = forge_discovery(
+            discovery, profile=prof, model_override=model_override, force=force,
+        )
+    except Exception as e:
+        forge_result = {"error": f"{type(e).__name__}: {e}"}
+    _print_forge_result(forge_result, terse=True)
+    if forge_result.get("offerings_path") and not forge_result.get("error"):
+        update_forged(discovery_id, offerings_path=forge_result["offerings_path"])
+
+    # petition (independent of forge — runs even if forge errored)
+    try:
+        petition_result = petition_discovery(
+            discovery, profile=prof, model_override=model_override, force=force,
+        )
+    except Exception as e:
+        petition_result = {"error": f"{type(e).__name__}: {e}"}
+    _print_petition_result(petition_result, terse=True)
+    if petition_result.get("letter_path") and not petition_result.get("error"):
+        update_petitioned(
+            discovery_id,
+            offerings_path=petition_result.get("offerings_path"),
+        )
+
+
+@cli.command("offerings")
+@click.option("--id", "discovery_id", type=int, help="Show one discovery's offerings.")
+@click.option("--open", "open_folder", is_flag=True,
+              help="Open the offerings folder in your file manager (use with --id).")
+@click.option("--list", "list_all", is_flag=True,
+              help="List all discoveries that have offerings folders.")
+def offerings_cmd(
+    discovery_id: int | None,
+    open_folder: bool,
+    list_all: bool,
+) -> None:
+    """Show the materials prepared for a discovery. The boatman's manifest."""
+    from pathlib import Path
+
+    if not any([discovery_id, list_all]):
+        list_all = True  # default
+
+    if list_all:
+        from charon.db import get_connection
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, company, role, combined_score, offerings_path, "
+                "forged_at, petition_at FROM discoveries "
+                "WHERE offerings_path IS NOT NULL "
+                "ORDER BY combined_score DESC, discovered_at DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+        rows = [dict(r) for r in rows]
+
+        if not rows:
+            print_info(
+                "No offerings yet. Run 'charon forge --ready' or 'charon "
+                "provision --ready' first."
+            )
+            return
+
+        section_header("OFFERINGS")
+        for r in rows:
+            score = r.get("combined_score") or 0
+            forged = "F" if r.get("forged_at") else "-"
+            petitioned = "P" if r.get("petition_at") else "-"
+            console.print(
+                f"  [info]#{r['id']:<5}[/info] "
+                f"[bold]{score:5.1f}[/bold]  "
+                f"[good]{forged}{petitioned}[/good]  "
+                f"{r['company']}: {r['role']}"
+            )
+            console.print(f"        [dim]{r.get('offerings_path', '?')}[/dim]")
+        console.print(f"\n  [dim]{len(rows)} offerings | F=forged P=petitioned[/dim]")
+        return
+
+    # --id path
+    if discovery_id is None:
+        print_error("Provide --id <N> with --open, or use --list.")
+        return
+
+    from charon.db import get_discovery
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        print_error(f"No discovery with id {discovery_id}.")
+        return
+
+    folder_str = discovery.get("offerings_path")
+    if not folder_str:
+        print_warning(
+            f"No offerings for #{discovery_id} yet. "
+            f"Run 'charon provision --id {discovery_id}'."
+        )
+        return
+
+    folder = Path(folder_str)
+    if not folder.exists():
+        print_error(
+            f"Offerings folder is recorded but missing on disk: {folder}\n"
+            "Re-run with 'charon provision --id N --force' to regenerate."
+        )
+        return
+
+    if open_folder:
+        click.launch(str(folder))
+        print_info(f"Opened: {folder}")
+        return
+
+    section_header(f"OFFERINGS #{discovery_id}")
+    console.print(f"  [header]Company:[/header]  {discovery.get('company')}")
+    console.print(f"  [header]Role:[/header]     {discovery.get('role')}")
+    console.print(f"  [header]Folder:[/header]   {folder}")
+    console.print()
+
+    files = sorted(folder.iterdir())
+    if not files:
+        print_warning("Folder is empty.")
+        return
+
+    for f in files:
+        if f.is_file():
+            size = f.stat().st_size
+            console.print(f"  [info]{f.name:<24}[/info] [dim]{size:>6} bytes[/dim]")
+    console.print()
+    print_info(
+        f"Open in your file manager: charon offerings --id {discovery_id} --open"
+    )
+
+
 @cli.command("daily")
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without sending.")
 def daily(dry_run: bool) -> None:

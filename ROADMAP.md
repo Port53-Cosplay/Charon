@@ -386,12 +386,12 @@ tuned with --reclassify on existing scores.
 
 ---
 
-### Phase 9 — `forge` and `petition` `[~]`
+### Phase 9 — `forge` and `petition` `[X]`
 **Sub-phase status:**
 - 9.1 (forge) — **shipped v0.9.0 (2026-05-05)**
 - 9.2 (petition) — **shipped v0.9.5 (2026-05-05)**
-- 9.3 (provision + offerings) — pending
-**Target version:** v0.9.0 → v0.9.5 → v0.9.x
+- 9.3 (provision + offerings) — **shipped v0.9.6 (2026-05-05)**
+**Target version:** v0.9.0 → v0.9.5 → v0.9.6
 **Complexity:** L
 **Goal:** Per-job tailored resume (`forge`) and cover letter (`petition`) for jobs that passed `judge`. Provisions for the crossing.
 
@@ -419,7 +419,7 @@ charon offerings --open --id N         # open offerings folder
 - [X] Forging prompt includes prompt-injection hardening directives
 - [X] Petition references company name and role title from discovery
 - [X] Offerings folder created — resume.md + forge_audit.md (9.1), cover_letter.md + petition_audit.md (9.2)
-- [ ] `charon provision --ready` requires explicit confirmation before bulk run (Phase 9.3)
+- [X] `charon provision --ready` requires explicit confirmation before bulk run
 - [X] Token usage logged per call (in prompt_used.md and CLI summary)
 - [X] Model routing works: profile.forge.model determines API target; openrouter: prefix supported
 - [X] Tests cover: fact preservation (verifier), prompt construction, model routing, force overwrite
@@ -553,6 +553,7 @@ Update this after every phase ships. Last entry on top.
 
 | Date | Version | Phase | Status | Notes |
 |---|---|---|---|---|
+| 2026-05-05 | 0.9.6 | 9.3 | shipped | `charon provision` (forge + petition wrapper) and `charon offerings` (browse materials). Phase 9 complete. 438 tests. |
 | 2026-05-05 | 0.9.5 | 9.2 | shipped | `charon petition` writes voice-tuned cover letters. Geographic-fabrication rule added after first live run hallucinated "I'm in the UK." 426 tests. Live: re-petitioned Coalfire honestly, surfaced UK-only requirement. |
 | 2026-05-05 | 0.9.0 | 9.1 | shipped | `charon forge` tailors resumes per ready discovery. Post-gen verifier flags fabricated numerical claims. 417 tests. Live: forged Coalfire SOC role at $0.005, verifier clean. |
 | 2026-05-05 | 0.8.5 | 8.5 | shipped | Resume match analyzer + weights + alignment_floor + reclassify + by-company + Ctrl+C fix. 392 tests. Live: Lever 92 → 14 (floor) → 6 ready (resume_match). |
