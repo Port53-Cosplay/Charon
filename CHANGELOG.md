@@ -4,7 +4,80 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Next: Phase 9 (`forge` + `petition`). See `ROADMAP.md` for plan.
+Next: Phase 9.2 (`petition` cover letters), then 9.3 (`provision` + `offerings`).
+
+## [0.9.0] — 2026-05-05
+
+Phase 9.1 ships. The funnel finally has a content-generation stage:
+`charon forge` produces a tailored resume per ready discovery, with a
+post-generation verifier that flags numerical claims not present in the
+source resume.
+
+### Added
+
+- **`charon forge` command.** `--id N` for one, `--ready` for all unforged
+  ready discoveries, `--ats <name>` to slice, `--force` to overwrite,
+  `--model` to override the configured model for a run, `--limit` to cap
+  batch size, `--yes` to skip the >20-discovery confirmation prompt.
+- **`charon/tailor.py`** with `forge_discovery`, `offerings_folder`,
+  `slugify`, `verify_against_source`. Reuses `load_resume_text` from
+  resume_match (md/txt/pdf/docx). Model routing mirrors enrich: bare
+  names use the native Anthropic SDK, `openrouter:vendor/model` prefix
+  routes through OpenRouter.
+- **Per-discovery offerings folder** at
+  `<offerings_dir>/<company-slug>-<role-slug>-<id>/` containing
+  `resume.md` (the tailored output) and `prompt_used.md` (full audit
+  trail: model, token usage, system prompt, user prompt, raw output,
+  verifier results).
+- **Forge prompt** explicitly forbids fabrication: every concrete fact
+  in the output (companies, dates, role titles, metrics, certifications,
+  technologies) must trace back to the source resume. The AI may reorder,
+  reframe, and emphasize, but not invent. Style guidance also bans
+  AI-slop ("leveraged," "spearheaded," uniform bullet length, etc.).
+- **Post-generation verifier.** Extracts every numerical claim from the
+  generated resume (counts, percentages, years, thousands-separator
+  numbers) and confirms each appears in the source under multiple
+  normalizations (with/without commas, with/without %, "30 percent"
+  variant). Unverified claims surface in the CLI as warnings and in
+  prompt_used.md as a marked section. Output is still written — the
+  user reviews before submitting.
+- **`forge` profile section** (`model`, `max_tokens`, `offerings_dir`)
+  with validation. Default model is `claude-haiku-4-5` per ADR-003.
+- **Judgement hints** flow into the forge prompt: the resume_match
+  analyzer's `overlap` list and role_alignment's `overlap` are surfaced
+  as "experience to emphasize," giving the AI explicit guidance about
+  which existing achievements to lead with.
+- **DB columns** `forged_at`, `offerings_path` and helper
+  `update_discovery_forged`. New helper `get_ready_discoveries` with
+  `unforged_only` flag for batch processing.
+- **HOWTO.md** gains a forge workflow section.
+
+### Verified live (2026-05-05)
+
+- Forged Coalfire "Associate, SOC Assessment" (#2607). 3,433 input /
+  1,325 output tokens (~$0.005 on Haiku). Verifier clean. Output
+  correctly framed Citi fraud-detection work as audit/assessment
+  experience, surfaced relevant certs in priority order (CISA
+  highlighted for SOC assessment), and avoided AI-slop language.
+
+### Tests
+
+- 25 new tests (392 → 417 total). Slugification edge cases, offerings
+  folder layout, verifier across normalization variants (commas,
+  percent, "30 percent" wording, year detection), forge_discovery
+  behavior (writes files, surfaces unverified claims, skips when
+  folder exists, `--force` overwrites, rejects non-ready discoveries,
+  rejects discoveries without descriptions, judgement hints in
+  prompt), and model routing (`openrouter:` vs bare).
+
+### Deferred to later phase 9 sub-releases
+
+- `charon petition` (cover letter) — Phase 9.2, ships as v0.9.5.
+  Will reuse the offerings folder convention and model routing
+  built here. DeAnna's voice traits from CLAUDE.md will inform the
+  cover-letter prompt specifically.
+- `charon provision` (forge + petition wrapper) and `charon offerings`
+  (show / open the materials folder) — Phase 9.3.
 
 ## [0.8.5] — 2026-05-05
 
@@ -288,7 +361,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.5...v0.9.0
 [0.8.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.0...v0.8.5
 [0.8.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.6.0...v0.7.0

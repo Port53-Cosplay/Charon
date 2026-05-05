@@ -63,6 +63,11 @@ from charon.screen import (
     list_by_status,
     reclassify_batch,
 )
+from charon.tailor import (
+    ForgeError,
+    forge_discovery,
+    offerings_folder,
+)
 
 
 @click.group()
@@ -2311,6 +2316,194 @@ def _print_judge_line(result: dict, threshold: float | None = None) -> None:
     reason = result.get("judgement_reason")
     if status == "rejected" and reason:
         console.print(f"      [dim]{reason}[/dim]")
+
+
+@cli.command("forge")
+@click.option("--id", "discovery_id", type=int, help="Forge a single discovery by ID.")
+@click.option("--ready", "forge_ready", is_flag=True,
+              help="Forge all unforged ready discoveries.")
+@click.option("--ats", help="Limit batch to one ATS.")
+@click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
+@click.option("--force", is_flag=True, help="Overwrite existing offerings folder.")
+@click.option("--model", "model_override", default=None,
+              help="Override forge.model for this run (e.g. claude-sonnet-4-20250514).")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
+def forge_cmd(
+    discovery_id: int | None,
+    forge_ready: bool,
+    ats: str | None,
+    limit: int | None,
+    force: bool,
+    model_override: str | None,
+    yes: bool,
+) -> None:
+    """Tailor a resume per ready discovery. Provisions for the crossing."""
+    if not discovery_id and not forge_ready:
+        print_error("Provide --id <N> or --ready.")
+        return
+
+    try:
+        prof = load_profile()
+    except ProfileError as e:
+        print_error(f"Profile error: {e}")
+        return
+
+    if not (prof.get("resume_path") or "").strip():
+        print_error(
+            "No resume configured. Set profile.resume_path to your resume file or directory.\n"
+            "Supported formats: .md, .txt, .pdf, .docx"
+        )
+        return
+
+    # ── single discovery ────────────────────────────────────────
+    if discovery_id is not None:
+        from charon.db import get_discovery, update_discovery_forged
+        discovery = get_discovery(discovery_id)
+        if discovery is None:
+            print_error(f"No discovery with id {discovery_id}.")
+            return
+
+        section_header(f"FORGE #{discovery_id}")
+        try:
+            result = forge_discovery(
+                discovery,
+                profile=prof,
+                model_override=model_override,
+                force=force,
+            )
+        except KeyboardInterrupt:
+            print_warning("Interrupted.")
+            return
+
+        _print_forge_result(result)
+        if result.get("offerings_path") and not result.get("error"):
+            update_discovery_forged(
+                discovery_id, offerings_path=result["offerings_path"]
+            )
+        return
+
+    # ── batch over ready discoveries ────────────────────────────
+    if forge_ready:
+        from charon.db import (
+            get_ready_discoveries,
+            update_discovery_forged,
+        )
+        targets = get_ready_discoveries(
+            ats=ats, unforged_only=not force, limit=limit
+        )
+        if not targets:
+            if force:
+                print_info("No ready discoveries to forge.")
+            else:
+                print_info(
+                    "Nothing to forge — all ready discoveries already have "
+                    "offerings folders. Use --force to regenerate."
+                )
+            return
+
+        # Bulk guardrail
+        if len(targets) > 20 and not yes:
+            est_low = 0.02 * len(targets)
+            est_high = 0.05 * len(targets)
+            print_warning(
+                f"About to forge {len(targets)} discoveries - "
+                f"roughly ${est_low:.2f}-${est_high:.2f} on Haiku "
+                f"(more on Sonnet)."
+            )
+            if not click.confirm("Proceed?", default=False):
+                print_info("Aborted. Use --yes to skip this prompt.")
+                return
+
+        section_header("FORGE BATCH")
+        scope = []
+        if ats:
+            scope.append(f"ats={ats}")
+        if force:
+            scope.append("force")
+        if limit:
+            scope.append(f"limit={limit}")
+        if model_override:
+            scope.append(f"model={model_override}")
+        if scope:
+            print_info("Scope: " + " ".join(scope))
+        print_info(f"Processing {len(targets)} discoveries...")
+        console.print()
+
+        results: list[dict] = []
+        try:
+            for discovery in targets:
+                result = forge_discovery(
+                    discovery,
+                    profile=prof,
+                    model_override=model_override,
+                    force=force,
+                )
+                _print_forge_result(result, terse=True)
+                if result.get("offerings_path") and not result.get("error"):
+                    update_discovery_forged(
+                        discovery["id"], offerings_path=result["offerings_path"]
+                    )
+                results.append(result)
+        except KeyboardInterrupt:
+            print_warning("Interrupted. Partial results written.")
+            return
+
+        console.print()
+        section_header("FORGE SUMMARY")
+        ok = sum(1 for r in results if r.get("offerings_path") and not r.get("error"))
+        skipped = sum(1 for r in results if r.get("skipped_reason"))
+        errors = sum(1 for r in results if r.get("error"))
+        warned = sum(1 for r in results if r.get("unverified_claims"))
+        total_in = sum((r.get("usage") or {}).get("input_tokens", 0) for r in results)
+        total_out = sum((r.get("usage") or {}).get("output_tokens", 0) for r in results)
+
+        if ok:
+            console.print(f"  [good]Forged:[/good]      {ok}")
+        if warned:
+            console.print(f"  [warning]With warnings:[/warning] {warned} (verifier flagged numerical claims)")
+        if skipped:
+            console.print(f"  [dim]Skipped:[/dim]     {skipped} (already forged; --force to overwrite)")
+        if errors:
+            console.print(f"  [danger]Errors:[/danger]      {errors}")
+        if total_in or total_out:
+            console.print(f"  [dim]Tokens:[/dim]      in={total_in} out={total_out}")
+
+
+def _print_forge_result(result: dict, terse: bool = False) -> None:
+    """One-line CLI render of a forge result."""
+    if result.get("error"):
+        print_error(result["error"])
+        return
+
+    discovery_id = result.get("discovery_id", "?")
+    folder = result.get("offerings_path", "?")
+    unverified = result.get("unverified_claims") or []
+
+    if result.get("skipped_reason"):
+        console.print(f"  [dim][~] #{discovery_id}: {result['skipped_reason']}[/dim]")
+        console.print(f"      [dim]{folder}[/dim]")
+        return
+
+    style = "warning" if unverified else "good"
+    marker = "[!]" if unverified else "[+]"
+
+    console.print(f"  [{style}]{marker}[/{style}] #{discovery_id} forged -> {folder}")
+    if unverified:
+        console.print(
+            f"      [warning]{len(unverified)} unverified numerical claim(s):[/warning] "
+            f"{', '.join(unverified[:5])}"
+            + (" ..." if len(unverified) > 5 else "")
+        )
+        console.print(
+            f"      [dim]Review prompt_used.md before submitting.[/dim]"
+        )
+    if not terse:
+        usage = result.get("usage") or {}
+        if usage:
+            console.print(
+                f"      [dim]tokens: in={usage.get('input_tokens', 0)} "
+                f"out={usage.get('output_tokens', 0)}[/dim]"
+            )
 
 
 @cli.command("daily")

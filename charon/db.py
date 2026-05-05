@@ -99,6 +99,8 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN judgement_detail TEXT",
     "ALTER TABLE discoveries ADD COLUMN judged_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN resume_match_score REAL",
+    "ALTER TABLE discoveries ADD COLUMN forged_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN offerings_path TEXT",
 ]
 
 
@@ -769,6 +771,53 @@ def get_judged_counts() -> dict[str, int]:
             "WHERE judged_at IS NOT NULL GROUP BY screened_status"
         ).fetchall()
         return {row["screened_status"]: row["count"] for row in rows}
+    finally:
+        conn.close()
+
+
+def update_discovery_forged(
+    discovery_id: int,
+    *,
+    offerings_path: str,
+) -> bool:
+    """Mark a discovery as forged and record where its offerings live."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET forged_at = ?, offerings_path = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), offerings_path, discovery_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_ready_discoveries(
+    ats: str | None = None,
+    unforged_only: bool = False,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Discoveries with screened_status='ready'. Optionally filter to those
+    not yet forged."""
+    clauses = ["screened_status = 'ready'", "judged_at IS NOT NULL"]
+    params: list[Any] = []
+    if unforged_only:
+        clauses.append("forged_at IS NULL")
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+
+    sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY combined_score DESC, discovered_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

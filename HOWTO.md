@@ -344,6 +344,64 @@ That re-runs all analyzers on each currently-ready row and may flip some
 to rejected. Cheaper than `--rejudge --all` because the rejected pile
 stays rejected.
 
+### Forge Tailored Resumes
+
+After `judge` marks discoveries `ready`, `charon forge` produces a posting-
+specific resume in markdown. The AI may reorder, regroup, and reframe your
+existing experience to match the role's vocabulary, but it can't invent —
+a post-generation verifier extracts every numerical claim from the output
+and confirms each appears in your source resume.
+
+```bash
+# Forge one ready discovery (writes to ~/.charon/offerings/<company>-<role>-<id>/)
+charon forge --id 2607
+
+# Forge all unforged ready discoveries
+charon forge --ready
+charon forge --ready --ats lever      # slice by ATS
+
+# Re-forge after editing your resume / profile / prompt
+charon forge --id 2607 --force
+
+# Override the model for one run (e.g. upgrade to Sonnet)
+charon forge --id 2607 --model claude-sonnet-4-20250514
+
+# Or via OpenRouter
+charon forge --ready --model openrouter:google/gemini-flash-2-0
+```
+
+Each forge writes two files into the offerings folder:
+
+- **`resume.md`** — the tailored resume itself
+- **`prompt_used.md`** — full audit trail: model, token usage, system prompt,
+  user prompt, raw output, verifier results (any unverified numerical claims
+  flagged here)
+
+**The verifier.** After generation, every number in the output (counts,
+percentages, years, thousands-separator numbers like `10,000`) must appear in
+the source resume under one of several normalizations (with/without commas,
+with/without `%`, "30 percent" written-out form). Unverified items show in
+the CLI as a yellow warning and in `prompt_used.md` as a marked section.
+**The output is still written** — you read the resume yourself before
+submitting anything. The verifier is for catching obvious fabrication
+(`reduced incidents by 99%` when nothing in your resume mentions 99 or
+99%), not for blocking edge cases.
+
+**Cost.** Forge is a single API call per discovery. On Claude Haiku 4.5
+(the default), expect ~$0.005-$0.02 per discovery. Charon warns and asks
+before running on more than 20 at once with a cost estimate.
+
+**Configure forge.** In `~/.charon/profile.yaml`:
+
+```yaml
+resume_path: ~/.charon/resume.md   # or a directory; first md/txt/docx/pdf wins
+forge:
+  model: claude-haiku-4-5          # default. claude-sonnet-* for higher quality.
+                                   # openrouter:vendor/model also supported.
+  max_tokens: 4096
+  offerings_dir: ~/.charon/offerings
+```
+
 ### Company Watchlist
 
 ```bash

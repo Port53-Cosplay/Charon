@@ -93,6 +93,11 @@ DEFAULT_PROFILE = {
         },
     },
     "resume_path": "",  # set to your resume file or directory; analyzer is skipped if unset
+    "forge": {
+        "model": "claude-haiku-4-5",
+        "max_tokens": 4096,
+        "offerings_dir": "~/.charon/offerings",
+    },
 }
 
 REQUIRED_KEYS = {"values", "dealbreakers", "yellow_flags", "green_flags"}
@@ -264,6 +269,20 @@ def validate_profile(profile: dict[str, Any]) -> None:
     resume_path = profile.get("resume_path")
     if resume_path is not None and not isinstance(resume_path, str):
         raise ProfileError("resume_path must be a string")
+
+    # Validate forge section
+    forge_cfg = profile.get("forge", {})
+    if isinstance(forge_cfg, dict):
+        model = forge_cfg.get("model")
+        if model is not None and not isinstance(model, str):
+            raise ProfileError("forge.model must be a string")
+        max_tokens = forge_cfg.get("max_tokens")
+        if max_tokens is not None:
+            if not isinstance(max_tokens, int) or max_tokens < 1:
+                raise ProfileError("forge.max_tokens must be a positive integer")
+        offerings_dir = forge_cfg.get("offerings_dir")
+        if offerings_dir is not None and not isinstance(offerings_dir, str):
+            raise ProfileError("forge.offerings_dir must be a string")
 
     # Validate notifications mail_to (string or list)
     notif = profile.get("notifications", {})
