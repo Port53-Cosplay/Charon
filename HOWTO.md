@@ -402,6 +402,59 @@ forge:
   offerings_dir: ~/.charon/offerings
 ```
 
+### Petition (Cover Letters)
+
+`charon petition` writes a tailored cover letter per ready discovery. The
+letter and the forged resume share the same offerings folder, so the two
+materials always travel together. The system prompt is voice-tuned to avoid
+sounding AI-generated — conversational over corporate, specific over
+abstract, varied sentence length, banned phrases include the obvious
+("passionate about," "I am writing to express my interest," "looking
+forward to hearing from you," "team player," "leverage" as a verb) and
+some less-obvious ones ("transferable skills," "proven track record").
+
+```bash
+# One ready discovery
+charon petition --id 2607
+
+# All unpetitioned ready discoveries
+charon petition --ready
+
+# Slice / cap / model override (same flags as forge)
+charon petition --ready --ats lever
+charon petition --id 2607 --force
+charon petition --id 2607 --model claude-sonnet-4-20250514
+```
+
+The output:
+- **`cover_letter.md`** — the letter
+- **`petition_audit.md`** — model, tokens, prompts, raw output, verifier
+  results
+
+The same numerical verifier from `forge` runs on the cover letter — any
+metric in the letter must trace back to your resume. **Geographic claims
+are also banned** in the prompt itself: the letter cannot claim you're
+located in or relocating to a city/country not on your resume. (This rule
+exists because an early petition fabricated "I'm in the UK" when the
+posting required UK residency. The corrected version honestly opened with
+the location mismatch instead.)
+
+If the verifier flags something, it logs the warning and writes the letter
+anyway — you read it before submitting. **Read every cover letter before
+sending it.** AI-written letters are obvious if you look. The voice-tuning
+gets you 80% of the way there; the last 20% is editing for cadence and
+specifics that only you know.
+
+**Configure petition.** Petition shares forge's profile section (same model,
+same tokens budget, same offerings dir):
+
+```yaml
+forge:
+  model: claude-haiku-4-5    # used by both forge and petition
+  max_tokens: 4096
+  offerings_dir: ~/.charon/offerings
+```
+
 ### Company Watchlist
 
 ```bash

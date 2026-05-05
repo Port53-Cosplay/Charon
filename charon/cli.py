@@ -68,6 +68,7 @@ from charon.tailor import (
     forge_discovery,
     offerings_folder,
 )
+from charon.letter import petition_discovery
 
 
 @click.group()
@@ -2496,6 +2497,192 @@ def _print_forge_result(result: dict, terse: bool = False) -> None:
         )
         console.print(
             f"      [dim]Review prompt_used.md before submitting.[/dim]"
+        )
+    if not terse:
+        usage = result.get("usage") or {}
+        if usage:
+            console.print(
+                f"      [dim]tokens: in={usage.get('input_tokens', 0)} "
+                f"out={usage.get('output_tokens', 0)}[/dim]"
+            )
+
+
+@cli.command("petition")
+@click.option("--id", "discovery_id", type=int, help="Petition a single discovery by ID.")
+@click.option("--ready", "petition_ready", is_flag=True,
+              help="Petition all unpetitioned ready discoveries.")
+@click.option("--ats", help="Limit batch to one ATS.")
+@click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
+@click.option("--force", is_flag=True, help="Overwrite existing cover letter.")
+@click.option("--model", "model_override", default=None,
+              help="Override forge.model for this run (cover letter shares forge config).")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
+def petition_cmd(
+    discovery_id: int | None,
+    petition_ready: bool,
+    ats: str | None,
+    limit: int | None,
+    force: bool,
+    model_override: str | None,
+    yes: bool,
+) -> None:
+    """Write a tailored cover letter per ready discovery. Plead your case to the gates."""
+    if not discovery_id and not petition_ready:
+        print_error("Provide --id <N> or --ready.")
+        return
+
+    try:
+        prof = load_profile()
+    except ProfileError as e:
+        print_error(f"Profile error: {e}")
+        return
+
+    if not (prof.get("resume_path") or "").strip():
+        print_error(
+            "No resume configured. Set profile.resume_path to your resume file or directory."
+        )
+        return
+
+    # ── single discovery ────────────────────────────────────────
+    if discovery_id is not None:
+        from charon.db import get_discovery, update_discovery_petitioned
+        discovery = get_discovery(discovery_id)
+        if discovery is None:
+            print_error(f"No discovery with id {discovery_id}.")
+            return
+
+        section_header(f"PETITION #{discovery_id}")
+        try:
+            result = petition_discovery(
+                discovery,
+                profile=prof,
+                model_override=model_override,
+                force=force,
+            )
+        except KeyboardInterrupt:
+            print_warning("Interrupted.")
+            return
+
+        _print_petition_result(result)
+        if result.get("letter_path") and not result.get("error"):
+            update_discovery_petitioned(
+                discovery_id, offerings_path=result.get("offerings_path")
+            )
+        return
+
+    # ── batch over ready discoveries ────────────────────────────
+    if petition_ready:
+        from charon.db import (
+            get_ready_discoveries,
+            update_discovery_petitioned,
+        )
+        targets = get_ready_discoveries(
+            ats=ats, unpetitioned_only=not force, limit=limit
+        )
+        if not targets:
+            if force:
+                print_info("No ready discoveries to petition.")
+            else:
+                print_info(
+                    "Nothing to petition - all ready discoveries already have "
+                    "cover letters. Use --force to regenerate."
+                )
+            return
+
+        # Bulk guardrail
+        if len(targets) > 20 and not yes:
+            est_low = 0.02 * len(targets)
+            est_high = 0.05 * len(targets)
+            print_warning(
+                f"About to petition {len(targets)} discoveries - "
+                f"roughly ${est_low:.2f}-${est_high:.2f} on Haiku."
+            )
+            if not click.confirm("Proceed?", default=False):
+                print_info("Aborted. Use --yes to skip this prompt.")
+                return
+
+        section_header("PETITION BATCH")
+        scope = []
+        if ats:
+            scope.append(f"ats={ats}")
+        if force:
+            scope.append("force")
+        if limit:
+            scope.append(f"limit={limit}")
+        if model_override:
+            scope.append(f"model={model_override}")
+        if scope:
+            print_info("Scope: " + " ".join(scope))
+        print_info(f"Processing {len(targets)} discoveries...")
+        console.print()
+
+        results: list[dict] = []
+        try:
+            for discovery in targets:
+                result = petition_discovery(
+                    discovery,
+                    profile=prof,
+                    model_override=model_override,
+                    force=force,
+                )
+                _print_petition_result(result, terse=True)
+                if result.get("letter_path") and not result.get("error"):
+                    update_discovery_petitioned(
+                        discovery["id"], offerings_path=result.get("offerings_path")
+                    )
+                results.append(result)
+        except KeyboardInterrupt:
+            print_warning("Interrupted. Partial results written.")
+            return
+
+        console.print()
+        section_header("PETITION SUMMARY")
+        ok = sum(1 for r in results if r.get("letter_path") and not r.get("error"))
+        skipped = sum(1 for r in results if r.get("skipped_reason"))
+        errors = sum(1 for r in results if r.get("error"))
+        warned = sum(1 for r in results if r.get("unverified_claims"))
+        total_in = sum((r.get("usage") or {}).get("input_tokens", 0) for r in results)
+        total_out = sum((r.get("usage") or {}).get("output_tokens", 0) for r in results)
+
+        if ok:
+            console.print(f"  [good]Petitioned:[/good]  {ok}")
+        if warned:
+            console.print(f"  [warning]With warnings:[/warning] {warned} (verifier flagged numerical claims)")
+        if skipped:
+            console.print(f"  [dim]Skipped:[/dim]     {skipped} (already petitioned; --force to overwrite)")
+        if errors:
+            console.print(f"  [danger]Errors:[/danger]      {errors}")
+        if total_in or total_out:
+            console.print(f"  [dim]Tokens:[/dim]      in={total_in} out={total_out}")
+
+
+def _print_petition_result(result: dict, terse: bool = False) -> None:
+    """One-line CLI render of a petition result."""
+    if result.get("error"):
+        print_error(result["error"])
+        return
+
+    discovery_id = result.get("discovery_id", "?")
+    folder = result.get("offerings_path", "?")
+    unverified = result.get("unverified_claims") or []
+
+    if result.get("skipped_reason"):
+        console.print(f"  [dim][~] #{discovery_id}: {result['skipped_reason']}[/dim]")
+        console.print(f"      [dim]{folder}[/dim]")
+        return
+
+    style = "warning" if unverified else "good"
+    marker = "[!]" if unverified else "[+]"
+
+    console.print(f"  [{style}]{marker}[/{style}] #{discovery_id} petitioned -> {folder}")
+    if unverified:
+        console.print(
+            f"      [warning]{len(unverified)} unverified numerical claim(s):[/warning] "
+            f"{', '.join(unverified[:5])}"
+            + (" ..." if len(unverified) > 5 else "")
+        )
+        console.print(
+            f"      [dim]Review petition_audit.md before submitting.[/dim]"
         )
     if not terse:
         usage = result.get("usage") or {}

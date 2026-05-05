@@ -4,7 +4,79 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Next: Phase 9.2 (`petition` cover letters), then 9.3 (`provision` + `offerings`).
+Next: Phase 9.3 (`provision` wrapper + `offerings` command), then Phase 10 (`manifest` dashboard).
+
+## [0.9.5] — 2026-05-05
+
+Phase 9.2 ships. The funnel produces both materials per ready discovery:
+the tailored resume from forge plus a voice-tuned cover letter from
+petition. Materials live side-by-side in the same offerings folder.
+
+### Added
+
+- **`charon petition` command.** `--id N` for one, `--ready` for all
+  unpetitioned ready discoveries, `--ats <name>` to slice, `--force` to
+  overwrite, `--model` to override the configured model, `--limit` to cap,
+  `--yes` to skip the >20-discovery confirmation prompt. Same surface as
+  `forge`.
+- **`charon/letter.py`** with `petition_discovery`. Reuses `tailor.py`'s
+  offerings folder convention, model routing (`openrouter:` prefix), audit
+  trail format, and verifier. Cover letter saves to `cover_letter.md`
+  alongside the existing `resume.md`. Audit lands at `petition_audit.md`.
+- **Voice-tuned system prompt.** Bakes in CLAUDE.md's DeAnna's Voice
+  traits: conversational over corporate, specific over abstract, varied
+  sentence length, contractions where natural, one associative aside is
+  fine but two is too many, light mythology only if it lands. Explicitly
+  bans corporate filler ("I am writing to express my interest,"
+  "passionate about," "team player," "Looking forward to hearing from
+  you," "leverage" as a verb, "spearheaded," "proven track record" etc.).
+  Structure is loose: opening with a real reason, middle with concrete
+  overlap and honest gap acknowledgment, close with a specific element to
+  discuss instead of generic gratitude.
+- **`petition_at` column** with `update_discovery_petitioned` helper.
+  `get_ready_discoveries` gains `unpetitioned_only` flag for batch
+  processing.
+- **Judgement-aware prompting.** The petition prompt receives the
+  resume_match analyzer's `overlap` (strengths to lead with), `gaps`
+  (to address honestly), role_alignment overlap, and any green flags
+  found by redflags — so the letter has concrete signal to lean on
+  instead of re-deriving everything from the resume + posting.
+
+### Fixed
+
+- **Geographic fabrication closed.** First live petition run fabricated
+  "I'm in the UK" when the Coalfire posting required UK residency. The
+  numerical verifier doesn't catch geographic claims, so the rule lives
+  in the prompt directly: do NOT claim the candidate is located in,
+  moving to, or based in any city/state/country not on the resume.
+  Regression test in `test_letter.py` pins the prompt rule. Re-running
+  the petition produced an honest letter that opened with the geographic
+  mismatch and offered a constructive alternative (US-based / remote).
+
+### Changed (small breaking)
+
+- **Audit filename standardized.** Forge's `prompt_used.md` renamed to
+  `forge_audit.md` for symmetry with petition's `petition_audit.md`.
+  Existing `prompt_used.md` files in offerings folders need a manual
+  rename (one-line `mv` per folder); only one folder existed at the time
+  of this release and it was renamed in place.
+
+### Verified live (2026-05-05)
+
+- Petitioned Coalfire "Associate, SOC Assessment" #2607. 4,010 input /
+  497 output tokens (~$0.005 on Haiku). First run flagged the geographic
+  fabrication; prompt was hardened mid-session; re-run produced an
+  honest letter that surfaced the UK requirement directly. Letter
+  voice landed: specific Citi metrics, real verbs, no corporate filler.
+
+### Tests
+
+- 9 new petition tests + the geographic-fabrication regression test
+  (417 → 426 total). Mocked AI, prompt construction (voice traits and
+  bans present in prompt, judgement hints flow through), file output
+  (cover_letter.md, petition_audit.md), force overwrite (touches
+  letter, leaves resume.md alone), non-ready rejection, missing
+  judgement_detail, verifier integration.
 
 ## [0.9.0] — 2026-05-05
 
@@ -361,7 +433,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.0...v0.9.5
 [0.9.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.5...v0.9.0
 [0.8.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.0...v0.8.5
 [0.8.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.7.0...v0.8.0

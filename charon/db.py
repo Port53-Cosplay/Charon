@@ -101,6 +101,7 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN resume_match_score REAL",
     "ALTER TABLE discoveries ADD COLUMN forged_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN offerings_path TEXT",
+    "ALTER TABLE discoveries ADD COLUMN petition_at TEXT",
 ]
 
 
@@ -796,14 +797,17 @@ def update_discovery_forged(
 def get_ready_discoveries(
     ats: str | None = None,
     unforged_only: bool = False,
+    unpetitioned_only: bool = False,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Discoveries with screened_status='ready'. Optionally filter to those
-    not yet forged."""
+    not yet forged or petitioned."""
     clauses = ["screened_status = 'ready'", "judged_at IS NOT NULL"]
     params: list[Any] = []
     if unforged_only:
         clauses.append("forged_at IS NULL")
+    if unpetitioned_only:
+        clauses.append("petition_at IS NULL")
     if ats:
         clauses.append("ats = ?")
         params.append(ats)
@@ -818,6 +822,37 @@ def get_ready_discoveries(
     try:
         rows = conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def update_discovery_petitioned(
+    discovery_id: int,
+    *,
+    offerings_path: str | None = None,
+) -> bool:
+    """Mark a discovery as petitioned. If offerings_path is provided and
+    the row doesn't already have one, set it (covers the case of running
+    petition before forge)."""
+    conn = get_connection()
+    try:
+        if offerings_path is not None:
+            cursor = conn.execute(
+                "UPDATE discoveries SET petition_at = ?, "
+                "offerings_path = COALESCE(offerings_path, ?) WHERE id = ?",
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    offerings_path,
+                    discovery_id,
+                ),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE discoveries SET petition_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), discovery_id),
+            )
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

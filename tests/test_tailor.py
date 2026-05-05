@@ -152,7 +152,7 @@ class TestForgeDiscovery:
         folder = Path(result["offerings_path"])
         assert folder.exists()
         assert (folder / "resume.md").exists()
-        assert (folder / "prompt_used.md").exists()
+        assert (folder / "forge_audit.md").exists()
         assert (folder / "resume.md").read_text(encoding="utf-8").startswith("# DeAnna Shanks")
         assert result["unverified_claims"] == []
         assert result["usage"]["input_tokens"] == 100
@@ -181,7 +181,7 @@ class TestForgeDiscovery:
         # File is still written — verifier warns, doesn't block
         assert Path(result["offerings_path"]).exists()
         # Audit file mentions the unverified claim
-        audit = (Path(result["offerings_path"]) / "prompt_used.md").read_text(encoding="utf-8")
+        audit = (Path(result["offerings_path"]) / "forge_audit.md").read_text(encoding="utf-8")
         assert "99%" in audit
         assert "unverified" in audit.lower()
 

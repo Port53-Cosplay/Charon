@@ -1,3 +1,3 @@
 """Charon — Getting you to the other side."""
 
-__version__ = "0.9.0"
+__version__ = "0.9.5"

@@ -517,8 +517,9 @@ def forge_discovery(
     folder.mkdir(parents=True, exist_ok=True)
     resume_out.write_text(generated, encoding="utf-8")
 
-    prompt_out = folder / "prompt_used.md"
+    audit_out = folder / "forge_audit.md"
     audit = _build_audit(
+        title="Forge Audit Trail",
         model=model,
         usage=usage,
         unverified=unverified,
@@ -527,13 +528,13 @@ def forge_discovery(
         generated=generated,
         discovery=discovery,
     )
-    prompt_out.write_text(audit, encoding="utf-8")
+    audit_out.write_text(audit, encoding="utf-8")
 
     return {
         "discovery_id": discovery.get("id"),
         "offerings_path": str(folder),
         "resume_path": str(resume_out),
-        "prompt_path": str(prompt_out),
+        "audit_path": str(audit_out),
         "unverified_claims": unverified,
         "usage": usage,
         "model": model,
@@ -542,6 +543,7 @@ def forge_discovery(
 
 def _build_audit(
     *,
+    title: str = "Audit Trail",
     model: str,
     usage: dict[str, int],
     unverified: list[str],
@@ -551,7 +553,7 @@ def _build_audit(
     discovery: dict[str, Any],
 ) -> str:
     parts = [
-        "# Forge Audit Trail",
+        f"# {title}",
         "",
         f"- **Generated:** {datetime.now(timezone.utc).isoformat()}",
         f"- **Model:** `{model}`",
