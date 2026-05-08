@@ -488,13 +488,31 @@ def discovery_exists(dedupe_hash: str) -> bool:
         conn.close()
 
 
+_ORDER_CLAUSES = {
+    "discovered_at": "discovered_at DESC",
+    # SQLite sorts NULLs last in DESC by default — judged rows have a score,
+    # any unjudged stragglers fall to the bottom.
+    "combined_score": "combined_score DESC, discovered_at DESC",
+}
+
+
 def get_discoveries(
     ats: str | None = None,
     slug: str | None = None,
     status: str | None = None,
     limit: int | None = None,
+    order_by: str = "discovered_at",
 ) -> list[dict[str, Any]]:
-    """Retrieve discoveries with optional filters."""
+    """Retrieve discoveries with optional filters.
+
+    `order_by` is a literal key into a whitelist (`discovered_at` or
+    `combined_score`) — never interpolate user input directly.
+    """
+    if order_by not in _ORDER_CLAUSES:
+        raise ValueError(
+            f"order_by must be one of {sorted(_ORDER_CLAUSES)}, got '{order_by}'."
+        )
+
     clauses: list[str] = []
     params: list[Any] = []
     if ats:
@@ -510,7 +528,7 @@ def get_discoveries(
     sql = "SELECT * FROM discoveries"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY discovered_at DESC"
+    sql += f" ORDER BY {_ORDER_CLAUSES[order_by]}"
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)

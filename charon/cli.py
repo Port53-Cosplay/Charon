@@ -2163,6 +2163,8 @@ def judge_cmd(
                 f"  [{style}]#{r['id']:<5}[/{style}] {score:5.1f}  "
                 f"{r['company']:<24} {r['role']}"
             )
+            if r.get("url"):
+                console.print(f"       [dim]{r['url']}[/dim]")
             if list_status == "rejected" and r.get("judgement_reason"):
                 console.print(f"       [dim]{r['judgement_reason']}[/dim]")
         console.print(f"\n  [dim]{len(rows)} discoveries[/dim]")

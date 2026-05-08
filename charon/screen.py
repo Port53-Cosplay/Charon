@@ -524,7 +524,7 @@ def list_by_status(
     if status not in {"ready", "rejected"}:
         raise JudgeError(f"status must be 'ready' or 'rejected', got '{status}'.")
 
-    rows = get_discoveries(ats=ats, status=status, limit=limit)
+    rows = get_discoveries(ats=ats, status=status, limit=limit, order_by="combined_score")
     # Filter to only judged rows (status='rejected' could match unjudged
     # discoveries that failed enrich; we want judged-only here).
     return [r for r in rows if r.get("judged_at")]
