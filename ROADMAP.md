@@ -584,6 +584,17 @@ start hurting.
   2026-05-07 and got "No such option". Fix: add `--slug` to enrich/judge for
   consistency; map slug -> ats internally.
 
+- **No tier filter on `judge`.** `judge` accepts `--ats` and `--limit` but
+  not `--tier`, so you can't say "judge tier_1 and tier_2 first" to spend
+  AI budget on the highest-signal rows before churning through the long
+  tail. Surfaced 2026-05-08 after the first full enrich finished: 5,038
+  enriched-but-unjudged rows broke down to 318 tier_1, 550 tier_2, 4,170
+  tier_3 — splitting by tier would have been the natural batch boundary,
+  but the only available splits were ATS (2,602 / 1,404 / 1,032) and
+  `--limit`. Worked around with `--limit` for a toe-dip. Fix: add `--tier`
+  (accepting `tier_1` / `tier_2` / `tier_3`, possibly repeatable) to
+  `judge`; consider mirroring on `enrich` for symmetry.
+
 ---
 
 ## 12. Status Tracker
