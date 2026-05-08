@@ -575,6 +575,15 @@ start hurting.
   uncrawlable. Check Point joins the block as of 2026-05-07 (custom PHP
   `cpcareers` system, ~269 jobs).
 
+- **Slug filter inconsistency across pipeline commands.** `gather` accepts
+  `--slug` but `enrich` and `judge` only accept `--id`, `--all`, or `--ats`.
+  After running `gather --slug <name>`, you have to drive the rest of the
+  pipeline with `--all` and rely on the "skip already-done rows" behavior to
+  hit only the new entries. Works in practice but the asymmetry is a memory
+  trap — flagged when DeAnna ran `enrich --slug guidepointsecurity` on
+  2026-05-07 and got "No such option". Fix: add `--slug` to enrich/judge for
+  consistency; map slug -> ats internally.
+
 ---
 
 ## 12. Status Tracker
