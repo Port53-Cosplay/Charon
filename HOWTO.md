@@ -6,6 +6,16 @@ Quick reference for using Charon day-to-day. Run all commands from any terminal.
 
 ---
 
+## TL;DR — forgot the workflow?
+
+```bash
+charon funnel
+```
+
+Prints the full pipeline (gather -> enrich -> judge -> provision -> offerings) with a working example for each step. Use it whenever you blank on what comes next.
+
+---
+
 ## Quick Start
 
 ```bash

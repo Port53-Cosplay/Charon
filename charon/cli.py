@@ -82,6 +82,50 @@ def cli() -> None:
     pass
 
 
+# ── funnel (workflow cheat sheet) ────────────────────────────────────
+
+
+@cli.command()
+def funnel() -> None:
+    """The funnel, in order. When you forget what comes next."""
+    console.print()
+    console.print("[header]The Funnel[/header]  [dim]gather -> enrich -> judge -> provision -> offerings[/dim]")
+    console.print("[dim]" + "-" * 70 + "[/dim]")
+
+    steps = [
+        ("1", "gather",    "Pull jobs from configured employers into the discoveries table.",
+            ["charon gather --slug <employer>      # one employer",
+             "charon gather                        # all configured employers",
+             "charon gather --add <url>            # add ad-hoc by careers URL"]),
+        ("2", "enrich",    "Fill in full job descriptions. JSON-LD -> ATS CSS -> LLM fallback.",
+            ["charon enrich --all                  # only un-enriched rows touched",
+             "charon enrich --ats greenhouse       # scope to one ATS"]),
+        ("3", "judge",     "Score each discovery: ghost + redflag + alignment + resume_match.",
+            ["charon judge --all                   # only un-judged rows touched",
+             "charon judge --list ready            # see who passed",
+             "charon judge --by-company            # patterns across employers"]),
+        ("4", "provision", "Forge tailored resume + petition cover letter for a ready job.",
+            ["charon provision --id <N>            # forge + petition together",
+             "charon forge --id <N>                # resume only",
+             "charon petition --id <N>             # cover letter only"]),
+        ("5", "offerings", "Find the generated materials on disk.",
+            ["charon offerings --id <N>            # show paths",
+             "charon offerings --id <N> --open     # open the folder"]),
+    ]
+
+    for num, name, desc, examples in steps:
+        console.print()
+        console.print(f"  [good]{num}.[/good] [header]{name}[/header]  [dim]{desc}[/dim]")
+        for ex in examples:
+            console.print(f"       [dim]$[/dim] {ex}")
+
+    console.print()
+    console.print("[dim]" + "-" * 70 + "[/dim]")
+    console.print("[dim]Per-command help:[/dim]  charon <command> --help")
+    console.print("[dim]Forgot this exists?:[/dim] charon funnel")
+    console.print()
+
+
 # ── profile ──────────────────────────────────────────────────────────
 
 
