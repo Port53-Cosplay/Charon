@@ -481,10 +481,8 @@ def dossier(company: str, save: bool) -> None:
         print_error(str(e))
         return
 
-    # Display results
-    _display_dossier(result, prof)
-
-    # Save to file if requested
+    # Save to file FIRST so a renderer crash doesn't lose AI-generated content
+    # (e.g. non-cp1252 chars like ₪ break Rich's legacy Windows renderer).
     if save:
         save_path = prof.get("dossier", {}).get("save_path", "~/.charon/dossiers/")
         try:
@@ -492,6 +490,9 @@ def dossier(company: str, save: bool) -> None:
             print_success(f"Dossier saved to {filepath}")
         except OSError as e:
             print_error(f"Failed to save dossier: {e}")
+
+    # Display results
+    _display_dossier(result, prof)
 
     # Save to history
     save_history("dossier", "company", company, result.get("weighted_score"), result, company=company)

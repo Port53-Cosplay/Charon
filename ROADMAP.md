@@ -547,6 +547,36 @@ Things that came up but aren't in v2. Revisit after v2 ships.
 
 ---
 
+## 11.5. Known Workflow Gaps (In-Scope, Not Yet Addressed)
+
+These are real gaps in the current workflow. They live here so they don't get
+lost — pick them up between phases or fold into a Phase 10.x patch when they
+start hurting.
+
+- **No location filter at the gather/judge stage.** User is remote-only but
+  Coalfire UK roles ranked highest in the first live judge run. Surfaced
+  2026-05-05 after Phase 9.2 shipped. Worked around by adding "requires
+  residence outside US" to dealbreakers, but that only takes effect on fresh
+  judges or `--rejudge`. Real fix: location matching as a first-class funnel
+  filter.
+
+- **No values-alignment screen before adding a company to the gather list.**
+  User is told about an employer (e.g. via referral), wants to add to
+  `companies.yaml`, but has to manually remember to run `charon dossier` to
+  check values fit before deciding tier (or whether to add at all). Surfaced
+  2026-05-07 when Check Point + GuidePoint Security came up as referrals.
+  Possible fix: `charon gather --add <url>` auto-prompts to run dossier first
+  if the company isn't already in the list, surfaces the values score, and
+  asks for tier confirmation.
+
+- **Proprietary ATS coverage.** `companies.yaml` TODO block lists 7 employers
+  whose ATS isn't one of the four supported (Greenhouse, Lever, Ashby,
+  Workday). Adding each requires either a new adapter or accepting they stay
+  uncrawlable. Check Point joins the block as of 2026-05-07 (custom PHP
+  `cpcareers` system, ~269 jobs).
+
+---
+
 ## 12. Status Tracker
 
 Update this after every phase ships. Last entry on top.

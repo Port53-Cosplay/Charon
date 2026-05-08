@@ -36,6 +36,9 @@ gather:
     # Bug bounty platforms (tier_1 per spec)
     - { slug: bugcrowd,             name: "Bugcrowd",            tier: tier_1, category: offsec,                    notes: "Bug bounty platform" }
 
+    # Security services / VAR / consulting
+    - { slug: guidepointsecurity,   name: "GuidePoint Security", tier: tier_1, category: security_product_general,  notes: "Security consulting/VAR. Broad role mix: AppSec, cloud, AI sec, PAM, vendor specialists. Dossier 76.1 (2026-05-07). Watch: regional culture varies. Slug 'guidepoint' is the financial-research firm — wrong company." }
+
     # Threat intel / TPRM / OSINT
     - { slug: censys,               name: "Censys",              tier: tier_2, category: threat_intel,              notes: "Internet scanning, attack surface" }
     - { slug: greynoiseintelligence, name: "GreyNoise",          tier: tier_2, category: threat_intel,              notes: "Slug correction: greynoiseintelligence (not greynoise)" }
@@ -179,6 +182,13 @@ gather:
 # - Palisade Research — known small org, likely posts via custom careers page
 # - Lakera         — was on Ashby as 'lakera', slug now 404s as of 2026-05-05;
 #                    careers page hides the ATS endpoint behind JS
+# - Check Point    — proprietary `cpcareers` PHP system at careers.checkpoint.com.
+#                    Server-rendered HTML, ~269 jobs. Adapter would need a custom
+#                    scraper (no public JSON API). Dossier 62.3 (2026-05-07): stock
+#                    -50% off 52wk high, below-market pay, no bug bounty despite
+#                    being a security co, downplayed Dec 2024 breach. Personal
+#                    referral on file but doesn't justify custom adapter cost on
+#                    its own. Revisit if score improves or DeAnna actively wants in.
 
 # ─── Bonus AI-research orgs (commented out, optional to enable) ─────────────
 # Found during verification probes but not in the original spec.
