@@ -796,18 +796,29 @@
       background: transparent;
       color: var(--gold-deep);
       border: 1px solid var(--gold);
-      padding: 8px 14px;
-      font-size: 13px;
-      font-weight: 500;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      font-size: 16px;
+      font-weight: 700;
       border-radius: 10px;
       cursor: pointer;
-      letter-spacing: 0.01em;
-      transition: background 0.12s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.12s ease, transform 0.08s ease;
       font-family: inherit;
     }
 
     .card .actions .salary-btn:hover { background: var(--gold-soft); }
-    .card .actions .salary-btn[disabled] { opacity: 0.7; cursor: wait; }
+    .card .actions .salary-btn:active { transform: scale(0.95); }
+    .card .actions .salary-btn[disabled] { opacity: 0.6; cursor: wait; }
+
+    /* When intel already exists, give the button a filled look so it reads
+       "this is done" vs "click to do" — same glyph, different weight. */
+    .card .actions .salary-btn.has-it {
+      background: var(--gold-soft);
+    }
 
     /* ── expandable detail section ───────────────────────────── */
 
@@ -1469,7 +1480,7 @@
 
       // Salary intel: also requires offerings folder (needs somewhere to save the .md)
       const salaryBtn = hasOfferings
-        ? `<button class="salary-btn" data-id="${d.id}">${d.has_salary ? "Refresh salary" : "Salary intel"}</button>`
+        ? `<button class="salary-btn${d.has_salary ? " has-it" : ""}" data-id="${d.id}" title="${d.has_salary ? "Refresh salary intel" : "Get salary intel for this role"}" aria-label="Salary intel">$</button>`
         : "";
 
       return `
@@ -2130,7 +2141,7 @@
       const btn = cardEl.querySelector(".salary-btn");
       if (!btn) return;
       btn.disabled = true;
-      btn.innerHTML = `<span class="prep-status">Researching<span class="dots"></span></span>`;
+      // Keep the $ visible; just dim it. The toast carries the progress message.
       showToast(`Pulling salary intel for #${id} — usually 20-40 seconds.`);
 
       try {
@@ -2151,7 +2162,6 @@
         renderList(data.ready || []);
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = "Salary intel";
         showToast("Couldn't fetch salary: " + e.message, true);
       }
     }
