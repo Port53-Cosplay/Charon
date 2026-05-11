@@ -175,16 +175,47 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
             {"status": s, "count": app_buckets.get(s, 0)}
             for s in breakdown_order
         ]
-        # Funnel waterfall — six stages, each a strict subset of the prior.
-        offered = app_buckets.get("offered", 0)
-        out["funnel"] = [
-            {"label": "Gathered",  "count": gathered,   "key": "gathered"},
-            {"label": "Judged",    "count": judged,     "key": "judged"},
-            {"label": "Ready",     "count": ready,      "key": "ready"},
-            {"label": "Applied",   "count": total_apps, "key": "applied"},
-            {"label": "Engaged",   "count": engaged,    "key": "engaged"},
-            {"label": "Offered",   "count": offered,    "key": "offered"},
+        # Sankey flow — discoveries.screened_status accounts for the
+        # post-judge fate of each row (ready / rejected / applied / etc.).
+        # The pre-judge tail (gathered minus judged) terminates here as
+        # "Pending" — un-judged discoveries we haven't decided on yet.
+        applied_from_funnel = sum(
+            1 for s in [
+                # screened_status='applied' on a discovery means the user
+                # marked it applied via the dashboard's bridge.
+            ]
+        )  # filled in below from a real query
+        # (Re-open the DB just for the funnel-applied count — keeps the
+        # main stats block readable.)
+        from charon.db import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM discoveries WHERE screened_status = 'applied'"
+            )
+            applied_from_funnel = cur.fetchone()[0]
+        finally:
+            conn.close()
+
+        pending = max(gathered - judged, 0)
+        # Nodes: id, label, layer, count
+        nodes = [
+            {"id": "gathered", "label": "Gathered", "layer": 0, "count": gathered},
+            {"id": "judged",   "label": "Judged",   "layer": 1, "count": judged},
+            {"id": "pending",  "label": "Pending",  "layer": 1, "count": pending},
+            {"id": "ready",    "label": "Ready",    "layer": 2, "count": ready},
+            {"id": "refused",  "label": "Refused",  "layer": 2, "count": refused},
+            {"id": "applied",  "label": "Applied",  "layer": 2, "count": applied_from_funnel},
         ]
+        links = [
+            {"source": "gathered", "target": "judged",  "value": judged},
+            {"source": "gathered", "target": "pending", "value": pending},
+            {"source": "judged",   "target": "ready",   "value": ready},
+            {"source": "judged",   "target": "refused", "value": refused},
+            {"source": "judged",   "target": "applied", "value": applied_from_funnel},
+        ]
+        out["sankey"] = {"nodes": nodes, "links": links}
         out["weekly"] = weekly
     return out
 

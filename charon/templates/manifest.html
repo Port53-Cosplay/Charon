@@ -344,57 +344,42 @@
       letter-spacing: 0.02em;
     }
 
-    /* Funnel waterfall — each row a "river crossing" */
-    .funnel-rows {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+    /* Sankey flow — braided currents through the funnel */
+    .sankey-svg {
+      display: block;
+      width: 100%;
+      height: auto;
     }
 
-    .funnel-row {
-      display: grid;
-      grid-template-columns: 90px 1fr 100px;
-      align-items: center;
-      gap: 14px;
+    .sankey-svg .sankey-node-rect {
+      fill: var(--plum);
+      transition: fill 0.12s ease;
     }
 
-    .funnel-row .stage {
-      font-size: 12px;
+    .sankey-svg .sankey-node-rect.dim { fill: var(--ink-faint); }
+
+    .sankey-svg .sankey-node-label {
+      font-family: 'Inter', sans-serif;
+      font-size: 11.5px;
       font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--ink-soft);
-      text-align: right;
+      fill: var(--ink);
     }
 
-    .funnel-bar {
-      height: 28px;
-      border-radius: 6px;
-      background: var(--lilac-soft);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .funnel-bar .fill {
-      position: absolute;
-      inset: 0;
-      width: 0%;
-      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-      background: linear-gradient(135deg, var(--plum-soft) 0%, var(--plum) 60%);
-    }
-
-    .funnel-row .count {
+    .sankey-svg .sankey-node-count {
+      font-family: 'Inter', sans-serif;
+      font-size: 10.5px;
+      fill: var(--ink-muted);
       font-variant-numeric: tabular-nums;
-      font-size: 13px;
-      color: var(--ink-soft);
-      font-weight: 500;
     }
 
-    .funnel-row .count .pct {
-      color: var(--ink-muted);
-      font-size: 11px;
-      margin-left: 4px;
+    .sankey-svg .sankey-link {
+      fill: none;
+      stroke-linecap: butt;
+      opacity: 0.55;
+      transition: opacity 0.15s ease;
     }
+
+    .sankey-svg .sankey-link:hover { opacity: 0.85; }
 
     /* Charts row — donut + time series side by side */
     .charts-row {
@@ -1245,9 +1230,9 @@
       </header>
 
       <div class="chart-panel">
-        <h3>The crossing</h3>
-        <div class="caption">Each tier of the Styx — who makes it across, who doesn't.</div>
-        <div class="funnel-rows" id="funnel-rows"></div>
+        <h3>The currents</h3>
+        <div class="caption">Tributaries of the Styx — souls splitting at each crossing.</div>
+        <svg id="sankey-svg" class="sankey-svg" viewBox="0 0 720 280" preserveAspectRatio="xMidYMid meet"></svg>
       </div>
 
       <div class="charts-row">
@@ -1501,31 +1486,111 @@
       ghosted:      "#C8C0D6",
     };
 
-    function renderFunnel(stages) {
-      const rows = document.getElementById("funnel-rows");
-      if (!stages || stages.length === 0) {
-        rows.innerHTML = `<div style="color:var(--ink-muted);font-size:12px">No data yet.</div>`;
+    function renderSankey(sankey) {
+      const svg = document.getElementById("sankey-svg");
+      if (!sankey || !sankey.nodes?.length) {
+        svg.innerHTML = `<text x="360" y="140" text-anchor="middle" fill="#8B7BA0" font-size="12">No flow yet — run a judge pass.</text>`;
         return;
       }
-      const top = Math.max(stages[0].count, 1);
-      rows.innerHTML = stages.map((s, i) => {
-        const pct = (s.count / top) * 100;
-        const prev = i > 0 ? stages[i - 1].count : null;
-        const dropPct = (prev && prev > 0) ? Math.round((s.count / prev) * 100) : null;
-        const dropLabel = dropPct !== null ? `<span class="pct">(${dropPct}%)</span>` : "";
-        return `
-          <div class="funnel-row">
-            <div class="stage">${escapeHtml(s.label)}</div>
-            <div class="funnel-bar"><div class="fill" data-pct="${pct.toFixed(2)}"></div></div>
-            <div class="count">${s.count.toLocaleString()}${dropLabel}</div>
-          </div>`;
-      }).join("");
-      // Animate bars in next frame
-      requestAnimationFrame(() => {
-        rows.querySelectorAll(".fill").forEach(el => {
-          el.style.width = el.getAttribute("data-pct") + "%";
+
+      // Layout constants (SVG coordinate space)
+      const W = 720, H = 280;
+      const pad = { top: 16, right: 100, bottom: 16, left: 100 };
+      const innerW = W - pad.left - pad.right;
+      const innerH = H - pad.top - pad.bottom;
+      const nodeWidth = 12;
+      const nodeGap = 14; // vertical gap between stacked nodes in a layer
+
+      // Group nodes by layer
+      const layers = {};
+      sankey.nodes.forEach(n => {
+        (layers[n.layer] = layers[n.layer] || []).push(n);
+      });
+      const layerNums = Object.keys(layers).map(Number).sort((a, b) => a - b);
+
+      // Scale: max layer total controls vertical extent
+      let maxLayerTotal = 0;
+      layerNums.forEach(ln => {
+        const total = layers[ln].reduce((acc, n) => acc + Math.max(n.count, 0), 0);
+        if (total > maxLayerTotal) maxLayerTotal = total;
+      });
+      // Enforce a minimum visible height per node so tiny counts don't vanish
+      const minNodeHeight = 6;
+      const scale = (count) => {
+        if (maxLayerTotal === 0) return 0;
+        // Reserve room for inter-node gaps in the densest layer
+        const availForBars = innerH - (layers[layerNums[0]].length - 1) * nodeGap;
+        const raw = (count / maxLayerTotal) * availForBars;
+        return Math.max(raw, count > 0 ? minNodeHeight : 0);
+      };
+
+      // Position each node: assign x by layer, y by stacking within layer
+      const nodeMap = {};
+      const layerCount = layerNums.length;
+      layerNums.forEach((ln, idx) => {
+        const xRatio = layerCount > 1 ? idx / (layerCount - 1) : 0;
+        const x = pad.left + xRatio * innerW - nodeWidth / 2;
+        const layerNodes = layers[ln];
+        const totalH = layerNodes.reduce((acc, n) => acc + scale(n.count), 0)
+                       + Math.max(0, (layerNodes.length - 1)) * nodeGap;
+        let y = pad.top + (innerH - totalH) / 2;
+        layerNodes.forEach(n => {
+          const h = scale(n.count);
+          nodeMap[n.id] = { ...n, x, y, h };
+          y += h + nodeGap;
         });
       });
+
+      // For each node, track running offsets for outgoing/incoming link bands
+      const outOffset = {};
+      const inOffset = {};
+      Object.keys(nodeMap).forEach(id => { outOffset[id] = 0; inOffset[id] = 0; });
+
+      // Color per layer-2 destination (the fates branch)
+      const TARGET_COLORS = {
+        ready:   "#6845A0",  // plum-soft
+        refused: "#C8C0D6",  // muted
+        applied: "#6BA890",  // green
+        pending: "#E4C77A",  // gold (waiting)
+        judged:  "#6845A0",
+      };
+
+      // Build link paths
+      const linkPaths = sankey.links.map(L => {
+        const src = nodeMap[L.source];
+        const tgt = nodeMap[L.target];
+        if (!src || !tgt) return "";
+        const w = scale(L.value);
+        const x0 = src.x + nodeWidth;
+        const x1 = tgt.x;
+        const y0 = src.y + outOffset[src.id] + w / 2;
+        const y1 = tgt.y + inOffset[tgt.id] + w / 2;
+        outOffset[src.id] += w;
+        inOffset[tgt.id] += w;
+        const mid = (x0 + x1) / 2;
+        const color = TARGET_COLORS[L.target] || "#D7C5EE";
+        // Cubic bezier with control points horizontal at the midpoint —
+        // makes the strand braid-curve cleanly without overshoot.
+        const d = `M ${x0} ${y0} C ${mid} ${y0}, ${mid} ${y1}, ${x1} ${y1}`;
+        return `<path class="sankey-link" d="${d}" stroke="${color}" stroke-width="${Math.max(w, 1)}"></path>`;
+      }).join("");
+
+      // Render nodes (rects + labels)
+      const nodeShapes = Object.values(nodeMap).map(n => {
+        const cls = (n.id === "pending" || n.id === "refused") ? "sankey-node-rect dim" : "sankey-node-rect";
+        const labelOnRight = n.layer === Math.max(...layerNums);
+        const labelX = labelOnRight ? n.x + nodeWidth + 8 : n.x - 8;
+        const anchor = labelOnRight ? "start" : "end";
+        const labelY = n.y + n.h / 2 - 2;
+        const countY = n.y + n.h / 2 + 12;
+        return `
+          <rect class="${cls}" x="${n.x}" y="${n.y}" width="${nodeWidth}" height="${n.h}" rx="2"></rect>
+          <text class="sankey-node-label" x="${labelX}" y="${labelY}" text-anchor="${anchor}">${escapeHtml(n.label)}</text>
+          <text class="sankey-node-count" x="${labelX}" y="${countY}" text-anchor="${anchor}">${n.count.toLocaleString()}</text>
+        `;
+      }).join("");
+
+      svg.innerHTML = linkPaths + nodeShapes;
     }
 
     function renderDonut(breakdown) {
@@ -1632,7 +1697,7 @@
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
         const s = data.stats || {};
-        renderFunnel(s.funnel || []);
+        renderSankey(s.sankey || null);
         renderDonut(s.breakdown || []);
         renderTimeSeries(s.weekly || []);
       } catch (e) {
