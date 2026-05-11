@@ -355,16 +355,32 @@ def get_application(app_id: int) -> dict[str, Any] | None:
         conn.close()
 
 
+STALEABLE_STATUSES = ("applied", "acknowledged", "responded", "interviewing")
+
+
 def get_stale_applications(days: int) -> list[dict[str, Any]]:
-    """Get applications in 'applied' status older than N days without ghosted notification."""
+    """Get applications that haven't moved in N days.
+
+    "Hasn't moved" means: status is non-terminal (applied / acknowledged /
+    responded / interviewing) and the row hasn't been touched (`updated_at`)
+    in `days` days. Anchored to `updated_at` rather than `applied_at` so a
+    real status change resets the clock — an acknowledgment email yesterday
+    doesn't count as 21-day silence.
+
+    Excludes:
+      - 'offered'  — positive terminal state, don't auto-ghost
+      - 'rejected' — already terminal
+      - 'ghosted'  — already terminal
+    """
+    placeholders = ",".join("?" for _ in STALEABLE_STATUSES)
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM applications "
-            "WHERE status = 'applied' AND ghosted_notified = 0 "
-            "AND julianday('now') - julianday(applied_at) >= ? "
-            "ORDER BY applied_at",
-            (days,),
+            f"SELECT * FROM applications "
+            f"WHERE status IN ({placeholders}) AND ghosted_notified = 0 "
+            f"AND julianday('now') - julianday(updated_at) >= ? "
+            f"ORDER BY updated_at",
+            (*STALEABLE_STATUSES, days),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:

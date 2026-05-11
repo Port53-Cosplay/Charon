@@ -49,6 +49,132 @@ def _ready_discoveries() -> list[dict[str, Any]]:
     return [_summarize_discovery(r) for r in rows]
 
 
+def _applications() -> list[dict[str, Any]]:
+    """Fetch tracked applications, with best-effort back-link to the
+    discovery row so the dashboard can offer "Open folder" /
+    "Find contacts" buttons on applications that came from the funnel.
+
+    The link is by exact (company, role) match — applications don't carry
+    a discovery_id today. Manually-typed `apply --add` rows that don't
+    match a discovery just won't get the offering-side actions.
+    Logged as a §11.5 candidate for a real FK later.
+    """
+    from datetime import datetime, timezone
+    from charon.contacts import CONTACTS_FILENAME
+    from charon.db import get_applications, get_connection
+
+    apps = get_applications()
+    if not apps:
+        return []
+
+    # One-shot lookup: company+role -> (discovery_id, offerings_path)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, company, role, offerings_path FROM discoveries "
+            "WHERE offerings_path IS NOT NULL OR screened_status = 'applied'"
+        ).fetchall()
+    finally:
+        conn.close()
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in rows:
+        key = ((r["company"] or "").strip().lower(), (r["role"] or "").strip().lower())
+        by_key[key] = {
+            "discovery_id": r["id"],
+            "offerings_path": r["offerings_path"],
+        }
+
+    now = datetime.now(timezone.utc)
+    out: list[dict[str, Any]] = []
+    for app in apps:
+        key = ((app.get("company") or "").strip().lower(),
+               (app.get("role") or "").strip().lower())
+        link = by_key.get(key) or {}
+        offerings_path = link.get("offerings_path")
+
+        has_contacts = False
+        if offerings_path:
+            try:
+                has_contacts = (Path(offerings_path) / CONTACTS_FILENAME).exists()
+            except OSError:
+                has_contacts = False
+
+        days_since = None
+        applied_at = app.get("applied_at")
+        if applied_at:
+            try:
+                applied_dt = datetime.fromisoformat(applied_at.replace("Z", "+00:00"))
+                if applied_dt.tzinfo is None:
+                    applied_dt = applied_dt.replace(tzinfo=timezone.utc)
+                days_since = (now - applied_dt).days
+            except (ValueError, AttributeError):
+                pass
+
+        out.append({
+            "id": app["id"],
+            "company": app["company"],
+            "role": app["role"],
+            "url": app.get("url"),
+            "status": app.get("status"),
+            "applied_at": applied_at,
+            "updated_at": app.get("updated_at"),
+            "notes": app.get("notes"),
+            "days_since": days_since,
+            "discovery_id": link.get("discovery_id"),
+            "offerings_path": offerings_path,
+            "has_offerings": bool(offerings_path),
+            "has_contacts": has_contacts,
+        })
+    return out
+
+
+def _ghost_check() -> dict[str, Any]:
+    """Run the stale-applications sweep from the dashboard.
+
+    Reads `applications.ghosted_after_days` from the profile (default 21),
+    flips qualifying rows to 'ghosted', and returns a summary of what was
+    touched alongside the refreshed applications list.
+    """
+    from charon.apply import ApplyError, check_ghosted
+    from charon.profile import load_profile
+
+    try:
+        prof = load_profile()
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Profile error: {e}") from e
+
+    days = int((prof.get("applications") or {}).get("ghosted_after_days", 21))
+    try:
+        ghosted = check_ghosted(days)
+    except ApplyError as e:
+        raise DashboardError(str(e)) from e
+
+    return {
+        "days": days,
+        "ghosted": [
+            {"id": app["id"], "company": app["company"], "role": app["role"]}
+            for app in ghosted
+        ],
+        "count": len(ghosted),
+    }
+
+
+def _update_status(app_id: int, status: str) -> dict[str, Any]:
+    """Bridge for updating an application's status from the dashboard."""
+    from charon.db import VALID_STATUSES, get_application, update_application_status
+
+    if status not in VALID_STATUSES:
+        raise DashboardError(
+            f"Invalid status '{status}'. "
+            f"Valid: {', '.join(sorted(VALID_STATUSES))}"
+        )
+    ok = update_application_status(app_id, status)
+    if not ok:
+        raise DashboardError(f"No application with id {app_id}.")
+    app = get_application(app_id) or {}
+    return {"id": app_id, "status": app.get("status")}
+
+
 def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
     """Cherry-pick fields the dashboard cares about — keeps the JSON tight."""
     from charon.contacts import CONTACTS_FILENAME
@@ -285,6 +411,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
             return
+        if path == "/api/applications":
+            self._serve_json({"applications": _applications()})
+            return
         self._serve_status(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:
@@ -349,6 +478,34 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json(
                 {"ok": True, "contacts": summary, "ready": _ready_discoveries()}
             )
+            return
+        if path == "/api/ghost-check":
+            try:
+                summary = _ghost_check()
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json(
+                {"ok": True, "summary": summary, "applications": _applications()}
+            )
+            return
+        if path.startswith("/api/applications/") and path.endswith("/status"):
+            try:
+                app_id = int(path.split("/")[-2])
+            except (ValueError, IndexError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "application id must be an integer")
+                return
+            body = self._read_json_body() or {}
+            new_status = body.get("status") if isinstance(body, dict) else None
+            if not new_status or not isinstance(new_status, str):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "status (string) is required")
+                return
+            try:
+                rec = _update_status(app_id, new_status)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "updated": rec, "applications": _applications()})
             return
         if path.startswith("/api/open-offerings/"):
             try:
