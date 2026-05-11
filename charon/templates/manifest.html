@@ -174,6 +174,52 @@
 
     .tab-pane[hidden] { display: none; }
 
+    /* ── stats band ──────────────────────────────────────────── */
+
+    .stats-band {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 0;
+      background: var(--paper);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 18px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .stats-band .stat {
+      flex: 1 1 auto;
+      min-width: 96px;
+      padding: 0 14px;
+      border-right: 1px solid var(--card-border);
+    }
+
+    .stats-band .stat:last-child { border-right: none; }
+
+    .stats-band .stat .num {
+      font-family: 'Fraunces', Georgia, serif;
+      font-weight: 600;
+      font-size: 22px;
+      color: var(--plum);
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-band .stat .label {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-top: 2px;
+    }
+
+    .stats-band .stat.dim .num { color: var(--ink-soft); }
+
+    .stats-band .stat .num.placeholder { color: var(--ink-faint); }
+
     .pane-toolbar {
       display: flex;
       gap: 10px;
@@ -389,6 +435,45 @@
       background: var(--lilac-soft);
       color: var(--plum-soft);
       border-color: var(--lilac);
+    }
+
+    .card .actions .unreject-btn {
+      background: var(--lilac-soft);
+      color: var(--plum);
+      border: 1px solid var(--lilac);
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: background 0.12s ease;
+      font-family: inherit;
+    }
+
+    .card .actions .unreject-btn:hover { background: var(--lilac); }
+    .card .actions .unreject-btn[disabled] { opacity: 0.7; cursor: wait; }
+
+    .card.refused .head .reason-tag {
+      background: var(--bg-soft);
+      color: var(--ink-muted);
+      font-size: 11.5px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      max-width: 280px;
+      white-space: normal;
+      font-style: italic;
+    }
+
+    .card.refused .refused-reason {
+      background: var(--bg-soft);
+      border-left: 3px solid var(--ink-faint);
+      padding: 8px 12px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: var(--ink-soft);
+      border-radius: 0 8px 8px 0;
     }
 
     .card .actions .prep-btn {
@@ -869,10 +954,22 @@
         <button class="tab" data-tab="applications">
           <span>Applied</span><span class="tab-count" id="count-applications">—</span>
         </button>
+        <button class="tab" data-tab="refused">
+          <span>Refused</span><span class="tab-count" id="count-refused">—</span>
+        </button>
       </nav>
     </aside>
 
     <main class="main">
+      <div id="stats-band" class="stats-band">
+        <div class="stat dim"><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div></div>
+        <div class="stat dim"><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div></div>
+        <div class="stat"><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
+        <div class="stat"><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
+        <div class="stat dim"><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
+        <div class="stat"><div class="num placeholder" id="stat-reply-rate">—</div><div class="label">Reply rate</div></div>
+      </div>
+
       <section class="tab-pane" data-pane="ready">
         <div id="list-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading…</div>
@@ -885,6 +982,12 @@
         </div>
         <div id="applications-container" class="applications-list">
           <div class="state"><div class="glyph">·</div>Loading applications…</div>
+        </div>
+      </section>
+
+      <section class="tab-pane" data-pane="refused" hidden>
+        <div id="refused-container" class="ready-list">
+          <div class="state"><div class="glyph">·</div>Loading refused discoveries…</div>
         </div>
       </section>
     </main>
@@ -1084,6 +1187,141 @@
       container.innerHTML = ready.map(renderCard).join("");
     }
 
+    // ── Stats band ─────────────────────────────────────────────
+
+    function setStat(id, value, isPercent = false) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (value === null || value === undefined) {
+        el.classList.add("placeholder");
+        el.textContent = "—";
+      } else {
+        el.classList.remove("placeholder");
+        el.textContent = isPercent ? `${value}%` : String(value);
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const r = await fetch("/api/stats");
+        if (!r.ok) return;
+        const data = await r.json();
+        const s = data.stats || {};
+        setStat("stat-gathered", s.gathered);
+        setStat("stat-judged", s.judged);
+        setStat("stat-ready", s.ready);
+        setStat("stat-applied", s.applied_total);
+        setStat("stat-stranded", s.stranded);
+        setStat("stat-reply-rate", s.reply_rate, true);
+      } catch (e) { /* silent — stats are decorative */ }
+    }
+
+    // ── Refused tab ────────────────────────────────────────────
+
+    function renderRefusedCard(d) {
+      const fScore = d.combined_score != null ? d.combined_score.toFixed(1) : "—";
+      const subScores = [
+        pip("G", d.ghost_score),
+        pip("R", d.redflag_score),
+        pip("A", d.alignment_score),
+        pip("Rs", d.resume_match_score),
+      ].join("");
+      const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
+      const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
+      const location = d.location ? `<div class="location">${escapeHtml(d.location)}</div>` : "";
+      const posting = d.url
+        ? `<a class="posting-link" href="${escapeHtml(d.url)}" target="_blank" rel="noopener">View posting →</a>`
+        : "";
+      const reason = d.judgement_reason
+        ? `<div class="refused-reason">${escapeHtml(d.judgement_reason)}</div>`
+        : "";
+
+      return `
+        <article class="card refused" data-id="${d.id}">
+          <div class="head">
+            <div class="titles">
+              <div class="company">${escapeHtml(d.company)} <span class="id">· #${d.id}</span></div>
+              <div class="role">${escapeHtml(d.role)}</div>
+            </div>
+            <div class="score">${fScore}</div>
+          </div>
+          ${location}
+          <div class="meta">
+            ${subScores}
+            ${tierBadge}
+            ${atsBadge}
+          </div>
+          ${reason}
+          <div class="actions">
+            ${posting}
+            <button class="unreject-btn" data-id="${d.id}">Send to ready</button>
+          </div>
+          <button class="expand-toggle" data-id="${d.id}">
+            <span class="chev">▸</span><span class="expand-label">Show details</span>
+          </button>
+          ${detailHtml(d)}
+        </article>
+      `;
+    }
+
+    function renderRefused(refused) {
+      const container = document.getElementById("refused-container");
+      document.getElementById("count-refused").textContent = refused.length;
+      if (refused.length === 0) {
+        container.innerHTML = `
+          <div class="state">
+            <div class="glyph">·</div>
+            No refused discoveries. (Or none in the most recent 200.)
+          </div>`;
+        return;
+      }
+      container.innerHTML = refused.map(renderRefusedCard).join("");
+    }
+
+    async function loadRefused() {
+      try {
+        const r = await fetch("/api/refused");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        renderRefused(data.refused || []);
+      } catch (e) {
+        document.getElementById("refused-container").innerHTML = `
+          <div class="state">
+            <div class="glyph">·</div>
+            Couldn't load refused list. ${escapeHtml(e.message)}
+          </div>`;
+      }
+    }
+
+    async function unrejectDiscovery(id, cardEl) {
+      cardEl.classList.add("is-applying");
+      const btn = cardEl.querySelector(".unreject-btn");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Sending…";
+      }
+      try {
+        const r = await fetch(`/api/unreject/${id}`, { method: "POST" });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        cardEl.classList.add("is-gone");
+        showToast(`#${id} sent back to Ready.`);
+        setTimeout(() => {
+          renderRefused(data.refused || []);
+          renderList(data.ready || []);
+          loadStats();
+        }, 320);
+      } catch (e) {
+        cardEl.classList.remove("is-applying");
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Send to ready";
+        }
+        showToast("Couldn't un-refuse: " + e.message, true);
+      }
+    }
+
     // ── Applications tab ───────────────────────────────────────
 
     const STATUS_LABELS = {
@@ -1245,6 +1483,8 @@
       });
       if (name === "applications") loadApplications();
       if (name === "ready") loadReady();
+      if (name === "refused") loadRefused();
+      loadStats();
     }
 
     async function loadReady() {
@@ -1437,6 +1677,15 @@
         return;
       }
 
+      // Un-refuse (Refused tab → back to Ready)
+      const unrejectBtn = ev.target.closest(".unreject-btn");
+      if (unrejectBtn && !unrejectBtn.disabled) {
+        const card = unrejectBtn.closest(".card");
+        const id = unrejectBtn.getAttribute("data-id");
+        if (id && card) unrejectDiscovery(id, card);
+        return;
+      }
+
       // Mark applied
       const applyBtn = ev.target.closest(".apply-btn");
       if (applyBtn) {
@@ -1527,6 +1776,8 @@
 
     loadReady();
     loadApplications();
+    loadRefused();
+    loadStats();
   </script>
 </body>
 </html>

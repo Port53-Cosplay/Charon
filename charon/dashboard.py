@@ -61,6 +61,88 @@ def _ready_discoveries() -> list[dict[str, Any]]:
     return [_summarize_discovery(r) for r in rows]
 
 
+def _refused_discoveries(limit: int = 200) -> list[dict[str, Any]]:
+    """Discoveries the judge filtered out — 'refused' in the UI's voice.
+
+    Capped by default since a long judge run can produce thousands of
+    refusals and they're an audit view, not the daily flow.
+    """
+    from charon.db import get_discoveries
+
+    rows = get_discoveries(status="rejected", order_by="combined_score", limit=limit)
+    rows = [r for r in rows if r.get("judged_at")]
+    return [_summarize_discovery(r) for r in rows]
+
+
+def _unreject_discovery(discovery_id: int) -> dict[str, Any]:
+    """Flip a refused discovery back to ready (override the judge).
+
+    Doesn't re-judge — keeps the existing scores and reason for context.
+    """
+    from charon.db import get_connection, get_discovery
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+    if discovery.get("screened_status") != "rejected":
+        raise DashboardError(
+            f"Discovery #{discovery_id} isn't refused (status={discovery.get('screened_status')})."
+        )
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE discoveries SET screened_status = 'ready' WHERE id = ?",
+            (discovery_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": discovery_id, "new_status": "ready"}
+
+
+def _stats() -> dict[str, Any]:
+    """Pipeline-wide counters for the stats band.
+
+    All counts are over the lifetime of the DB — no time window. Gives a
+    sense of the funnel's shape: how many came in, how many made it through.
+    """
+    from charon.db import get_connection
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM discoveries")
+        gathered = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM discoveries WHERE judged_at IS NOT NULL")
+        judged = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'ready'")
+        ready = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'rejected'")
+        refused = cur.fetchone()[0]
+        cur.execute("SELECT status, COUNT(*) FROM applications GROUP BY status")
+        app_buckets = dict(cur.fetchall())
+    finally:
+        conn.close()
+
+    total_apps = sum(app_buckets.values())
+    stranded = app_buckets.get("ghosted", 0)
+    pending = app_buckets.get("applied", 0)
+    engaged = total_apps - stranded - pending
+    reply_rate = (engaged / total_apps * 100.0) if total_apps else None
+
+    return {
+        "gathered": gathered,
+        "judged": judged,
+        "ready": ready,
+        "refused": refused,
+        "applied_total": total_apps,
+        "stranded": stranded,
+        "pending": pending,
+        "engaged": engaged,
+        "reply_rate": round(reply_rate, 1) if reply_rate is not None else None,
+    }
+
+
 ARCHIVE_DAYS = 45
 TERMINAL_STATUSES_FOR_ARCHIVE = ("ghosted", "rejected", "offered")
 
@@ -545,6 +627,12 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
             return
+        if path == "/api/refused":
+            self._serve_json({"refused": _refused_discoveries()})
+            return
+        if path == "/api/stats":
+            self._serve_json({"stats": _stats()})
+            return
         if path == "/api/applications":
             qs = urllib.parse.parse_qs(parsed.query or "")
             include_archived = qs.get("archived", ["0"])[0] in {"1", "true", "yes"}
@@ -570,6 +658,24 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, "application": app, "ready": _ready_discoveries()})
+            return
+        if path.startswith("/api/unreject/"):
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            try:
+                rec = _unreject_discovery(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({
+                "ok": True,
+                "unrejected": rec,
+                "ready": _ready_discoveries(),
+                "refused": _refused_discoveries(),
+            })
             return
         if path.startswith("/api/reject/"):
             try:
