@@ -432,10 +432,11 @@ charon offerings --open --id N         # open offerings folder
 
 ---
 
-### Phase 10 — `manifest` `[ ]`
+### Phase 10 — `manifest` `[~]` (mid-build)
 **Target version:** v0.10.0
 **Complexity:** L
 **Goal:** Local HTML dashboard showing the funnel end-to-end. The ferryman's passenger manifest.
+**Status:** First slice shipped (uncommitted at time of writing) — Ready tab with apply / reject / prep-materials / open-folder / find-contacts. Render module (`charon/render.py`) and contacts helper (`charon/contacts.py`) supporting it. Remaining: Gathered / Judged / Provisioned / Crossed tabs, stats panel, detail view, Sirens tab, voice-block migration in `profile.yaml`. See CHANGELOG.md [Unreleased] for the shipped bits.
 
 **Scope:**
 - New module: `charon/dashboard.py` (CLI command name: `manifest`; Python `http.server` based)

@@ -4,7 +4,78 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Next: Phase 10 (`manifest` HTML dashboard).
+Phase 10 is mid-build. The dashboard ships in its first usable form
+alongside the supporting deterministic-render layer and a small
+LinkedIn-contacts surfacing helper.
+
+### Added
+
+- **`charon manifest`** — local HTTP dashboard. Default port 7777,
+  auto-opens browser, binds to loopback only. Single "Ready" tab in
+  this cut: score-sorted cards with score badges, sub-score pips,
+  ATS/tier/materials badges, and per-card actions:
+  - **Mark applied** — bridge that writes the application row AND flips
+    the discovery's `screened_status` to `applied` atomically. Applied
+    jobs drop off the ready list immediately.
+  - **Not for me** — soft rejection with an optional "why?" textarea.
+    Reason persists to `judgement_reason` for future filtering.
+  - **Prep materials** (on cards without offerings) — runs forge +
+    petition + render server-side, ~30s, card refreshes when done.
+  - **Open folder** (on cards with offerings) — opens the offering's
+    folder via `click.launch`.
+  - **Find contacts** (on cards with offerings) — runs the LinkedIn
+    contact search, saves to `linkedin_contacts.md`, adds a "contacts"
+    badge to the card.
+- **`charon render`** — deterministic markdown → styled HTML for an
+  offering's `resume.md` and `cover_letter.md`. Pure Python via
+  `markdown-it-py` token walk + section dispatch — no AI calls. CSS is
+  inlined so each `.html` is a self-contained file ready for browser
+  print-to-PDF. The shared stylesheet lives at
+  `charon/templates/charon-document-style.css` (deep-purple accent,
+  IBM Plex Sans, US Letter @page rules). Cover letter falls back to
+  sibling `resume.md` for identity (tagline + contact rows) when the
+  petition output is identity-light. 31 new tests.
+- **`charon contacts --id <N>`** — surfaces recruiters / hiring
+  managers / team members at the company for a specific offering
+  and saves a categorized markdown list to its folder. Wraps the
+  existing `dossier.find_contacts` web-search helper; opt-in so the
+  per-call web-search cost (~$0.10-$0.20) is only paid for roles
+  you actually want to outreach for.
+
+### Changed
+
+- **`charon provision` auto-renders**. After forge + petition succeed,
+  provision automatically calls `render_offering(id)` so `.html`
+  files land alongside the `.md` files in one step. Render is
+  best-effort: failures surface as warnings, they don't roll back
+  forge or petition.
+- **`charon judge --list ready/rejected`** now sorts by `combined_score
+  DESC` (was `discovered_at DESC`) and prints the posting URL beneath
+  each row. The ready list is now genuinely an "apply to these, in
+  this order" view.
+
+### Docs / planning
+
+- **Sirens** specced into Phase 10 in ROADMAP §10 — voice-true
+  LinkedIn post writer embedded as a 5th tab in `manifest`, with
+  voice prompt migrating to `profile.yaml` (canonical source for both
+  Sirens and petition).
+- **ROADMAP §11.5 (Known Workflow Gaps)** picked up two entries:
+  - No `--tier` filter on `judge` (can't say "judge tier_1 first").
+  - No discovery <-> application bridge in the CLI: `apply --add` still
+    requires manual `--company`/`--role`/`--url` (the dashboard's
+    Mark Applied button is the only place this is closed today).
+- `charon funnel` cheat sheet grew steps 6 (render) and 7 (manifest).
+- HOWTO.md adds sections for render, contacts, and the manifest
+  dashboard.
+
+### Dependencies
+
+- Added `markdown-it-py >= 3.0` (used by `charon render`). Already a
+  common transitive dep; small, pure-Python, no native build.
+
+Next: more tabs on the dashboard (Gathered / Judged / Provisioned /
+Crossed) and the Sirens tab.
 
 ## [0.9.6] — 2026-05-05
 

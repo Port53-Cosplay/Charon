@@ -51,6 +51,16 @@ def _ready_discoveries() -> list[dict[str, Any]]:
 
 def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
     """Cherry-pick fields the dashboard cares about — keeps the JSON tight."""
+    from charon.contacts import CONTACTS_FILENAME
+
+    offerings_path = r.get("offerings_path")
+    has_contacts = False
+    if offerings_path:
+        try:
+            has_contacts = (Path(offerings_path) / CONTACTS_FILENAME).exists()
+        except OSError:
+            has_contacts = False
+
     return {
         "id": r["id"],
         "company": r["company"],
@@ -64,9 +74,10 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "resume_match_score": _round1(r.get("resume_match_score")),
         "tier": r.get("tier"),
         "ats": r.get("ats"),
-        "offerings_path": r.get("offerings_path"),
+        "offerings_path": offerings_path,
         "forged_at": r.get("forged_at"),
         "petition_at": r.get("petition_at"),
+        "has_contacts": has_contacts,
     }
 
 
@@ -128,6 +139,115 @@ def _reject_discovery(discovery_id: int, reason: str | None) -> dict[str, Any]:
     return {"id": discovery_id, "reason": cleaned}
 
 
+def _provision_discovery(discovery_id: int) -> dict[str, Any]:
+    """Bridge: forge + petition + render for a discovery. Blocks ~30s.
+
+    Mirrors `charon provision --id N` step-for-step (without the click
+    layer). Returns a summary dict including any error and the rendered
+    artifact paths.
+    """
+    from charon.db import (
+        get_discovery,
+        update_discovery_forged,
+        update_discovery_petitioned,
+    )
+    from charon.letter import petition_discovery
+    from charon.profile import load_profile
+    from charon.tailor import forge_discovery
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+
+    try:
+        profile = load_profile()
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Profile error: {e}") from e
+
+    summary: dict[str, Any] = {"id": discovery_id, "errors": []}
+
+    # Forge resume
+    try:
+        forge_result = forge_discovery(discovery, profile=profile)
+    except Exception as e:  # noqa: BLE001
+        forge_result = {"error": f"{type(e).__name__}: {e}"}
+    if forge_result.get("offerings_path") and not forge_result.get("error"):
+        update_discovery_forged(
+            discovery_id, offerings_path=forge_result["offerings_path"]
+        )
+    elif forge_result.get("error"):
+        summary["errors"].append(f"forge: {forge_result['error']}")
+
+    # Petition cover letter (independent of forge)
+    try:
+        petition_result = petition_discovery(discovery, profile=profile)
+    except Exception as e:  # noqa: BLE001
+        petition_result = {"error": f"{type(e).__name__}: {e}"}
+    if petition_result.get("letter_path") and not petition_result.get("error"):
+        update_discovery_petitioned(
+            discovery_id, offerings_path=petition_result.get("offerings_path")
+        )
+    elif petition_result.get("error"):
+        summary["errors"].append(f"petition: {petition_result['error']}")
+
+    # Auto-render .html alongside .md (mirrors provision_cmd's tail)
+    if (
+        (forge_result.get("offerings_path") and not forge_result.get("error"))
+        or (petition_result.get("letter_path") and not petition_result.get("error"))
+    ):
+        from charon.render import RenderError, render_offering
+        try:
+            r = render_offering(discovery_id)
+            summary["resume_path"] = r.get("resume_path")
+            summary["cover_letter_path"] = r.get("cover_letter_path")
+            summary["errors"].extend(r.get("errors") or [])
+        except RenderError as e:
+            summary["errors"].append(f"render: {e}")
+        except Exception as e:  # noqa: BLE001
+            summary["errors"].append(f"render: {type(e).__name__}: {e}")
+
+    summary["offerings_path"] = (
+        forge_result.get("offerings_path") or petition_result.get("offerings_path")
+    )
+    summary["ok"] = bool(summary["offerings_path"]) and not (
+        forge_result.get("error") and petition_result.get("error")
+    )
+    return summary
+
+
+def _find_contacts(discovery_id: int) -> dict[str, Any]:
+    """Bridge: surface LinkedIn contacts for a discovery and persist the list
+    to its offerings folder. Synchronous web-search call — typically ~10–20s.
+    """
+    from charon.contacts import ContactsError, find_contacts_for_discovery
+
+    try:
+        return find_contacts_for_discovery(discovery_id)
+    except ContactsError as e:
+        raise DashboardError(str(e)) from e
+
+
+def _open_offerings_folder(discovery_id: int) -> dict[str, Any]:
+    """Open the offering's folder in the user's file manager via click.launch.
+    Server-side action — the dashboard's POST avoids the browser's file://
+    restrictions entirely.
+    """
+    import click
+    from charon.db import get_discovery
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+    folder = discovery.get("offerings_path")
+    if not folder:
+        raise DashboardError(f"No offerings folder for #{discovery_id}.")
+    p = Path(folder)
+    if not p.exists():
+        raise DashboardError(f"Offerings folder missing on disk: {folder}")
+    click.launch(str(p))
+    return {"id": discovery_id, "folder": str(p)}
+
+
 # ── HTTP request handler ────────────────────────────────────────────
 
 
@@ -181,6 +301,49 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, "rejection": rec, "ready": _ready_discoveries()})
+            return
+        if path.startswith("/api/provision/"):
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            try:
+                summary = _provision_discovery(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json(
+                {"ok": summary.get("ok", False), "summary": summary, "ready": _ready_discoveries()}
+            )
+            return
+        if path.startswith("/api/contacts/"):
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            try:
+                summary = _find_contacts(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json(
+                {"ok": True, "contacts": summary, "ready": _ready_discoveries()}
+            )
+            return
+        if path.startswith("/api/open-offerings/"):
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            try:
+                rec = _open_offerings_folder(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "opened": rec})
             return
         self._serve_status(HTTPStatus.NOT_FOUND, "not found")
 

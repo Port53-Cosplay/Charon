@@ -488,6 +488,83 @@ The two stages are independent — petition still runs even if forge
 errors. The bulk-warn fires above 20 discoveries with a cost estimate
 that reflects 2 calls per discovery (~$0.04-$0.10 each on Haiku).
 
+After forge + petition finish, `provision` automatically calls `render`
+so the offering folder gets `resume.html` and `cover_letter.html`
+alongside the `.md` files — browser-ready for print-to-PDF in one step.
+Render is best-effort and won't roll back provision if it errors.
+
+### Render Materials to HTML
+
+`charon render` converts an offering's `.md` files to styled HTML you
+can print to PDF for upload to ATS portals. Pure deterministic
+markdown-to-HTML conversion — no AI calls, no extra cost. The HTML
+files are self-contained (CSS inlined) so they survive being emailed
+or moved between machines.
+
+```bash
+charon render --id 2607
+# writes resume.html and cover_letter.html next to the .md files
+```
+
+You usually don't need to run this manually — `provision` calls it for
+you. The standalone command is here for re-rendering after a manual
+edit to a `.md` file, or for older offerings that pre-date the auto-render
+behavior.
+
+Open the resulting `.html` in your browser, then File -> Print -> "Save
+as PDF" to get a PDF for upload. Format honors a US Letter page size and
+preserves the styling across browsers (Chrome, Edge, Firefox, Safari all
+render it the same).
+
+### Find LinkedIn Contacts
+
+`charon contacts` surfaces recruiters, hiring managers, and team
+members at the company for a specific offering — useful for warm
+outreach alongside an application.
+
+```bash
+charon contacts --id 2607
+# writes linkedin_contacts.md to the offering folder
+```
+
+Uses Claude with web search (~$0.10-$0.20 per call), grouped by
+category in the output file. Contact list saves alongside resume.md
+and cover_letter.md so the whole application packet lives in one
+folder. Opt-in only — `provision` does NOT auto-run this, so you only
+pay for searches on roles you actually plan to outreach for.
+
+### Browse the Funnel in a Browser (`manifest`)
+
+`charon manifest` launches a local dashboard so you can browse the
+ready list, prep materials, apply, or reject — all from one page
+instead of a terminal loop.
+
+```bash
+charon manifest               # default port 7777, auto-opens browser
+charon manifest --port 8080   # custom port
+charon manifest --no-open     # start server, don't auto-open
+```
+
+What the dashboard does today:
+
+- **Ready list**, score-sorted with gold score badges and per-component
+  pips (Ghost / Redflag / Alignment / Resume).
+- **Prep materials** button on cards without offerings — forges + petitions
+  + renders server-side (~30s LLM call), card refreshes when done.
+- **Open folder** button on cards with offerings — opens Explorer at the
+  offering's folder via `click.launch`.
+- **Find contacts** button on cards with offerings — fires the same
+  search as `charon contacts`, saves to the same file.
+- **Mark applied** — records the application AND flips the discovery's
+  status to `applied` in one click, so applied jobs drop off the ready
+  list automatically.
+- **Not for me** — soft rejection with an optional "why?" reason that
+  gets saved to `judgement_reason`. The reason field is there for future
+  filtering of similar roles.
+
+Server is local-only (binds to `127.0.0.1`) — nothing exposed to the
+network. Ctrl+C to stop.
+
 ### Browse Offerings
 
 `charon offerings` lets you see and open the materials you've generated.

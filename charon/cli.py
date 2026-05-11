@@ -2902,6 +2902,38 @@ def _provision_one(
             print_warning(f"Render failed: {type(e).__name__}: {e}")
 
 
+@cli.command("contacts")
+@click.option("--id", "discovery_id", type=int, required=True,
+              help="Discovery ID to find contacts for.")
+def contacts_cmd(discovery_id: int) -> None:
+    """Find LinkedIn contacts for an offering. Saved to its folder as linkedin_contacts.md."""
+    from charon.contacts import ContactsError, find_contacts_for_discovery
+
+    section_header(f"CONTACTS #{discovery_id}")
+    try:
+        result = find_contacts_for_discovery(discovery_id)
+    except ContactsError as e:
+        print_error(str(e))
+        return
+
+    count = result.get("count", 0)
+    if count == 0:
+        print_warning("No contacts surfaced by the search.")
+    else:
+        by_cat = result.get("by_category") or {}
+        bits = []
+        if by_cat.get("recruiter"):
+            bits.append(f"{by_cat['recruiter']} recruiter(s)")
+        if by_cat.get("hiring_manager"):
+            bits.append(f"{by_cat['hiring_manager']} hiring manager(s)")
+        if by_cat.get("team_member"):
+            bits.append(f"{by_cat['team_member']} team member(s)")
+        print_success(f"Found {count}: {', '.join(bits) if bits else 'see file'}")
+
+    if result.get("path"):
+        print_info(f"Saved: {result['path']}")
+
+
 @cli.command("manifest")
 @click.option("--port", type=int, default=None, help="Custom port (default 7777).")
 @click.option("--no-open", is_flag=True, help="Don't auto-open the browser.")

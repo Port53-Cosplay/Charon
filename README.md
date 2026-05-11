@@ -70,6 +70,20 @@ All four accept `--paste` for postings behind login walls. Pipe from a file on W
 Get-Content posting.txt | charon hunt --paste
 ```
 
+### Funnel (gather → enrich → judge → provision → render → manifest)
+
+```bash
+charon funnel                            # cheat sheet: every step with examples
+charon gather --slug <employer>          # pull jobs from one ATS
+charon enrich --all                      # fill in full descriptions
+charon judge --all                       # score ghost + redflag + alignment + resume
+charon judge --list ready                # score-sorted apply-to-these list
+charon provision --id <N>                # forge + petition + auto-render for one ready job
+charon render --id <N>                   # re-render an offering's .md to .html
+charon contacts --id <N>                 # surface LinkedIn contacts for the role
+charon manifest                          # open the dashboard in your browser
+```
+
 ### Application tracking
 
 ```bash
