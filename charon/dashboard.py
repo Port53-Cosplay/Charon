@@ -61,7 +61,11 @@ def _ready_discoveries() -> list[dict[str, Any]]:
     return [_summarize_discovery(r) for r in rows]
 
 
-def _applications() -> list[dict[str, Any]]:
+ARCHIVE_DAYS = 45
+TERMINAL_STATUSES_FOR_ARCHIVE = ("ghosted", "rejected", "offered")
+
+
+def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]], int]:
     """Fetch tracked applications, with best-effort back-link to the
     discovery row so the dashboard can offer "Open folder" /
     "Find contacts" buttons on applications that came from the funnel.
@@ -70,6 +74,11 @@ def _applications() -> list[dict[str, Any]]:
     a discovery_id today. Manually-typed `apply --add` rows that don't
     match a discovery just won't get the offering-side actions.
     Logged as a §11.5 candidate for a real FK later.
+
+    By default, applications that have been in a terminal status
+    (stranded / rejected / offered) for ``ARCHIVE_DAYS`` or more days
+    are filtered out — they're not deleted, just hidden so the active
+    view stays focused. Pass include_archived=True to see everything.
     """
     from datetime import datetime, timezone
     from charon.contacts import CONTACTS_FILENAME
@@ -77,7 +86,7 @@ def _applications() -> list[dict[str, Any]]:
 
     apps = get_applications()
     if not apps:
-        return []
+        return [], 0
 
     # One-shot lookup: company+role -> (discovery_id, offerings_path)
     conn = get_connection()
@@ -98,6 +107,7 @@ def _applications() -> list[dict[str, Any]]:
 
     now = datetime.now(timezone.utc)
     out: list[dict[str, Any]] = []
+    archived_count = 0
     for app in apps:
         key = ((app.get("company") or "").strip().lower(),
                (app.get("role") or "").strip().lower())
@@ -122,12 +132,32 @@ def _applications() -> list[dict[str, Any]]:
             except (ValueError, AttributeError):
                 pass
 
+        # Archive filter: hide terminal-status applications whose updated_at
+        # is older than ARCHIVE_DAYS. Stays in the DB; just falls out of
+        # the dashboard's default view.
+        status = app.get("status")
+        is_archived = False
+        if status in TERMINAL_STATUSES_FOR_ARCHIVE:
+            updated_at = app.get("updated_at")
+            if updated_at:
+                try:
+                    updated_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                    if updated_dt.tzinfo is None:
+                        updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                    if (now - updated_dt).days >= ARCHIVE_DAYS:
+                        is_archived = True
+                except (ValueError, AttributeError):
+                    pass
+        if is_archived and not include_archived:
+            archived_count += 1
+            continue
+
         out.append({
             "id": app["id"],
             "company": app["company"],
             "role": app["role"],
             "url": app.get("url"),
-            "status": app.get("status"),
+            "status": status,
             "applied_at": applied_at,
             "updated_at": app.get("updated_at"),
             "notes": app.get("notes"),
@@ -136,8 +166,9 @@ def _applications() -> list[dict[str, Any]]:
             "offerings_path": offerings_path,
             "has_offerings": bool(offerings_path),
             "has_contacts": has_contacts,
+            "is_archived": is_archived,
         })
-    return out
+    return out, archived_count
 
 
 def _ghost_check() -> dict[str, Any]:
@@ -199,6 +230,17 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         except OSError:
             has_contacts = False
 
+    # Parse judgement_detail if it's structured JSON; surface a digest the UI
+    # can render without re-parsing the whole blob.
+    judgement_digest = None
+    detail_raw = r.get("judgement_detail")
+    if detail_raw:
+        try:
+            parsed = json.loads(detail_raw)
+            judgement_digest = _digest_judgement(parsed)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            judgement_digest = None
+
     return {
         "id": r["id"],
         "company": r["company"],
@@ -216,7 +258,84 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "forged_at": r.get("forged_at"),
         "petition_at": r.get("petition_at"),
         "has_contacts": has_contacts,
+        # Detail-view fields (loaded eagerly so click-to-expand is instant)
+        "full_description": r.get("full_description"),
+        "judgement_reason": r.get("judgement_reason"),
+        "judgement_digest": judgement_digest,
     }
+
+
+def _digest_judgement(parsed: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the human-useful bits from judgement_detail's JSON.
+
+    Top-level analyzer keys per screen.py: 'ghostbust', 'redflags',
+    'role_alignment', 'resume_match' (note plurals + 'role_alignment',
+    not 'redflag' / 'alignment').
+    """
+    out: dict[str, Any] = {}
+
+    ghost = parsed.get("ghostbust")
+    if isinstance(ghost, dict):
+        signals: list[dict[str, Any]] = []
+        for s in ghost.get("signals") or []:
+            if isinstance(s, dict):
+                signals.append({
+                    "severity": s.get("severity") or "info",
+                    "category": s.get("category"),
+                    "finding":  s.get("finding") or "",
+                })
+        if signals or ghost.get("summary"):
+            out["ghost"] = {"summary": ghost.get("summary"), "signals": signals}
+
+    def _flatten_flags(raw_list: Any) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for item in (raw_list or []):
+            if isinstance(item, dict):
+                items.append({
+                    "flag":           item.get("flag") or "",
+                    "evidence":       item.get("evidence") or "",
+                    "interpretation": item.get("interpretation") or "",
+                })
+            elif isinstance(item, str):
+                items.append({"flag": item, "evidence": "", "interpretation": ""})
+        return items
+
+    red = parsed.get("redflags")
+    if isinstance(red, dict):
+        red_block = {
+            "summary":      red.get("summary"),
+            "dealbreakers": _flatten_flags(red.get("dealbreakers_found")),
+            "yellow":       _flatten_flags(red.get("yellow_flags_found")),
+            "green":        _flatten_flags(red.get("green_flags_found")),
+        }
+        if any(red_block[k] for k in ("dealbreakers", "yellow", "green")) or red_block["summary"]:
+            out["redflags"] = red_block
+
+    align = parsed.get("role_alignment")
+    if isinstance(align, dict):
+        align_block = {
+            "closest_target": align.get("closest_target"),
+            "overlap":        [str(d) for d in (align.get("overlap") or [])],
+            "gaps":           [str(d) for d in (align.get("gaps") or [])],
+            "stepping_stone": align.get("stepping_stone"),
+            "assessment":     align.get("assessment"),
+        }
+        if any(align_block.values()):
+            out["alignment"] = align_block
+
+    rm = parsed.get("resume_match")
+    if isinstance(rm, dict):
+        rm_block = {
+            "match_type":   rm.get("match_type"),
+            "summary":      rm.get("summary"),
+            "overlap":      [str(d) for d in (rm.get("overlap") or [])],
+            "gaps":         [str(d) for d in (rm.get("gaps") or [])],
+            "transferable": [str(d) for d in (rm.get("transferable") or [])],
+        }
+        if any(rm_block.values()):
+            out["resume_match"] = rm_block
+
+    return out or None
 
 
 def _round1(v: float | None) -> float | None:
@@ -427,7 +546,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json({"ready": _ready_discoveries()})
             return
         if path == "/api/applications":
-            self._serve_json({"applications": _applications()})
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            include_archived = qs.get("archived", ["0"])[0] in {"1", "true", "yes"}
+            apps, archived_hidden = _applications(include_archived=include_archived)
+            self._serve_json({"applications": apps, "archived_hidden": archived_hidden})
             return
         self._serve_status(HTTPStatus.NOT_FOUND, "not found")
 
@@ -501,7 +623,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json(
-                {"ok": True, "summary": summary, "applications": _applications()}
+                {"ok": True, "summary": summary, "applications": _applications()[0]}
             )
             return
         if path.startswith("/api/applications/") and path.endswith("/status"):
@@ -520,7 +642,7 @@ class _Handler(BaseHTTPRequestHandler):
             except DashboardError as e:
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
-            self._serve_json({"ok": True, "updated": rec, "applications": _applications()})
+            self._serve_json({"ok": True, "updated": rec, "applications": _applications()[0]})
             return
         if path.startswith("/api/open-offerings/"):
             try:
