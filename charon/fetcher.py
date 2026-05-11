@@ -132,6 +132,10 @@ CLOSED_POSTING_PATTERNS = [
     r"position filled",
     r"no longer active",
     r"this job is closed",
+    r"no longer open",
+    r"this opening (?:is|has been) closed",
+    r"we are no longer (?:accepting|considering) applications",
+    r"this job is not currently accepting applications",
 ]
 
 _CLOSED_RE = re.compile("|".join(CLOSED_POSTING_PATTERNS), re.IGNORECASE)
