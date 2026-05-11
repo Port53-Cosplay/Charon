@@ -441,10 +441,20 @@ charon offerings --open --id N         # open offerings folder
 - New module: `charon/dashboard.py` (CLI command name: `manifest`; Python `http.server` based)
 - Single HTML template: `charon/templates/manifest.html` with embedded CSS/JS
 - Dark SOC theme (already specified in v1 REQUIREMENTS — port over)
-- Tabs: **Gathered** (raw discoveries) → **Judged** (screened, both passed and rejected) → **Provisioned** (ready with offerings) → **Crossed** (applications submitted)
+- Tabs: **Gathered** (raw discoveries) → **Judged** (screened, both passed and rejected) → **Provisioned** (ready with offerings) → **Crossed** (applications submitted) → **Sirens** (voice-true LinkedIn post writer; see sub-section below)
 - Per-job detail view: scores, evidence, links to offerings folder, "Mark Crossed" button (records via `apply --add`)
 - Stats panel: gather rate, judge-pass rate, cross rate, response rate, ghost rate
-- Read-only — all writes happen through CLI
+- Read-only for funnel tabs — all writes to discoveries/applications happen through CLI. Sirens tab writes its own draft state under `~/.charon/sirens/` (drafts are user-authored content, not funnel data, so this is acceptable).
+
+**Sirens tab — LinkedIn voice writer (sub-spec):**
+- **Purpose:** Embed the post-writing flow next to funnel state so topics can pull from real activity ("Just applied to GuidePoint for Sr. DFIR Consultant").
+- **Reference implementation:** `C:\Users\lurka\Projects\linkedin-helper\index.html` — standalone HTML tool DeAnna built 2026-05-08. Port the UI patterns (purple/pink palette, post cards, char-count danger state at 3000-char LinkedIn limit, two-mode operation: clipboard-relay vs. direct API). Tone prompt baked into that file is the seed content.
+- **Inputs:** `topic` (one-liner) + `dump` (textarea brain-dump). Topic field offers auto-fill suggestions sourced from recent discoveries (last N applications, ready jobs, dossier'd companies) and from the CISA Pursuit project state.
+- **Voice prompt source:** New top-level `voice` block in `profile.yaml` — copy the ~250-line prompt from `linkedin-helper/index.html` verbatim during this phase. **Retrofit `petition` (cover letters) at the same time** so there's one canonical voice source feeding both Sirens and petitions; petition's hand-tuned prompt becomes a reference comment, not the source of truth.
+- **Output:** Polished post(s), `===POST===`-delimited if multi-part, char count vs. 3000 limit per card, copy-to-clipboard per card.
+- **Persistence:** Drafts under `~/.charon/sirens/drafts/` as JSON (`{id, name, topic, dump, savedAt}`). Auto-save current input on debounce. JSON export/import (matches the standalone tool's portability behavior — DeAnna already requested this pattern in feedback memory `feedback_data_portability.md`).
+- **API key:** Charon's existing Anthropic key (Vault → env → profile). Drop the localStorage-stored key from the standalone-tool flow when porting.
+- **Out of scope for this phase:** Outreach to specific contacts. `dossier.find_contacts` already research-finds recruiters/hiring managers; promoting that into a tracked outreach workflow (drafted/sent/replied per contact) is a *different* Sirens-flavored idea — likely a separate tab or command later, not part of this first cut. Don't conflate them.
 
 **CLI:**
 ```
@@ -455,17 +465,20 @@ charon manifest --no-open              # don't auto-open browser
 
 **Acceptance criteria:**
 - [ ] Manifest runs on `localhost:7777` by default
-- [ ] All four tabs render with current data (Gathered, Judged, Provisioned, Crossed)
+- [ ] All five tabs render with current data (Gathered, Judged, Provisioned, Crossed, Sirens)
 - [ ] Detail view links to offerings folder (file:// links)
 - [ ] Stats panel matches `charon apply --stats` numbers
-- [ ] Server is read-only (no write endpoints)
+- [ ] Funnel tabs are read-only (no write endpoints touching discoveries/applications)
+- [ ] Sirens tab reads voice prompt from `profile.yaml`, writes drafts under `~/.charon/sirens/drafts/`
+- [ ] Sirens topic field auto-fills from recent discoveries
+- [ ] `petition` retrofitted to read voice from the same `profile.yaml` block (one canonical source)
 - [ ] Single-file HTML (no external CDN dependencies — works offline)
 - [ ] Ctrl+C shuts down cleanly
-- [ ] Tests cover: route handlers, data binding
+- [ ] Tests cover: route handlers, data binding, Sirens draft persistence, voice-block loading
 - [ ] CHANGELOG entry under v0.10.0
 
 **Dependencies:** Phase 9 complete
-**Risks:** Scope creep on UI features. Mitigation: ship minimum viable, iterate.
+**Risks:** Scope creep on UI features. Mitigation: ship minimum viable funnel tabs first; Sirens can land in a 10.x patch if it threatens the v0.10.0 cut.
 
 ---
 
