@@ -608,6 +608,19 @@ start hurting.
   (accepting `tier_1` / `tier_2` / `tier_3`, possibly repeatable) to
   `judge`; consider mirroring on `enrich` for symmetry.
 
+- **No discovery <-> application bridge.** `charon apply --add` requires
+  manually typed `--company`, `--role`, `--url` even when the data is
+  already in the `discoveries` row you just applied to; and writing the
+  application does not flip the discovery's `screened_status`, so applied
+  jobs keep cluttering `judge --list ready`. Surfaced 2026-05-11 after
+  applying to #5296 (GuidePoint DFIR): had to retype all fields, then
+  manually `UPDATE discoveries SET screened_status='applied' WHERE id=5296`
+  to drop it from the ready list. Fix: accept `charon apply --add <id>`
+  (pull company/role/url from the discovery row) and flip
+  `screened_status` to `applied` (or `crossed`) atomically with the
+  application insert. Bonus: store `discovery_id` on the application so
+  the dashboard can link in both directions.
+
 ---
 
 ## 12. Status Tracker
