@@ -383,14 +383,17 @@ def get_stale_applications(days: int) -> list[dict[str, Any]]:
     active_p = ",".join("?" for _ in ACTIVE_STATUSES)
     conn = get_connection()
     try:
+        # Compare calendar days (date()-truncated), not raw julianday — a
+        # timestamp at 21:30 UTC vs now at 18:00 UTC was producing 20.95
+        # for what intuitively should be "21 days ago today."
         rows = conn.execute(
             f"SELECT * FROM applications "
             f"WHERE ghosted_notified = 0 AND ("
             f"  (status IN ({passive_p}) "
-            f"   AND julianday('now') - julianday(applied_at) >= ?) "
+            f"   AND julianday(date('now')) - julianday(date(applied_at)) >= ?) "
             f"  OR "
             f"  (status IN ({active_p}) "
-            f"   AND julianday('now') - julianday(updated_at) >= ?) "
+            f"   AND julianday(date('now')) - julianday(date(updated_at)) >= ?) "
             f") "
             f"ORDER BY applied_at",
             (*PASSIVE_STATUSES, days, *ACTIVE_STATUSES, days),
