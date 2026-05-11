@@ -2884,6 +2884,23 @@ def _provision_one(
             offerings_path=petition_result.get("offerings_path"),
         )
 
+    # Render .html alongside the .md files so "materials ready" actually
+    # means browser-ready (print-to-PDF in one step). Best-effort — render
+    # errors don't roll back forge/petition, they just surface as a warning.
+    if (
+        (forge_result.get("offerings_path") and not forge_result.get("error"))
+        or (petition_result.get("letter_path") and not petition_result.get("error"))
+    ):
+        try:
+            from charon.render import RenderError, render_offering
+            r = render_offering(discovery_id)
+            for err in r.get("errors") or []:
+                print_warning(err)
+        except RenderError as e:
+            print_warning(f"Render skipped: {e}")
+        except Exception as e:  # noqa: BLE001
+            print_warning(f"Render failed: {type(e).__name__}: {e}")
+
 
 @cli.command("manifest")
 @click.option("--port", type=int, default=None, help="Custom port (default 7777).")
