@@ -228,11 +228,19 @@ def _find_contacts(discovery_id: int) -> dict[str, Any]:
 
 
 def _open_offerings_folder(discovery_id: int) -> dict[str, Any]:
-    """Open the offering's folder in the user's file manager via click.launch.
-    Server-side action — the dashboard's POST avoids the browser's file://
-    restrictions entirely.
+    """Open the offering's folder in the user's file manager.
+
+    Uses subprocess.Popen with the platform-native opener instead of
+    click.launch / os.startfile. The HTTP server runs handlers in
+    worker threads (ThreadingHTTPServer), and os.startfile relies on
+    ShellExecuteEx which expects a single-threaded COM apartment —
+    when called from a non-STA thread it can fail silently
+    (returns success, no window appears). subprocess.Popen bypasses
+    COM entirely by spawning the file manager as a child process,
+    which inherits the user's interactive session correctly.
     """
-    import click
+    import subprocess
+    import sys
     from charon.db import get_discovery
 
     discovery = get_discovery(discovery_id)
@@ -244,7 +252,17 @@ def _open_offerings_folder(discovery_id: int) -> dict[str, Any]:
     p = Path(folder)
     if not p.exists():
         raise DashboardError(f"Offerings folder missing on disk: {folder}")
-    click.launch(str(p))
+
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer.exe", str(p)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(p)])
+        else:
+            subprocess.Popen(["xdg-open", str(p)])
+    except OSError as e:
+        raise DashboardError(f"Couldn't launch file manager: {e}") from e
+
     return {"id": discovery_id, "folder": str(p)}
 
 
