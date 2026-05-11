@@ -99,7 +99,7 @@ def funnel() -> None:
              "charon gather --add <url>            # add ad-hoc by careers URL"]),
         ("2", "enrich",    "Fill in full job descriptions. JSON-LD -> ATS CSS -> LLM fallback.",
             ["charon enrich --all                  # only un-enriched rows touched",
-             "charon enrich --ats greenhouse       # scope to one ATS"]),
+             "charon enrich --all --ats greenhouse # scope to one ATS"]),
         ("3", "judge",     "Score each discovery: ghost + redflag + alignment + resume_match.",
             ["charon judge --all                   # only un-judged rows touched",
              "charon judge --list ready            # see who passed",
