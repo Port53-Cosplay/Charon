@@ -71,6 +71,19 @@
       overflow-y: auto;
     }
 
+    .sidebar .avatar {
+      display: block;
+      width: 100%;
+      margin-bottom: 14px;
+      filter: drop-shadow(0 6px 14px rgba(74, 44, 112, 0.18));
+    }
+
+    .sidebar .avatar img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
     .main {
       flex: 1;
       min-width: 0;
@@ -662,6 +675,9 @@
 <body>
   <div class="shell">
     <aside class="sidebar">
+      <div class="avatar">
+        <img src="/static/charon.png" alt="Charon the ferryman, holding a lantern and a key">
+      </div>
       <header class="banner">
         <h1>The Crossing</h1>
         <div class="sub">DeAnna's funnel · ferryman view</div>

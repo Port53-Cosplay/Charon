@@ -29,9 +29,21 @@ from typing import Any
 
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+ASSETS_DIR = TEMPLATES_DIR / "assets"
 MANIFEST_TEMPLATE = "manifest.html"
 DEFAULT_PORT = 7777
 LOOPBACK = "127.0.0.1"
+
+# Image / static asset MIME map. Kept tight — we don't want surprise types.
+_STATIC_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+}
 
 
 class DashboardError(Exception):
@@ -408,6 +420,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._serve_html()
             return
+        if path.startswith("/static/"):
+            self._serve_static(path[len("/static/"):])
+            return
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
             return
@@ -546,6 +561,37 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         # Local-only — no caching needed and reload should pick up template edits
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_static(self, rel_path: str) -> None:
+        """Serve a file from charon/templates/assets/.
+
+        Path-traversal guarded: reject anything with '..' or absolute
+        paths, and verify the resolved file is actually inside ASSETS_DIR.
+        Only known image MIME types are served.
+        """
+        if not rel_path or ".." in rel_path or rel_path.startswith("/") or "\\" in rel_path:
+            self._serve_status(HTTPStatus.BAD_REQUEST, "invalid asset path")
+            return
+        target = (ASSETS_DIR / rel_path).resolve()
+        try:
+            target.relative_to(ASSETS_DIR.resolve())
+        except ValueError:
+            self._serve_status(HTTPStatus.BAD_REQUEST, "asset path escapes /static")
+            return
+        if not target.is_file():
+            self._serve_status(HTTPStatus.NOT_FOUND, "asset not found")
+            return
+        mime = _STATIC_MIME.get(target.suffix.lower())
+        if mime is None:
+            self._serve_status(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported asset type")
+            return
+        body = target.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=3600")
         self.end_headers()
         self.wfile.write(body)
 
