@@ -89,7 +89,7 @@ def cli() -> None:
 def funnel() -> None:
     """The funnel, in order. When you forget what comes next."""
     console.print()
-    console.print("[header]The Funnel[/header]  [dim]gather -> enrich -> judge -> provision -> offerings -> render[/dim]")
+    console.print("[header]The Funnel[/header]  [dim]gather -> enrich -> judge -> provision -> offerings -> render -> manifest[/dim]")
     console.print("[dim]" + "-" * 70 + "[/dim]")
 
     steps = [
@@ -113,6 +113,9 @@ def funnel() -> None:
              "charon offerings --id <N> --open     # open the folder"]),
         ("6", "render",    "Convert offering .md to styled HTML for browser print-to-PDF.",
             ["charon render --id <N>               # writes resume.html + cover_letter.html"]),
+        ("7", "manifest",  "Open the dashboard. Browse ready jobs and apply from the UI.",
+            ["charon manifest                      # default port 7777, opens browser",
+             "charon manifest --no-open            # start server, don't auto-open"]),
     ]
 
     for num, name, desc, examples in steps:
@@ -2880,6 +2883,26 @@ def _provision_one(
             discovery_id,
             offerings_path=petition_result.get("offerings_path"),
         )
+
+
+@cli.command("manifest")
+@click.option("--port", type=int, default=None, help="Custom port (default 7777).")
+@click.option("--no-open", is_flag=True, help="Don't auto-open the browser.")
+def manifest_cmd(port: int | None, no_open: bool) -> None:
+    """Launch the dashboard. The ferryman's passenger manifest."""
+    from charon.dashboard import DEFAULT_PORT, DashboardError, start_server
+
+    chosen_port = port or DEFAULT_PORT
+    url = f"http://127.0.0.1:{chosen_port}/"
+    section_header("MANIFEST")
+    print_info(f"Serving at {url}")
+    print_info("Ctrl+C to stop.")
+    try:
+        start_server(port=chosen_port, open_browser=not no_open, block=True)
+    except DashboardError as e:
+        print_error(str(e))
+    else:
+        print_info("Server stopped.")
 
 
 @cli.command("render")

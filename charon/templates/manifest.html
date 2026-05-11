@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Charon · The Crossing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <style>
+    /* ── color & type tokens ─────────────────────────────────── */
+    :root {
+      --bg:          #F5EDFA;   /* very soft lavender wash */
+      --bg-soft:     #FBF7FE;
+      --paper:       #FFFFFF;
+      --card-border: #E7DAF0;
+      --card-shadow: 0 1px 2px rgba(74, 44, 112, 0.05),
+                     0 8px 24px rgba(74, 44, 112, 0.06);
+
+      --ink:         #2A1A3A;
+      --ink-soft:    #4A3A5A;
+      --ink-muted:   #8B7BA0;
+      --ink-faint:   #B0A5BF;
+
+      --plum:        #4A2C70;   /* deep purple, header */
+      --plum-soft:   #6845A0;   /* mid purple, accent */
+      --lilac:       #D7C5EE;   /* pale accent */
+      --lilac-soft:  #EFE3FA;
+
+      --blush:       #F5D0E0;   /* pink button bg */
+      --blush-deep:  #C4628E;   /* pink button text */
+      --blush-hover: #EFB8D0;
+
+      --gold:        #E4C77A;   /* score badge bg */
+      --gold-deep:   #8A6520;   /* score badge text */
+      --gold-soft:   #F5E5BA;
+
+      --danger:      #C4628E;
+      --success:     #6BA890;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--ink);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── layout ──────────────────────────────────────────────── */
+
+    .shell {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 24px 96px;
+    }
+
+    header.banner {
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid var(--lilac);
+    }
+
+    .banner h1 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-weight: 600;
+      font-size: 38px;
+      color: var(--plum);
+      letter-spacing: -0.02em;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .banner .sub {
+      color: var(--ink-muted);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+
+    .banner .sub .count {
+      color: var(--plum-soft);
+      font-weight: 600;
+    }
+
+    /* ── ready cards ─────────────────────────────────────────── */
+
+    .ready-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 18px 22px;
+      box-shadow: var(--card-shadow);
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(74, 44, 112, 0.06),
+                  0 12px 28px rgba(74, 44, 112, 0.10);
+    }
+
+    .card.is-applying { opacity: 0.5; pointer-events: none; }
+    .card.is-gone { opacity: 0; transform: translateY(-6px) scale(0.98); transition: opacity 0.3s ease, transform 0.3s ease; }
+
+    .card .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      margin-bottom: 6px;
+    }
+
+    .card .titles { min-width: 0; flex: 1; }
+
+    .card .company {
+      font-weight: 600;
+      color: var(--plum);
+      font-size: 14px;
+      letter-spacing: 0.01em;
+    }
+
+    .card .role {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--ink);
+      margin-top: 2px;
+      line-height: 1.35;
+    }
+
+    .card .score {
+      flex: 0 0 auto;
+      background: var(--gold-soft);
+      color: var(--gold-deep);
+      border: 1px solid var(--gold);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .card .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      margin: 8px 0 12px;
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .card .meta .pip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card .meta .pip strong {
+      color: var(--ink-soft);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .card .meta .badge {
+      background: var(--lilac-soft);
+      color: var(--plum-soft);
+      padding: 2px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .card .location {
+      color: var(--ink-muted);
+      font-style: italic;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .card .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .card .actions a.posting-link {
+      color: var(--plum-soft);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--lilac);
+      background: var(--lilac-soft);
+      transition: background 0.12s ease;
+    }
+
+    .card .actions a.posting-link:hover {
+      background: var(--lilac);
+    }
+
+    .card .actions .apply-btn {
+      background: var(--blush);
+      color: var(--blush-deep);
+      border: 1px solid var(--blush-hover);
+      padding: 8px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: background 0.12s ease, transform 0.08s ease;
+      font-family: inherit;
+    }
+
+    .card .actions .apply-btn:hover { background: var(--blush-hover); }
+    .card .actions .apply-btn:active { transform: scale(0.97); }
+    .card .actions .apply-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+
+    .card .actions .reject-btn {
+      background: transparent;
+      color: var(--ink-muted);
+      border: 1px solid var(--card-border);
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 10px;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+      font-family: inherit;
+    }
+
+    .card .actions .reject-btn:hover {
+      background: var(--lilac-soft);
+      color: var(--plum-soft);
+      border-color: var(--lilac);
+    }
+
+    .card .reject-form {
+      margin-top: 12px;
+      padding: 14px;
+      background: var(--lilac-soft);
+      border: 1px solid var(--lilac);
+      border-radius: 10px;
+    }
+
+    .card .reject-form[hidden] { display: none; }
+
+    .card .reject-form textarea {
+      width: 100%;
+      min-height: 56px;
+      max-height: 200px;
+      resize: vertical;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.5;
+    }
+
+    .card .reject-form textarea::placeholder {
+      color: var(--ink-faint);
+      font-style: italic;
+    }
+
+    .card .reject-form textarea:focus {
+      outline: none;
+      border-color: var(--plum-soft);
+      box-shadow: 0 0 0 3px rgba(104, 69, 160, 0.12);
+    }
+
+    .card .reject-form .form-row {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    .card .reject-form button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: background 0.12s ease;
+    }
+
+    .card .reject-form .cancel-btn {
+      background: transparent;
+      color: var(--ink-muted);
+      border: 1px solid transparent;
+    }
+
+    .card .reject-form .cancel-btn:hover {
+      color: var(--ink-soft);
+      background: var(--bg-soft);
+    }
+
+    .card .reject-form .confirm-btn {
+      background: var(--plum-soft);
+      color: white;
+      border: 1px solid var(--plum-soft);
+      font-weight: 600;
+    }
+
+    .card .reject-form .confirm-btn:hover { background: var(--plum); }
+    .card .reject-form .confirm-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+
+    .card .id {
+      font-size: 11px;
+      color: var(--ink-faint);
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+    }
+
+    /* ── empty / loading / error states ──────────────────────── */
+
+    .state {
+      background: var(--bg-soft);
+      border: 1px dashed var(--card-border);
+      border-radius: 14px;
+      padding: 36px 24px;
+      text-align: center;
+      color: var(--ink-muted);
+    }
+
+    .state .glyph {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 28px;
+      color: var(--plum-soft);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(120%);
+      background: var(--plum);
+      color: white;
+      padding: 12px 22px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: 0 8px 28px rgba(74, 44, 112, 0.4);
+      transition: transform 0.25s ease;
+      z-index: 100;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.error { background: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="banner">
+      <h1>The Crossing</h1>
+      <div class="sub">
+        Ready to apply <span class="count" id="ready-count">—</span>
+      </div>
+    </header>
+
+    <div id="list-container" class="ready-list">
+      <div class="state"><div class="glyph">·</div>Loading…</div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const escapeHtml = (s) =>
+      String(s ?? "").replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+
+    function showToast(message, isError = false) {
+      const t = document.getElementById("toast");
+      t.textContent = message;
+      t.classList.toggle("error", !!isError);
+      t.classList.add("show");
+      clearTimeout(showToast._timer);
+      clearTimeout(showToast._clearTimer);
+      showToast._timer = setTimeout(() => {
+        t.classList.remove("show");
+        // Clear the text once the slide-out transition (~250ms) finishes,
+        // so Ctrl+F doesn't find stale toasts in the off-screen DOM.
+        showToast._clearTimer = setTimeout(() => {
+          if (!t.classList.contains("show")) t.textContent = "";
+        }, 350);
+      }, 2400);
+    }
+
+    function pip(label, value) {
+      if (value === null || value === undefined) return "";
+      return `<span class="pip">${escapeHtml(label)} <strong>${escapeHtml(value)}</strong></span>`;
+    }
+
+    function renderCard(d) {
+      const fScore = d.combined_score != null ? d.combined_score.toFixed(1) : "—";
+      const subScores = [
+        pip("G", d.ghost_score),
+        pip("R", d.redflag_score),
+        pip("A", d.alignment_score),
+        pip("Rs", d.resume_match_score),
+      ].join("");
+      const hasOfferings = d.forged_at || d.petition_at || d.offerings_path;
+      const offeringsBadge = hasOfferings
+        ? `<span class="badge" title="Forge + petition complete">materials</span>`
+        : "";
+      const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
+      const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
+
+      const location = d.location
+        ? `<div class="location">${escapeHtml(d.location)}</div>`
+        : "";
+
+      const posting = d.url
+        ? `<a class="posting-link" href="${escapeHtml(d.url)}" target="_blank" rel="noopener">View posting →</a>`
+        : "";
+
+      return `
+        <article class="card" data-id="${d.id}">
+          <div class="head">
+            <div class="titles">
+              <div class="company">${escapeHtml(d.company)} <span class="id">· #${d.id}</span></div>
+              <div class="role">${escapeHtml(d.role)}</div>
+            </div>
+            <div class="score">${fScore}</div>
+          </div>
+          ${location}
+          <div class="meta">
+            ${subScores}
+            ${tierBadge}
+            ${atsBadge}
+            ${offeringsBadge}
+          </div>
+          <div class="actions">
+            ${posting}
+            <button class="apply-btn" data-id="${d.id}">Mark applied</button>
+            <button class="reject-btn" data-id="${d.id}">Not for me</button>
+          </div>
+          <div class="reject-form" hidden>
+            <textarea placeholder="Why? (optional — helps filter similar roles later)"></textarea>
+            <div class="form-row">
+              <button class="cancel-btn">Cancel</button>
+              <button class="confirm-btn" data-id="${d.id}">Confirm</button>
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderList(ready) {
+      const container = document.getElementById("list-container");
+      const count = document.getElementById("ready-count");
+      count.textContent = ready.length;
+      if (ready.length === 0) {
+        container.innerHTML = `
+          <div class="state">
+            <div class="glyph">·</div>
+            Nothing ready right now. Run <code>charon judge</code> to score more.
+          </div>`;
+        return;
+      }
+      container.innerHTML = ready.map(renderCard).join("");
+    }
+
+    async function loadReady() {
+      try {
+        const r = await fetch("/api/ready");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        renderList(data.ready || []);
+      } catch (e) {
+        document.getElementById("list-container").innerHTML = `
+          <div class="state">
+            <div class="glyph">·</div>
+            Couldn't load ready list. ${escapeHtml(e.message)}
+          </div>`;
+      }
+    }
+
+    async function applyToDiscovery(id, cardEl) {
+      cardEl.classList.add("is-applying");
+      const btn = cardEl.querySelector(".apply-btn");
+      btn.disabled = true;
+      btn.textContent = "Applying…";
+
+      try {
+        const r = await fetch(`/api/apply/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        // Drop the card with a soft animation, then re-render the list
+        cardEl.classList.add("is-gone");
+        showToast(`Applied to #${id}. Recorded as application #${data.application.id}.`);
+        setTimeout(() => {
+          renderList(data.ready || []);
+        }, 320);
+      } catch (e) {
+        cardEl.classList.remove("is-applying");
+        btn.disabled = false;
+        btn.textContent = "Mark applied";
+        showToast("Couldn't apply: " + e.message, true);
+      }
+    }
+
+    async function rejectDiscovery(id, cardEl, reason) {
+      const form = cardEl.querySelector(".reject-form");
+      const confirmBtn = form.querySelector(".confirm-btn");
+      cardEl.classList.add("is-applying"); // dim during submit
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Rejecting…";
+
+      try {
+        const r = await fetch(`/api/reject/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        cardEl.classList.add("is-gone");
+        const reasonNote = reason ? ` Reason saved.` : "";
+        showToast(`Rejected #${id}.${reasonNote}`);
+        setTimeout(() => { renderList(data.ready || []); }, 320);
+      } catch (e) {
+        cardEl.classList.remove("is-applying");
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Confirm";
+        showToast("Couldn't reject: " + e.message, true);
+      }
+    }
+
+    // Event delegation — handles cards even after re-render
+    document.addEventListener("click", (ev) => {
+      // Mark applied
+      const applyBtn = ev.target.closest(".apply-btn");
+      if (applyBtn) {
+        const card = applyBtn.closest(".card");
+        const id = applyBtn.getAttribute("data-id");
+        if (id && card) applyToDiscovery(id, card);
+        return;
+      }
+
+      // Not for me — reveal the reason form
+      const rejectBtn = ev.target.closest(".reject-btn");
+      if (rejectBtn) {
+        const card = rejectBtn.closest(".card");
+        const form = card.querySelector(".reject-form");
+        form.hidden = false;
+        // Hide the buttons while form is open (visual focus on the prompt)
+        card.querySelector(".actions").style.display = "none";
+        const ta = form.querySelector("textarea");
+        ta.focus();
+        return;
+      }
+
+      // Confirm rejection
+      const confirmBtn = ev.target.closest(".confirm-btn");
+      if (confirmBtn) {
+        const card = confirmBtn.closest(".card");
+        const id = confirmBtn.getAttribute("data-id");
+        const reason = card.querySelector(".reject-form textarea").value.trim();
+        if (id && card) rejectDiscovery(id, card, reason);
+        return;
+      }
+
+      // Cancel — collapse the reason form
+      const cancelBtn = ev.target.closest(".cancel-btn");
+      if (cancelBtn) {
+        const card = cancelBtn.closest(".card");
+        card.querySelector(".reject-form").hidden = true;
+        card.querySelector(".reject-form textarea").value = "";
+        card.querySelector(".actions").style.display = "";
+        return;
+      }
+    });
+
+    // Submit reject form on Ctrl/Cmd+Enter while textarea is focused
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || !(ev.ctrlKey || ev.metaKey)) return;
+      const ta = ev.target.closest(".reject-form textarea");
+      if (!ta) return;
+      const card = ta.closest(".card");
+      const confirmBtn = card.querySelector(".confirm-btn");
+      if (confirmBtn) confirmBtn.click();
+    });
+
+    loadReady();
+  </script>
+</body>
+</html>

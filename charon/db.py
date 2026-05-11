@@ -678,6 +678,48 @@ def update_discovery_judgement(
         conn.close()
 
 
+def mark_discovery_applied(discovery_id: int) -> bool:
+    """Flip a discovery's screened_status to 'applied'. Bridge from apply().
+    Returns True if a row was updated.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET screened_status = 'applied' WHERE id = ?",
+            (discovery_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def mark_discovery_rejected(discovery_id: int, reason: str | None = None) -> bool:
+    """Flip a discovery's screened_status to 'rejected' with an optional reason.
+    Used by the dashboard's "Not for me" action. Returns True if updated.
+
+    If a reason is provided, it overwrites judgement_reason — surfacing the
+    user's explicit rejection above whatever the AI judge said.
+    """
+    conn = get_connection()
+    try:
+        if reason:
+            cursor = conn.execute(
+                "UPDATE discoveries SET screened_status = 'rejected', "
+                "judgement_reason = ? WHERE id = ?",
+                (reason, discovery_id),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE discoveries SET screened_status = 'rejected' WHERE id = ?",
+                (discovery_id,),
+            )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def update_discovery_classification(
     discovery_id: int,
     *,
