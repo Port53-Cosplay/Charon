@@ -686,7 +686,7 @@
 
       <section class="tab-pane" data-pane="applications" hidden>
         <div class="pane-toolbar">
-          <button id="ghost-check-btn" title="Mark anything silent 21+ days as ghosted">Ghost stale</button>
+          <button id="ghost-check-btn" title="Mark anything silent 21+ days as stranded">Mark stranded</button>
         </div>
         <div id="applications-container" class="applications-list">
           <div class="state"><div class="glyph">·</div>Loading applications…</div>
@@ -819,7 +819,7 @@
       interviewing: "Interviewing",
       offered:      "Offered",
       rejected:     "Rejected",
-      ghosted:      "Ghosted",
+      ghosted:      "Stranded",  // souls Charon couldn't ferry stay on the wrong shore
     };
 
     function relativeApplied(daysSince, appliedAt) {
@@ -924,9 +924,9 @@
         const n = data.summary?.count ?? 0;
         const days = data.summary?.days ?? 21;
         if (n === 0) {
-          showToast(`No stale applications. Nothing past ${days} days of silence.`);
+          showToast(`Nothing stranded. Nothing past ${days} days of silence.`);
         } else {
-          showToast(`Ghosted ${n} application${n === 1 ? "" : "s"} (${days}+ day${days === 1 ? "" : "s"} of silence).`);
+          showToast(`Stranded ${n} application${n === 1 ? "" : "s"} (${days}+ day${days === 1 ? "" : "s"} of silence).`);
         }
         renderApplications(data.applications || []);
       } catch (e) {

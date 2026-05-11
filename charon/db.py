@@ -355,32 +355,45 @@ def get_application(app_id: int) -> dict[str, Any] | None:
         conn.close()
 
 
-STALEABLE_STATUSES = ("applied", "acknowledged", "responded", "interviewing")
+PASSIVE_STATUSES = ("applied", "acknowledged", "responded")
+ACTIVE_STATUSES = ("interviewing",)
 
 
 def get_stale_applications(days: int) -> list[dict[str, Any]]:
-    """Get applications that haven't moved in N days.
+    """Get applications that haven't really moved in N days.
 
-    "Hasn't moved" means: status is non-terminal (applied / acknowledged /
-    responded / interviewing) and the row hasn't been touched (`updated_at`)
-    in `days` days. Anchored to `updated_at` rather than `applied_at` so a
-    real status change resets the clock — an acknowledgment email yesterday
-    doesn't count as 21-day silence.
+    Two date anchors so the rule matches what "silence" actually means:
+
+      - **Passive statuses** (applied / acknowledged / responded) — anchor
+        to `applied_at`. An automated "we got your application" email is
+        not real engagement, so it shouldn't restart the silence clock.
+        If you applied 60 days ago and they auto-acked at day 1, the
+        clock still says ~60 days of company silence.
+
+      - **Active statuses** (interviewing) — anchor to `updated_at`. A
+        recent interview round IS real engagement; the clock starts from
+        the last move.
 
     Excludes:
-      - 'offered'  — positive terminal state, don't auto-ghost
+      - 'offered'  — positive terminal state, don't auto-strand
       - 'rejected' — already terminal
-      - 'ghosted'  — already terminal
+      - 'ghosted'  — already terminal (legacy DB value for stranded)
     """
-    placeholders = ",".join("?" for _ in STALEABLE_STATUSES)
+    passive_p = ",".join("?" for _ in PASSIVE_STATUSES)
+    active_p = ",".join("?" for _ in ACTIVE_STATUSES)
     conn = get_connection()
     try:
         rows = conn.execute(
             f"SELECT * FROM applications "
-            f"WHERE status IN ({placeholders}) AND ghosted_notified = 0 "
-            f"AND julianday('now') - julianday(updated_at) >= ? "
-            f"ORDER BY updated_at",
-            (*STALEABLE_STATUSES, days),
+            f"WHERE ghosted_notified = 0 AND ("
+            f"  (status IN ({passive_p}) "
+            f"   AND julianday('now') - julianday(applied_at) >= ?) "
+            f"  OR "
+            f"  (status IN ({active_p}) "
+            f"   AND julianday('now') - julianday(updated_at) >= ?) "
+            f") "
+            f"ORDER BY applied_at",
+            (*PASSIVE_STATUSES, days, *ACTIVE_STATUSES, days),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:

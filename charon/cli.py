@@ -1405,7 +1405,7 @@ def digest(send: bool, preview: bool) -> None:
 @click.option("--status", help="Filter by status or update status (with --id).")
 @click.option("--id", "app_id", type=int, help="Application ID for status update.")
 @click.option("--remove", "remove_id", type=int, help="Remove an application by ID.")
-@click.option("--ghost-check", is_flag=True, help="Check for ghosted applications.")
+@click.option("--ghost-check", is_flag=True, help="Mark stale applications as stranded (21+ days of silence).")
 @click.option("--stats", is_flag=True, help="Show application statistics.")
 def apply_cmd(
     add: bool,
@@ -1485,11 +1485,11 @@ def apply_cmd(
         ghosted = check_ghosted(days)
 
         if ghosted:
-            print_warning(f"Marked {len(ghosted)} application(s) as ghosted ({days}+ days):")
+            print_warning(f"Stranded {len(ghosted)} application(s) ({days}+ days of silence):")
             for app in ghosted:
                 console.print(f"  [danger][X][/danger] {app['company']} - {app['role']} (applied {app['applied_at'][:10]})")
         else:
-            print_info("No ghosted applications detected. Patience, mortal.")
+            print_info("Nothing stranded. Patience, mortal.")
         return
 
     if stats:
@@ -3129,18 +3129,18 @@ def daily(dry_run: bool) -> None:
         print_info("Step 1/3: Inbox scan skipped (no accounts configured).")
 
     # Step 2: Ghost check
-    print_info("Step 2/3: Checking for ghosted applications...")
+    print_info("Step 2/3: Checking for stranded applications...")
     days_threshold = prof.get("applications", {}).get("ghosted_after_days", 21)
     try:
         ghosted = check_ghosted(days_threshold)
         if ghosted:
-            print_warning(f"  Marked {len(ghosted)} application(s) as ghosted:")
+            print_warning(f"  Stranded {len(ghosted)} application(s):")
             for app in ghosted:
                 console.print(f"    [danger][X][/danger] {app['company']} - {app['role']}")
         else:
-            print_info("  No ghosted applications.")
+            print_info("  Nothing stranded.")
     except ApplyError as e:
-        print_warning(f"  Ghost check failed: {e}")
+        print_warning(f"  Stranded check failed: {e}")
 
     # Step 3: Digest
     if dry_run:
