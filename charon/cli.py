@@ -2902,6 +2902,33 @@ def _provision_one(
             print_warning(f"Render failed: {type(e).__name__}: {e}")
 
 
+@cli.command("salary")
+@click.option("--id", "discovery_id", type=int, required=True,
+              help="Discovery ID to research salary for.")
+def salary_cmd(discovery_id: int) -> None:
+    """Pull a fair-market salary range for this candidate + this posting. Web search; ~$0.05/call."""
+    from charon.salary import SalaryError, suggest_salary_for_discovery
+
+    section_header(f"SALARY #{discovery_id}")
+    try:
+        result = suggest_salary_for_discovery(discovery_id)
+    except SalaryError as e:
+        print_error(str(e))
+        return
+
+    cur = result.get("currency") or "USD"
+    sym = "$" if cur == "USD" else f"{cur} "
+    low = result.get("low")
+    mid = result.get("mid")
+    high = result.get("high")
+    conf = (result.get("confidence") or "").title() or "—"
+    print_success(f"Range: {sym}{low:,} — {sym}{high:,}   Target: {sym}{mid:,}   Confidence: {conf}")
+    if result.get("posted_range"):
+        print_info(f"Posting states: {result['posted_range']}")
+    if result.get("path"):
+        print_info(f"Saved: {result['path']}")
+
+
 @cli.command("contacts")
 @click.option("--id", "discovery_id", type=int, required=True,
               help="Discovery ID to find contacts for.")

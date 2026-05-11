@@ -518,6 +518,7 @@
       padding: 18px 22px;
       box-shadow: var(--card-shadow);
       transition: transform 0.12s ease, box-shadow 0.12s ease;
+      position: relative;
     }
 
     .card:hover {
@@ -630,30 +631,34 @@
       background: var(--lilac);
     }
 
-    .card .actions .closed-btn {
+    .card .closed-btn {
+      position: absolute;
+      top: 6px;
+      right: 8px;
       background: transparent;
-      border: 1px solid var(--card-border);
+      border: none;
       color: var(--ink-faint);
-      width: 34px;
-      height: 34px;
-      border-radius: 10px;
+      padding: 4px;
+      border-radius: 4px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-      padding: 0;
+      opacity: 0.35;
+      transition: color 0.12s ease, opacity 0.12s ease;
+      z-index: 2;
     }
 
-    .card .actions .closed-btn:hover {
-      background: var(--bg-soft);
+    .card .closed-btn:hover {
       color: var(--blush-deep);
-      border-color: var(--blush-hover);
+      opacity: 1;
     }
 
-    .card .actions .closed-btn[disabled] { opacity: 0.5; cursor: wait; }
+    .card:hover .closed-btn { opacity: 0.7; }
 
-    .card .actions .closed-btn svg { width: 16px; height: 16px; display: block; }
+    .card .closed-btn[disabled] { opacity: 0.3; cursor: wait; }
+
+    .card .closed-btn svg { width: 13px; height: 13px; display: block; }
 
     .card .actions .apply-btn {
       background: var(--blush);
@@ -786,6 +791,23 @@
     }
 
     .card .actions .contacts-btn[disabled] { opacity: 0.7; cursor: wait; }
+
+    .card .actions .salary-btn {
+      background: transparent;
+      color: var(--gold-deep);
+      border: 1px solid var(--gold);
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 10px;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      transition: background 0.12s ease;
+      font-family: inherit;
+    }
+
+    .card .actions .salary-btn:hover { background: var(--gold-soft); }
+    .card .actions .salary-btn[disabled] { opacity: 0.7; cursor: wait; }
 
     /* ── expandable detail section ───────────────────────────── */
 
@@ -1410,6 +1432,9 @@
       const contactsBadge = d.has_contacts
         ? `<span class="badge" title="LinkedIn contacts saved to folder">contacts</span>`
         : "";
+      const salaryBadge = d.has_salary
+        ? `<span class="badge" title="Salary intel saved to folder">salary</span>`
+        : "";
       const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
       const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
 
@@ -1442,8 +1467,14 @@
         ? `<button class="contacts-btn" data-id="${d.id}">${d.has_contacts ? "Refresh contacts" : "Find contacts"}</button>`
         : "";
 
+      // Salary intel: also requires offerings folder (needs somewhere to save the .md)
+      const salaryBtn = hasOfferings
+        ? `<button class="salary-btn" data-id="${d.id}">${d.has_salary ? "Refresh salary" : "Salary intel"}</button>`
+        : "";
+
       return `
         <article class="card" data-id="${d.id}">
+          ${closedBtn}
           <div class="head">
             <div class="titles">
               <div class="company">${escapeHtml(d.company)} <span class="id">· #${d.id}</span></div>
@@ -1458,12 +1489,13 @@
             ${atsBadge}
             ${offeringsBadge}
             ${contactsBadge}
+            ${salaryBadge}
           </div>
           <div class="actions">
             ${posting}
-            ${closedBtn}
             ${materialsBtn}
             ${contactsBtn}
+            ${salaryBtn}
             <button class="apply-btn" data-id="${d.id}">Mark applied</button>
             <button class="reject-btn" data-id="${d.id}">Not for me</button>
           </div>
@@ -2094,6 +2126,36 @@
       }
     }
 
+    async function fetchSalary(id, cardEl) {
+      const btn = cardEl.querySelector(".salary-btn");
+      if (!btn) return;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="prep-status">Researching<span class="dots"></span></span>`;
+      showToast(`Pulling salary intel for #${id} — usually 20-40 seconds.`);
+
+      try {
+        const r = await fetch(`/api/salary/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        const s = data.salary || {};
+        const cur = s.currency || "USD";
+        const sym = cur === "USD" ? "$" : `${cur} `;
+        const fmt = n => (typeof n === "number" ? `${sym}${n.toLocaleString()}` : "—");
+        const conf = (s.confidence || "—").toString();
+        showToast(`#${id}: ${fmt(s.low)}–${fmt(s.high)} · target ${fmt(s.mid)} · ${conf}. Saved.`);
+        renderList(data.ready || []);
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Salary intel";
+        showToast("Couldn't fetch salary: " + e.message, true);
+      }
+    }
+
     async function findContacts(id, cardEl) {
       const btn = cardEl.querySelector(".contacts-btn");
       if (!btn) return;
@@ -2235,6 +2297,15 @@
         const card = contactsBtn.closest(".card");
         const id = contactsBtn.getAttribute("data-id");
         if (id && card) findContacts(id, card);
+        return;
+      }
+
+      // Salary intel
+      const salaryBtn = ev.target.closest(".salary-btn");
+      if (salaryBtn && !salaryBtn.disabled) {
+        const card = salaryBtn.closest(".card");
+        const id = salaryBtn.getAttribute("data-id");
+        if (id && card) fetchSalary(id, card);
         return;
       }
 

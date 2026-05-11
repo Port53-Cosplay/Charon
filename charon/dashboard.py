@@ -352,11 +352,17 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
 
     offerings_path = r.get("offerings_path")
     has_contacts = False
+    has_salary = False
     if offerings_path:
         try:
             has_contacts = (Path(offerings_path) / CONTACTS_FILENAME).exists()
         except OSError:
             has_contacts = False
+        try:
+            from charon.salary import SALARY_FILENAME
+            has_salary = (Path(offerings_path) / SALARY_FILENAME).exists()
+        except OSError:
+            has_salary = False
 
     # Parse judgement_detail if it's structured JSON; surface a digest the UI
     # can render without re-parsing the whole blob.
@@ -386,6 +392,7 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "forged_at": r.get("forged_at"),
         "petition_at": r.get("petition_at"),
         "has_contacts": has_contacts,
+        "has_salary": has_salary,
         # Detail-view fields (loaded eagerly so click-to-expand is instant)
         "full_description": r.get("full_description"),
         "judgement_reason": r.get("judgement_reason"),
@@ -612,6 +619,17 @@ def _find_contacts(discovery_id: int) -> dict[str, Any]:
         raise DashboardError(str(e)) from e
 
 
+def _salary_lookup(discovery_id: int) -> dict[str, Any]:
+    """Bridge: pull salary intel for a discovery with web search + resume
+    context, persist to its offerings folder. ~20-40s on Sonnet."""
+    from charon.salary import SalaryError, suggest_salary_for_discovery
+
+    try:
+        return suggest_salary_for_discovery(discovery_id)
+    except SalaryError as e:
+        raise DashboardError(str(e)) from e
+
+
 def _open_offerings_folder(discovery_id: int) -> dict[str, Any]:
     """Open the offering's folder in the user's file manager.
 
@@ -768,6 +786,21 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._serve_json(
                 {"ok": True, "contacts": summary, "ready": _ready_discoveries()}
+            )
+            return
+        if path.startswith("/api/salary/"):
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            try:
+                summary = _salary_lookup(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json(
+                {"ok": True, "salary": summary, "ready": _ready_discoveries()}
             )
             return
         if path == "/api/ghost-check":
