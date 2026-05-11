@@ -220,6 +220,237 @@
 
     .stats-band .stat .num.placeholder { color: var(--ink-faint); }
 
+    .stats-band .chart-link {
+      flex: 0 0 auto;
+      align-self: center;
+      margin-left: 4px;
+      background: transparent;
+      border: 1px solid var(--lilac);
+      color: var(--plum-soft);
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .stats-band .chart-link:hover {
+      background: var(--lilac-soft);
+      color: var(--plum);
+    }
+
+    .stats-band .chart-link svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+
+    /* ── chart modal ─────────────────────────────────────────── */
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(42, 26, 58, 0.55);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 24px;
+      overflow-y: auto;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+
+    .modal-backdrop.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal {
+      background: var(--bg);
+      border-radius: 18px;
+      max-width: 920px;
+      width: 100%;
+      padding: 28px 32px 32px;
+      box-shadow: 0 24px 64px rgba(42, 26, 58, 0.4);
+    }
+
+    .modal header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 24px;
+      padding-bottom: 14px;
+      border-bottom: 2px solid var(--lilac);
+    }
+
+    .modal header h2 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--plum);
+      letter-spacing: -0.01em;
+    }
+
+    .modal header .sub {
+      color: var(--ink-muted);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+    }
+
+    .modal .close-btn {
+      background: transparent;
+      border: 1px solid var(--card-border);
+      color: var(--ink-muted);
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .modal .close-btn:hover {
+      background: var(--lilac-soft);
+      color: var(--plum);
+    }
+
+    .chart-panel {
+      background: var(--paper);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      margin-bottom: 18px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .chart-panel h3 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 18px;
+      color: var(--plum);
+      margin-bottom: 4px;
+      letter-spacing: -0.005em;
+    }
+
+    .chart-panel .caption {
+      font-size: 12px;
+      color: var(--ink-muted);
+      margin-bottom: 16px;
+      letter-spacing: 0.02em;
+    }
+
+    /* Funnel waterfall — each row a "river crossing" */
+    .funnel-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .funnel-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 100px;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .funnel-row .stage {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .funnel-bar {
+      height: 28px;
+      border-radius: 6px;
+      background: var(--lilac-soft);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .funnel-bar .fill {
+      position: absolute;
+      inset: 0;
+      width: 0%;
+      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      background: linear-gradient(135deg, var(--plum-soft) 0%, var(--plum) 60%);
+    }
+
+    .funnel-row .count {
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+
+    .funnel-row .count .pct {
+      color: var(--ink-muted);
+      font-size: 11px;
+      margin-left: 4px;
+    }
+
+    /* Charts row — donut + time series side by side */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    @media (max-width: 720px) {
+      .charts-row { grid-template-columns: 1fr; }
+    }
+
+    /* Donut */
+    .donut-wrap {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .donut-wrap svg { flex: 0 0 auto; }
+
+    .donut-legend {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      font-size: 12px;
+    }
+
+    .donut-legend li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      color: var(--ink-soft);
+    }
+
+    .donut-legend .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      flex: 0 0 auto;
+    }
+
+    .donut-legend .ct {
+      color: var(--ink-muted);
+      margin-left: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Time series */
+    .series-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
     .pane-toolbar {
       display: flex;
       gap: 10px;
@@ -968,6 +1199,14 @@
         <div class="stat"><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
         <div class="stat dim"><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
         <div class="stat"><div class="num placeholder" id="stat-reply-rate">—</div><div class="label">Reply rate</div></div>
+        <button id="open-charts-btn" class="chart-link" title="Open visual breakdown" aria-label="Open visual breakdown">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="20" x2="21" y2="20"></line>
+            <rect x="5" y="11" width="3" height="7"></rect>
+            <rect x="10.5" y="7" width="3" height="11"></rect>
+            <rect x="16" y="14" width="3" height="4"></rect>
+          </svg>
+        </button>
       </div>
 
       <section class="tab-pane" data-pane="ready">
@@ -994,6 +1233,40 @@
   </div>
 
   <div id="toast" class="toast"></div>
+
+  <div id="charts-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="charts-title">
+      <header>
+        <div>
+          <h2 id="charts-title">Charon's Pulse</h2>
+          <div class="sub">The funnel, the fates, the rhythm</div>
+        </div>
+        <button class="close-btn" id="close-charts-btn" aria-label="Close">×</button>
+      </header>
+
+      <div class="chart-panel">
+        <h3>The crossing</h3>
+        <div class="caption">Each tier of the Styx — who makes it across, who doesn't.</div>
+        <div class="funnel-rows" id="funnel-rows"></div>
+      </div>
+
+      <div class="charts-row">
+        <div class="chart-panel">
+          <h3>The fates</h3>
+          <div class="caption">Where your applications end up.</div>
+          <div class="donut-wrap">
+            <svg id="donut-svg" width="160" height="160" viewBox="0 0 160 160"></svg>
+            <ul class="donut-legend" id="donut-legend"></ul>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <h3>The rhythm</h3>
+          <div class="caption">Applications submitted each week.</div>
+          <svg id="series-svg" class="series-svg" viewBox="0 0 320 160" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     const escapeHtml = (s) =>
@@ -1214,6 +1487,163 @@
         setStat("stat-stranded", s.stranded);
         setStat("stat-reply-rate", s.reply_rate, true);
       } catch (e) { /* silent — stats are decorative */ }
+    }
+
+    // ── Charts modal ───────────────────────────────────────────
+
+    const STATUS_COLORS = {
+      applied:      "#D7C5EE",
+      acknowledged: "#E4C77A",
+      responded:    "#E4C77A",
+      interviewing: "#95C9AC",
+      offered:      "#6BA890",
+      rejected:     "#F0B8D6",
+      ghosted:      "#C8C0D6",
+    };
+
+    function renderFunnel(stages) {
+      const rows = document.getElementById("funnel-rows");
+      if (!stages || stages.length === 0) {
+        rows.innerHTML = `<div style="color:var(--ink-muted);font-size:12px">No data yet.</div>`;
+        return;
+      }
+      const top = Math.max(stages[0].count, 1);
+      rows.innerHTML = stages.map((s, i) => {
+        const pct = (s.count / top) * 100;
+        const prev = i > 0 ? stages[i - 1].count : null;
+        const dropPct = (prev && prev > 0) ? Math.round((s.count / prev) * 100) : null;
+        const dropLabel = dropPct !== null ? `<span class="pct">(${dropPct}%)</span>` : "";
+        return `
+          <div class="funnel-row">
+            <div class="stage">${escapeHtml(s.label)}</div>
+            <div class="funnel-bar"><div class="fill" data-pct="${pct.toFixed(2)}"></div></div>
+            <div class="count">${s.count.toLocaleString()}${dropLabel}</div>
+          </div>`;
+      }).join("");
+      // Animate bars in next frame
+      requestAnimationFrame(() => {
+        rows.querySelectorAll(".fill").forEach(el => {
+          el.style.width = el.getAttribute("data-pct") + "%";
+        });
+      });
+    }
+
+    function renderDonut(breakdown) {
+      const svg = document.getElementById("donut-svg");
+      const legend = document.getElementById("donut-legend");
+      const total = breakdown.reduce((acc, b) => acc + b.count, 0);
+      if (total === 0) {
+        svg.innerHTML = `<text x="80" y="84" text-anchor="middle" fill="#8B7BA0" font-size="13">No data</text>`;
+        legend.innerHTML = "";
+        return;
+      }
+      const cx = 80, cy = 80, r = 64, inner = 42;
+      let start = -Math.PI / 2;
+      const slices = [];
+      const legendItems = [];
+      breakdown.forEach(b => {
+        if (b.count <= 0) return;
+        const frac = b.count / total;
+        const end = start + frac * Math.PI * 2;
+        const color = STATUS_COLORS[b.status] || "#D7C5EE";
+        const x1 = cx + r * Math.cos(start);
+        const y1 = cy + r * Math.sin(start);
+        const x2 = cx + r * Math.cos(end);
+        const y2 = cy + r * Math.sin(end);
+        const xi1 = cx + inner * Math.cos(start);
+        const yi1 = cy + inner * Math.sin(start);
+        const xi2 = cx + inner * Math.cos(end);
+        const yi2 = cy + inner * Math.sin(end);
+        const largeArc = frac > 0.5 ? 1 : 0;
+        const d = [
+          `M ${x1} ${y1}`,
+          `A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`,
+          `L ${xi2} ${yi2}`,
+          `A ${inner} ${inner} 0 ${largeArc} 0 ${xi1} ${yi1}`,
+          "Z",
+        ].join(" ");
+        slices.push(`<path d="${d}" fill="${color}"></path>`);
+        legendItems.push(`
+          <li>
+            <span class="swatch" style="background:${color}"></span>
+            <span>${escapeHtml(STATUS_LABELS[b.status] || b.status)}</span>
+            <span class="ct">${b.count}</span>
+          </li>`);
+        start = end;
+      });
+      slices.push(
+        `<text x="${cx}" y="${cy - 4}" text-anchor="middle" fill="#4A2C70" font-family="Fraunces" font-size="22" font-weight="600">${total}</text>`,
+        `<text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="#8B7BA0" font-size="10" letter-spacing="2" text-transform="uppercase">TOTAL</text>`,
+      );
+      svg.innerHTML = slices.join("");
+      legend.innerHTML = legendItems.join("");
+    }
+
+    function renderTimeSeries(weekly) {
+      const svg = document.getElementById("series-svg");
+      if (!weekly || weekly.length === 0) {
+        svg.innerHTML = `<text x="160" y="84" text-anchor="middle" fill="#8B7BA0" font-size="12">No applications yet.</text>`;
+        return;
+      }
+      const W = 320, H = 160, pad = { top: 12, right: 14, bottom: 26, left: 26 };
+      const innerW = W - pad.left - pad.right;
+      const innerH = H - pad.top - pad.bottom;
+      const maxY = Math.max(...weekly.map(w => w.submitted), 1);
+      const n = weekly.length;
+      const step = n > 1 ? innerW / (n - 1) : 0;
+      const xAt = i => pad.left + i * step;
+      const yAt = v => pad.top + innerH - (v / maxY) * innerH;
+
+      const pointsSubmitted = weekly.map((w, i) => `${xAt(i)},${yAt(w.submitted)}`).join(" ");
+      const pointsEngaged = weekly.map((w, i) => `${xAt(i)},${yAt(w.engaged)}`).join(" ");
+      const areaPath = `M ${pad.left} ${pad.top + innerH} L ${pointsSubmitted.split(" ").join(" L ")} L ${pad.left + (n - 1) * step} ${pad.top + innerH} Z`;
+
+      // Y-axis ticks: 0 and max only, keep it minimal
+      const yTicks = `
+        <text x="${pad.left - 6}" y="${pad.top + 4}" text-anchor="end" fill="#8B7BA0" font-size="9">${maxY}</text>
+        <text x="${pad.left - 6}" y="${pad.top + innerH + 2}" text-anchor="end" fill="#8B7BA0" font-size="9">0</text>
+      `;
+
+      // X-axis label — first and last week_start
+      const fmt = s => (s ? s.slice(5) : "");
+      const xTicks = `
+        <text x="${pad.left}" y="${H - 8}" text-anchor="start" fill="#8B7BA0" font-size="9">${fmt(weekly[0].week_start)}</text>
+        <text x="${pad.left + innerW}" y="${H - 8}" text-anchor="end" fill="#8B7BA0" font-size="9">${fmt(weekly[n - 1].week_start)}</text>
+      `;
+
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.innerHTML = `
+        <path d="${areaPath}" fill="#D7C5EE" opacity="0.55"></path>
+        <polyline points="${pointsSubmitted}" fill="none" stroke="#6845A0" stroke-width="2"></polyline>
+        <polyline points="${pointsEngaged}" fill="none" stroke="#6BA890" stroke-width="2" stroke-dasharray="3 3"></polyline>
+        ${yTicks}
+        ${xTicks}
+        <text x="${pad.left + innerW}" y="${pad.top - 2}" text-anchor="end" fill="#6845A0" font-size="9">— submitted</text>
+        <text x="${pad.left + innerW}" y="${pad.top + 9}" text-anchor="end" fill="#6BA890" font-size="9">- - engaged</text>
+      `;
+    }
+
+    async function openChartsModal() {
+      const backdrop = document.getElementById("charts-modal");
+      backdrop.classList.add("show");
+      backdrop.setAttribute("aria-hidden", "false");
+      try {
+        const r = await fetch("/api/stats?charts=1");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        const s = data.stats || {};
+        renderFunnel(s.funnel || []);
+        renderDonut(s.breakdown || []);
+        renderTimeSeries(s.weekly || []);
+      } catch (e) {
+        showToast("Couldn't load charts: " + e.message, true);
+      }
+    }
+
+    function closeChartsModal() {
+      const backdrop = document.getElementById("charts-modal");
+      backdrop.classList.remove("show");
+      backdrop.setAttribute("aria-hidden", "true");
     }
 
     // ── Refused tab ────────────────────────────────────────────
@@ -1654,6 +2084,21 @@
         return;
       }
 
+      // Open / close charts modal
+      if (ev.target.closest("#open-charts-btn")) {
+        openChartsModal();
+        return;
+      }
+      if (ev.target.closest("#close-charts-btn")) {
+        closeChartsModal();
+        return;
+      }
+      // Click on backdrop (not the modal content) closes
+      if (ev.target.id === "charts-modal") {
+        closeChartsModal();
+        return;
+      }
+
       // Card expand/collapse toggle
       const expandBtn = ev.target.closest(".expand-toggle");
       if (expandBtn) {
@@ -1766,6 +2211,14 @@
 
     // Submit reject form on Ctrl/Cmd+Enter while textarea is focused
     document.addEventListener("keydown", (ev) => {
+      // Esc closes the charts modal first if open
+      if (ev.key === "Escape") {
+        const modal = document.getElementById("charts-modal");
+        if (modal && modal.classList.contains("show")) {
+          closeChartsModal();
+          return;
+        }
+      }
       if (ev.key !== "Enter" || !(ev.ctrlKey || ev.metaKey)) return;
       const ta = ev.target.closest(".reject-form textarea");
       if (!ta) return;

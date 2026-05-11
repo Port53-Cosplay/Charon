@@ -100,11 +100,11 @@ def _unreject_discovery(discovery_id: int) -> dict[str, Any]:
     return {"id": discovery_id, "new_status": "ready"}
 
 
-def _stats() -> dict[str, Any]:
+def _stats(include_charts: bool = False) -> dict[str, Any]:
     """Pipeline-wide counters for the stats band.
 
-    All counts are over the lifetime of the DB — no time window. Gives a
-    sense of the funnel's shape: how many came in, how many made it through.
+    With include_charts=True, returns extra data for the visualization
+    page: per-status application counts and a weekly application series.
     """
     from charon.db import get_connection
 
@@ -121,6 +121,28 @@ def _stats() -> dict[str, Any]:
         refused = cur.fetchone()[0]
         cur.execute("SELECT status, COUNT(*) FROM applications GROUP BY status")
         app_buckets = dict(cur.fetchall())
+
+        weekly: list[dict[str, Any]] = []
+        if include_charts:
+            # Weekly buckets keyed to the Monday of each week. SQLite's
+            # `weekday 0` = Sunday; subtract a day to anchor to Monday.
+            cur.execute(
+                "SELECT date(applied_at, 'weekday 1', '-7 days') AS week_start, "
+                "       COUNT(*) AS submitted, "
+                "       SUM(CASE WHEN status NOT IN ('applied','ghosted') THEN 1 ELSE 0 END) AS engaged, "
+                "       SUM(CASE WHEN status = 'offered' THEN 1 ELSE 0 END) AS offered "
+                "FROM applications "
+                "WHERE applied_at IS NOT NULL "
+                "GROUP BY week_start "
+                "ORDER BY week_start"
+            )
+            for row in cur.fetchall():
+                weekly.append({
+                    "week_start": row[0],
+                    "submitted": row[1] or 0,
+                    "engaged": row[2] or 0,
+                    "offered": row[3] or 0,
+                })
     finally:
         conn.close()
 
@@ -130,7 +152,7 @@ def _stats() -> dict[str, Any]:
     engaged = total_apps - stranded - pending
     reply_rate = (engaged / total_apps * 100.0) if total_apps else None
 
-    return {
+    out: dict[str, Any] = {
         "gathered": gathered,
         "judged": judged,
         "ready": ready,
@@ -141,6 +163,30 @@ def _stats() -> dict[str, Any]:
         "engaged": engaged,
         "reply_rate": round(reply_rate, 1) if reply_rate is not None else None,
     }
+
+    if include_charts:
+        # Application status breakdown — order matches the dashboard's
+        # status palette so the donut wedge colors line up.
+        breakdown_order = (
+            "applied", "acknowledged", "responded",
+            "interviewing", "offered", "rejected", "ghosted",
+        )
+        out["breakdown"] = [
+            {"status": s, "count": app_buckets.get(s, 0)}
+            for s in breakdown_order
+        ]
+        # Funnel waterfall — six stages, each a strict subset of the prior.
+        offered = app_buckets.get("offered", 0)
+        out["funnel"] = [
+            {"label": "Gathered",  "count": gathered,   "key": "gathered"},
+            {"label": "Judged",    "count": judged,     "key": "judged"},
+            {"label": "Ready",     "count": ready,      "key": "ready"},
+            {"label": "Applied",   "count": total_apps, "key": "applied"},
+            {"label": "Engaged",   "count": engaged,    "key": "engaged"},
+            {"label": "Offered",   "count": offered,    "key": "offered"},
+        ]
+        out["weekly"] = weekly
+    return out
 
 
 ARCHIVE_DAYS = 45
@@ -631,7 +677,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json({"refused": _refused_discoveries()})
             return
         if path == "/api/stats":
-            self._serve_json({"stats": _stats()})
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            include_charts = qs.get("charts", ["0"])[0] in {"1", "true", "yes"}
+            self._serve_json({"stats": _stats(include_charts=include_charts)})
             return
         if path == "/api/applications":
             qs = urllib.parse.parse_qs(parsed.query or "")
