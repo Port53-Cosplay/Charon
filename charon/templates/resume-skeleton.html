@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Resume — Skeleton</title>
+
+  <!-- Production: inline the CSS file contents into a <style> block here.
+       During development: link to it. -->
+  <link rel="stylesheet" href="charon-document-style.css">
+</head>
+
+<!-- Body MUST have both classes: "document" and "resume" -->
+<body class="document resume">
+  <div class="page">
+
+    <!-- ===== IDENTITY HEADER ===== -->
+    <header class="identity">
+      <div class="name">DeAnna Shanks</div>
+      <div class="tagline">
+        Cybersecurity Analyst<span class="sep">|</span>Digital Forensics &amp; Incident Response<span class="sep">|</span>Security Researcher
+      </div>
+      <div class="contact">
+        <div class="contact-row">
+          <a href="mailto:dshanks@duck.com">dshanks@duck.com</a><span class="sep">·</span>423-534-3535<span class="sep">·</span>Johnson City, TN<span class="sep">·</span>Open to Remote
+        </div>
+        <div class="contact-row">
+          <a href="https://linkedin.com/in/deanna-shanks-3473b8233">linkedin.com/in/deanna-shanks-3473b8233</a><span class="sep">·</span><a href="https://github.com/Port53-Cosplay">github.com/Port53-Cosplay</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== PROFESSIONAL SUMMARY — single paragraph ===== -->
+    <section>
+      <h2 class="section">Professional Summary</h2>
+      <p class="summary">
+        One-paragraph summary goes here. Free prose, ~3-5 sentences.
+      </p>
+    </section>
+
+    <!-- ===== EXPERIENCE — list of .entry blocks ===== -->
+    <section>
+      <h2 class="section">Experience</h2>
+
+      <!-- Standard job entry: head + optional lead paragraph + bullet list -->
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">Role Title <span class="at">| Company Name</span></div>
+          <div class="entry-meta">Start &ndash; End &nbsp;·&nbsp; Location</div>
+        </div>
+        <p class="entry-lead">
+          Optional one-line summary paragraph that orients the reader before bullets.
+        </p>
+        <ul>
+          <li>Bullet point one.</li>
+          <li>Bullet point two.</li>
+        </ul>
+      </div>
+
+      <!-- Minimal entry: no lead paragraph, just bullets -->
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">Role Title <span class="at">| Company Name</span></div>
+          <div class="entry-meta">Start &ndash; End &nbsp;·&nbsp; Location</div>
+        </div>
+        <ul>
+          <li>Bullet point.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ===== PROJECTS — entries with URL or tag in the meta slot ===== -->
+    <section>
+      <h2 class="section">Security Research &amp; Projects</h2>
+
+      <!-- Project with repo URL in meta -->
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">Project Name <span class="at">&middot; Subtitle</span></div>
+          <div class="entry-meta project-url">
+            <a href="https://github.com/...">github.com/owner/repo</a>
+          </div>
+        </div>
+        <p class="entry-lead">Project description paragraph.</p>
+      </div>
+
+      <!-- Project with italic tag in meta (e.g., "in daily use") -->
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">Project Name <span class="at">&middot; Subtitle</span></div>
+          <div class="entry-meta project-tag">in daily use</div>
+        </div>
+        <p class="entry-lead">Project description paragraph.</p>
+      </div>
+    </section>
+
+    <!-- ===== CERTIFICATIONS — compact-block with optional .label rows ===== -->
+    <section>
+      <h2 class="section">Certifications</h2>
+      <div class="compact-block">
+        <div class="row"><span class="label">In Progress</span>ISACA CISA</div>
+        <div class="row">CompTIA PenTest+<span class="dot">·</span>CompTIA CySA+<span class="dot">·</span>ISC2 SSCP</div>
+      </div>
+    </section>
+
+    <!-- ===== TECHNICAL SKILLS — compact-block, no labels ===== -->
+    <section>
+      <h2 class="section">Technical Skills</h2>
+      <div class="compact-block">
+        <div class="row">Incident Response<span class="dot">·</span>Threat Hunting<span class="dot">·</span>Digital Forensics</div>
+        <div class="row">Python<span class="dot">·</span>Bash<span class="dot">·</span>SQL</div>
+      </div>
+    </section>
+
+    <!-- ===== EDUCATION — edu-block (specialized entry) ===== -->
+    <section>
+      <h2 class="section">Education</h2>
+      <div class="edu-block entry">
+        <div class="entry-head">
+          <div>
+            <div class="degree">Degree Name</div>
+            <div class="school">School Name</div>
+            <div class="accred">Optional accreditation / honors line.</div>
+          </div>
+          <div class="grad">Graduated Month Year</div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

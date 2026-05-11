@@ -89,7 +89,7 @@ def cli() -> None:
 def funnel() -> None:
     """The funnel, in order. When you forget what comes next."""
     console.print()
-    console.print("[header]The Funnel[/header]  [dim]gather -> enrich -> judge -> provision -> offerings[/dim]")
+    console.print("[header]The Funnel[/header]  [dim]gather -> enrich -> judge -> provision -> offerings -> render[/dim]")
     console.print("[dim]" + "-" * 70 + "[/dim]")
 
     steps = [
@@ -111,6 +111,8 @@ def funnel() -> None:
         ("5", "offerings", "Find the generated materials on disk.",
             ["charon offerings --id <N>            # show paths",
              "charon offerings --id <N> --open     # open the folder"]),
+        ("6", "render",    "Convert offering .md to styled HTML for browser print-to-PDF.",
+            ["charon render --id <N>               # writes resume.html + cover_letter.html"]),
     ]
 
     for num, name, desc, examples in steps:
@@ -2878,6 +2880,39 @@ def _provision_one(
             discovery_id,
             offerings_path=petition_result.get("offerings_path"),
         )
+
+
+@cli.command("render")
+@click.option("--id", "discovery_id", type=int, required=True,
+              help="Render the offering with this discovery ID.")
+def render_cmd(discovery_id: int) -> None:
+    """Render offering .md files to styled HTML. Print to PDF from your browser."""
+    from charon.render import RenderError, render_offering
+
+    section_header(f"RENDER #{discovery_id}")
+    try:
+        result = render_offering(discovery_id)
+    except RenderError as e:
+        print_error(str(e))
+        return
+
+    if result.get("resume_path"):
+        print_success(f"Wrote {result['resume_path']}")
+    else:
+        print_info("No resume.md found in offering folder.")
+
+    if result.get("cover_letter_path"):
+        print_success(f"Wrote {result['cover_letter_path']}")
+    else:
+        print_info("No cover_letter.md found in offering folder.")
+
+    for err in result.get("errors") or []:
+        print_warning(err)
+
+    if result.get("folder"):
+        console.print()
+        print_info(f"Folder: {result['folder']}")
+        print_info("Open the .html files in your browser, then File -> Print -> Save as PDF.")
 
 
 @cli.command("offerings")
