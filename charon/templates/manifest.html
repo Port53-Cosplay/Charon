@@ -1823,7 +1823,7 @@
         <div id="judge-progress" class="judge-progress" hidden>
           <span class="nums"><span id="judge-processed">0</span>/<span id="judge-total">0</span></span>
           <div class="progress-bar"><div class="progress-fill" id="judge-fill"></div></div>
-          <span class="breakdown">ready +<span id="judge-ready-added">0</span> · refused +<span id="judge-refused-added">0</span></span>
+          <span class="breakdown">ready +<span id="judge-ready-added">0</span> · refused +<span id="judge-refused-added">0</span> · skipped <span id="judge-skipped">0</span></span>
         </div>
         <div id="list-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading…</div>
@@ -2778,6 +2778,7 @@
       document.getElementById("judge-fill").style.width = `${pct}%`;
       document.getElementById("judge-ready-added").textContent = state.ready_added || 0;
       document.getElementById("judge-refused-added").textContent = state.refused_added || 0;
+      document.getElementById("judge-skipped").textContent = state.skipped || 0;
     }
 
     async function pollJudgeProgress() {
@@ -2801,7 +2802,9 @@
           } else {
             const r = state.ready_added || 0;
             const x = state.refused_added || 0;
-            showToast(`Judge complete: ${r} ready, ${x} refused.`);
+            const s = state.skipped || 0;
+            const sk = s > 0 ? `, ${s} skipped` : "";
+            showToast(`Judge complete: ${r} ready, ${x} refused${sk}.`);
           }
         }
       } catch (e) {

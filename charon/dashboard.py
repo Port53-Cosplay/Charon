@@ -308,6 +308,7 @@ _judge_state: dict[str, Any] = {
     "processed": 0,
     "ready_added": 0,
     "refused_added": 0,
+    "skipped": 0,
     "error": None,
 }
 
@@ -326,7 +327,13 @@ def _judge_worker(limit: int, ats: str | None) -> None:
         status = result.get("screened_status")
         with _judge_lock:
             _judge_state["processed"] += 1
-            if status == "ready":
+            # A result with an "error" key means judge_one_id failed
+            # before writing — the DB never sets judged_at. Bucket as
+            # "skipped" instead of "refused" so the dashboard count
+            # reflects real outcomes, not error-disguised-as-refusal.
+            if result.get("error"):
+                _judge_state["skipped"] += 1
+            elif status == "ready":
                 _judge_state["ready_added"] += 1
             elif status == "rejected":
                 _judge_state["refused_added"] += 1
@@ -369,6 +376,7 @@ def _start_judge_batch(limit: int, ats: str | None = None) -> dict[str, Any]:
             "processed": 0,
             "ready_added": 0,
             "refused_added": 0,
+            "skipped": 0,
             "error": None,
         })
     threading.Thread(

@@ -787,13 +787,20 @@ def get_unjudged_discoveries(
 ) -> list[dict[str, Any]]:
     """Discoveries that haven't been judged yet (judged_at IS NULL).
 
-    By default also requires enrichment_tier IS NOT NULL — judging without
-    a description is pointless. Set require_enriched=False to override.
+    By default requires enrichment_tier IS NOT NULL AND a non-empty
+    full_description — judging without a description is pointless.
+    Failed-enrichment rows (tier='failed' with desc_len=0) get
+    excluded explicitly so judge doesn't burn cycles re-picking
+    them every batch only to error out at the "no usable
+    description" check. Set require_enriched=False to override.
     """
     clauses = ["judged_at IS NULL"]
     params: list[Any] = []
     if require_enriched:
         clauses.append("enrichment_tier IS NOT NULL")
+        clauses.append("enrichment_tier != 'failed'")
+        clauses.append("full_description IS NOT NULL")
+        clauses.append("length(full_description) > 0")
     if ats:
         clauses.append("ats = ?")
         params.append(ats)
