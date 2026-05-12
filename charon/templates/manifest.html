@@ -571,6 +571,23 @@
 
     .pane-toolbar button[disabled] { opacity: 0.7; cursor: wait; }
 
+    .awaiting-header {
+      background: var(--paper);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      box-shadow: var(--card-shadow);
+    }
+
+    .awaiting-header strong {
+      color: var(--plum);
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
     .judge-form {
       display: flex;
       align-items: center;
@@ -1793,7 +1810,7 @@
       <nav class="tabs">
         <button class="tab" data-tab="gathered">
           <img class="tab-icon" src="/static/charon_ore.png" alt="">
-          <span class="tab-label">Gathered</span><span class="tab-count" id="count-gathered">—</span>
+          <span class="tab-label">Awaiting</span><span class="tab-count" id="count-gathered">—</span>
         </button>
         <button class="tab active" data-tab="ready">
           <img class="tab-icon" src="/static/charon_compass.png" alt="">
@@ -1833,6 +1850,9 @@
       </div>
 
       <section class="tab-pane" data-pane="gathered" hidden>
+        <div class="awaiting-header" id="awaiting-header">
+          <span><strong id="awaiting-count">—</strong> of <strong id="awaiting-lifetime">—</strong> lifetime · waiting to be scored</span>
+        </div>
         <div id="gathered-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading the queue…</div>
         </div>
@@ -2382,6 +2402,11 @@
       const container = document.getElementById("gathered-container");
       const chipTotal = (total != null) ? total : gathered.length;
       document.getElementById("count-gathered").textContent = chipTotal;
+      // Header: "{awaiting} of {lifetime} · waiting to be scored"
+      const lifetimeEl = document.getElementById("stat-gathered");
+      const lifetime = lifetimeEl ? lifetimeEl.textContent : "—";
+      document.getElementById("awaiting-count").textContent = chipTotal;
+      document.getElementById("awaiting-lifetime").textContent = lifetime;
       if (gathered.length === 0) {
         container.innerHTML = `
           <div class="state">
