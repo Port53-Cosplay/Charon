@@ -2111,15 +2111,16 @@
         const data = await r.json();
         const state = data.status || {};
         setJudgeProgress(state);
-        // Refresh ready list as new rows pass through
+        // Refresh ready list AND stats as new rows pass through — stats
+        // band stays live instead of waiting for the run to finish.
         loadReady();
+        loadStats();
         if (state.running) {
           setTimeout(pollJudgeProgress, 4000);
         } else {
           // Done
           document.getElementById("judge-progress").hidden = true;
           document.getElementById("judge-more-btn").disabled = false;
-          loadStats();
           if (state.error) {
             showToast("Judge failed: " + state.error, true);
           } else {
@@ -2628,6 +2629,22 @@
     loadApplications();
     loadRefused();
     loadStats();
+
+    // Background tabs get throttled by browsers — refresh whenever the
+    // user comes back to this tab so the numbers reflect any CLI judge
+    // runs or activity that happened while elsewhere.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        loadStats();
+        const active = document.querySelector(".tab.active");
+        if (active) {
+          const name = active.dataset.tab;
+          if (name === "ready") loadReady();
+          else if (name === "applications") loadApplications();
+          else if (name === "refused") loadRefused();
+        }
+      }
+    });
     // If a judge run is in progress on the server, pick up the indicator
     fetch("/api/judge/status").then(r => r.json()).then(d => {
       if (d?.status?.running) {
