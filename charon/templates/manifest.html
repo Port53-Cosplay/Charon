@@ -817,6 +817,49 @@
 
     .sirens-output .save-btn:hover { background: var(--lilac-soft); color: var(--plum); }
 
+    .post-timing {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px dashed var(--card-border);
+      font-size: 12px;
+      color: var(--ink-muted);
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .post-timing .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+      margin-top: 3px;
+    }
+
+    .post-timing .dot.peak { background: #6BA890; }     /* green */
+    .post-timing .dot.ok   { background: #E4C77A; }     /* gold */
+    .post-timing .dot.cold { background: var(--ink-faint); }
+
+    .post-timing .body { flex: 1 1 auto; }
+
+    .post-timing .body .verdict {
+      color: var(--ink-soft);
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .post-timing .body .next {
+      color: var(--ink-muted);
+      margin-bottom: 6px;
+    }
+
+    .post-timing .body .windows {
+      font-size: 11px;
+      color: var(--ink-faint);
+      letter-spacing: 0.02em;
+    }
+
     /* On narrow viewports, drop the sidebar back to top */
     @media (max-width: 760px) {
       .shell {
@@ -2383,6 +2426,81 @@
       }
     }
 
+    // Best-time-to-post heuristic. Pure client-side; uses the user's
+    // local time (DeAnna is in Eastern Time, which is also where most
+    // US tech recruiters scan LinkedIn). Based on rough industry guidance:
+    // Tue/Wed/Thu peaks 7:30–9:30am, 12–1pm, 5–7pm. Avoid weekends,
+    // Mon mornings, Fri afternoons.
+    //
+    // Returns { tier: "peak"|"ok"|"cold", verdict: string, next: string|null }
+    function postTimingNow(now = new Date()) {
+      const day = now.getDay(); // 0 Sun, 1 Mon, ..., 6 Sat
+      const hour = now.getHours() + now.getMinutes() / 60;
+
+      const isWeekend = (day === 0 || day === 6);
+      const isPeakDay = (day === 2 || day === 3 || day === 4); // Tue-Thu
+      const isMidDay = (day === 1 || day === 5);               // Mon, Fri
+
+      // Window classifier for a given (day-tier, hour)
+      const inWindow = (lo, hi) => hour >= lo && hour < hi;
+      const morning = inWindow(7.5, 9.5);
+      const lunch = inWindow(12, 13);
+      const evening = inWindow(17, 19);
+
+      let tier = "cold";
+      let verdict = "";
+
+      if (isWeekend) {
+        tier = "cold";
+        verdict = "Weekend — most recruiters aren't scrolling.";
+      } else if (isPeakDay && (morning || lunch || evening)) {
+        tier = "peak";
+        verdict = "Peak window — post now.";
+      } else if (isMidDay && (morning || lunch || evening)) {
+        tier = "ok";
+        verdict = day === 1
+          ? "Monday — decent but recruiters are catching up on emails."
+          : "Friday in-window — okay, but Tue-Thu hits harder.";
+      } else if (isPeakDay) {
+        tier = "ok";
+        verdict = "Off-peak hour on a peak day — fine to post.";
+      } else {
+        tier = "cold";
+        verdict = "Outside any peak window.";
+      }
+
+      // Compute next peak time
+      const next = nextPeakWindow(now);
+
+      return { tier, verdict, next };
+    }
+
+    function nextPeakWindow(from) {
+      const peakHours = [7.5, 12, 17]; // morning, lunch, evening
+      const peakLabels = ["8–10am", "12–1pm", "5–7pm"];
+      const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+      for (let offset = 0; offset < 8; offset++) {
+        const d = new Date(from.getTime() + offset * 86400000);
+        const day = d.getDay();
+        if (day !== 2 && day !== 3 && day !== 4) continue; // Tue-Thu only for "peak"
+        for (let i = 0; i < peakHours.length; i++) {
+          const peak = peakHours[i];
+          const peakDate = new Date(d);
+          peakDate.setHours(Math.floor(peak), Math.round((peak - Math.floor(peak)) * 60), 0, 0);
+          if (peakDate <= from) continue;
+
+          const diffMs = peakDate - from;
+          const diffH = Math.floor(diffMs / 3600000);
+          const diffM = Math.floor((diffMs % 3600000) / 60000);
+          const inLabel = diffH > 0 ? `in ${diffH}h ${diffM}m` : `in ${diffM}m`;
+          const dayLabel = offset === 0 ? "Today" : dayNames[day];
+          return `${dayLabel} ${peakLabels[i]} (${inLabel})`;
+        }
+      }
+      return null;
+    }
+
     function renderSirensOutput(result) {
       const box = document.getElementById("sirens-output");
       const post = result.post || "";
@@ -2401,6 +2519,21 @@
           }</ul></div>`
         : "";
 
+      // Best time to post — current verdict
+      const timing = postTimingNow();
+      const nextLine = timing.next
+        ? `<div class="next">Next peak: ${escapeHtml(timing.next)}</div>`
+        : "";
+      const timingHtml = `
+        <div class="post-timing">
+          <div class="dot ${timing.tier}" title="Posting-time verdict"></div>
+          <div class="body">
+            <div class="verdict">${escapeHtml(timing.verdict)}</div>
+            ${nextLine}
+            <div class="windows">Peak windows (Tue–Thu ET): 8–10am · 12–1pm · 5–7pm</div>
+          </div>
+        </div>`;
+
       box.innerHTML = `
         <h4>Polished</h4>
         <div class="out-meta">${charsLabel}</div>
@@ -2411,6 +2544,7 @@
           <button class="copy-btn" id="sirens-copy-btn">Copy</button>
           <button class="save-btn" id="sirens-save-btn">Save draft</button>
         </div>
+        ${timingHtml}
       `;
       box.hidden = false;
       box.scrollIntoView({ behavior: "smooth", block: "start" });
