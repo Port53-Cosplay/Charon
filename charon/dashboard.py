@@ -299,6 +299,84 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
     return out, archived_count
 
 
+_judge_lock = threading.Lock()
+_judge_state: dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "limit": 0,
+    "processed": 0,
+    "ready_added": 0,
+    "refused_added": 0,
+    "error": None,
+}
+
+
+def _judge_status_snapshot() -> dict[str, Any]:
+    with _judge_lock:
+        return dict(_judge_state)
+
+
+def _judge_worker(limit: int, ats: str | None) -> None:
+    from datetime import datetime, timezone
+    from charon.profile import load_profile
+    from charon.screen import judge_batch
+
+    def on_progress(result: dict[str, Any]) -> None:
+        status = result.get("screened_status")
+        with _judge_lock:
+            _judge_state["processed"] += 1
+            if status == "ready":
+                _judge_state["ready_added"] += 1
+            elif status == "rejected":
+                _judge_state["refused_added"] += 1
+
+    try:
+        profile = load_profile()
+        judge_batch(
+            ats=ats,
+            limit=limit,
+            profile=profile,
+            on_progress=on_progress,
+        )
+    except Exception as e:  # noqa: BLE001
+        with _judge_lock:
+            _judge_state["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        with _judge_lock:
+            _judge_state["running"] = False
+            _judge_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _start_judge_batch(limit: int, ats: str | None = None) -> dict[str, Any]:
+    """Kick off a judge batch in a worker thread.
+
+    Returns the initial state snapshot. Frontend polls /api/judge/status
+    until `running` is False to find out when it finishes.
+    """
+    from datetime import datetime, timezone
+
+    if limit < 1 or limit > 500:
+        raise DashboardError("limit must be between 1 and 500.")
+    with _judge_lock:
+        if _judge_state["running"]:
+            raise DashboardError("A judge batch is already running.")
+        _judge_state.update({
+            "running": True,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "limit": limit,
+            "processed": 0,
+            "ready_added": 0,
+            "refused_added": 0,
+            "error": None,
+        })
+    threading.Thread(
+        target=_judge_worker, args=(limit, ats), daemon=True
+    ).start()
+    return _judge_status_snapshot()
+
+
 def _ghost_check() -> dict[str, Any]:
     """Run the stale-applications sweep from the dashboard.
 
@@ -699,6 +777,9 @@ class _Handler(BaseHTTPRequestHandler):
             include_charts = qs.get("charts", ["0"])[0] in {"1", "true", "yes"}
             self._serve_json({"stats": _stats(include_charts=include_charts)})
             return
+        if path == "/api/judge/status":
+            self._serve_json({"status": _judge_status_snapshot()})
+            return
         if path == "/api/applications":
             qs = urllib.parse.parse_qs(parsed.query or "")
             include_archived = qs.get("archived", ["0"])[0] in {"1", "true", "yes"}
@@ -802,6 +883,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json(
                 {"ok": True, "salary": summary, "ready": _ready_discoveries()}
             )
+            return
+        if path == "/api/judge":
+            body = self._read_json_body() or {}
+            try:
+                limit = int(body.get("limit", 100)) if isinstance(body, dict) else 100
+            except (TypeError, ValueError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "limit must be an integer")
+                return
+            ats = body.get("ats") if isinstance(body, dict) else None
+            if ats is not None and not isinstance(ats, str):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "ats must be a string")
+                return
+            try:
+                snap = _start_judge_batch(limit, ats=ats)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "status": snap})
             return
         if path == "/api/ghost-check":
             try:

@@ -479,6 +479,114 @@
 
     .pane-toolbar button[disabled] { opacity: 0.7; cursor: wait; }
 
+    .judge-form {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--lilac-soft);
+      border: 1px solid var(--lilac);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      flex-wrap: wrap;
+    }
+
+    .judge-form[hidden] { display: none; }
+
+    .judge-form input[type="number"] {
+      width: 70px;
+      padding: 5px 8px;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--paper);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .judge-form input[type="number"]:focus {
+      outline: none;
+      border-color: var(--plum-soft);
+      box-shadow: 0 0 0 3px rgba(104, 69, 160, 0.12);
+    }
+
+    .judge-form .cost-est {
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .judge-form .spacer { flex: 1 1 auto; }
+
+    .judge-form button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .judge-form .confirm-btn {
+      background: var(--plum-soft);
+      color: white;
+      border: 1px solid var(--plum-soft);
+      font-weight: 600;
+    }
+
+    .judge-form .confirm-btn:hover { background: var(--plum); }
+
+    .judge-form .cancel-btn {
+      background: transparent;
+      color: var(--ink-muted);
+      border: 1px solid transparent;
+    }
+
+    .judge-form .cancel-btn:hover { color: var(--ink-soft); }
+
+    .judge-progress {
+      background: var(--paper);
+      border: 1px solid var(--lilac);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .judge-progress[hidden] { display: none; }
+
+    .judge-progress .progress-bar {
+      flex: 1 1 auto;
+      height: 6px;
+      background: var(--lilac-soft);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .judge-progress .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--plum-soft), var(--plum));
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+
+    .judge-progress .nums {
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    .judge-progress .breakdown {
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
     /* On narrow viewports, drop the sidebar back to top */
     @media (max-width: 760px) {
       .shell {
@@ -1268,6 +1376,23 @@
       </div>
 
       <section class="tab-pane" data-pane="ready">
+        <div class="pane-toolbar">
+          <button id="judge-more-btn" title="Score more unjudged discoveries">Judge more</button>
+        </div>
+        <div id="judge-form" class="judge-form" hidden>
+          <label>Batch size:
+            <input type="number" id="judge-limit-input" min="1" max="500" value="100">
+          </label>
+          <span class="cost-est">≈ <span id="judge-cost">$2–$5</span> in API spend · <span id="judge-time">5–10 min</span></span>
+          <div class="spacer"></div>
+          <button class="cancel-btn" id="judge-cancel">Cancel</button>
+          <button class="confirm-btn" id="judge-confirm">Confirm</button>
+        </div>
+        <div id="judge-progress" class="judge-progress" hidden>
+          <span class="nums"><span id="judge-processed">0</span>/<span id="judge-total">0</span></span>
+          <div class="progress-bar"><div class="progress-fill" id="judge-fill"></div></div>
+          <span class="breakdown">ready +<span id="judge-ready-added">0</span> · refused +<span id="judge-refused-added">0</span></span>
+        </div>
         <div id="list-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading…</div>
         </div>
@@ -1941,6 +2066,95 @@
       }
     }
 
+    // ── Judge more (Ready pane) ────────────────────────────────
+
+    function updateJudgeCostEstimate() {
+      const n = parseInt(document.getElementById("judge-limit-input").value, 10) || 0;
+      const lo = (n * 0.02).toFixed(2);
+      const hi = (n * 0.05).toFixed(2);
+      document.getElementById("judge-cost").textContent = `$${lo}–$${hi}`;
+      // Roughly 3-6s per row on Sonnet
+      const minS = Math.round(n * 3 / 60);
+      const maxS = Math.round(n * 6 / 60);
+      const t = (minS < 1 && maxS < 1)
+        ? "under a minute"
+        : `${Math.max(minS, 1)}–${maxS} min`;
+      document.getElementById("judge-time").textContent = t;
+    }
+
+    function showJudgeForm() {
+      document.getElementById("judge-form").hidden = false;
+      document.getElementById("judge-more-btn").disabled = true;
+      updateJudgeCostEstimate();
+      document.getElementById("judge-limit-input").focus();
+    }
+
+    function hideJudgeForm() {
+      document.getElementById("judge-form").hidden = true;
+      document.getElementById("judge-more-btn").disabled = false;
+    }
+
+    function setJudgeProgress(state) {
+      const processed = state.processed || 0;
+      const total = state.limit || 0;
+      const pct = total > 0 ? (processed / total) * 100 : 0;
+      document.getElementById("judge-processed").textContent = processed;
+      document.getElementById("judge-total").textContent = total;
+      document.getElementById("judge-fill").style.width = `${pct}%`;
+      document.getElementById("judge-ready-added").textContent = state.ready_added || 0;
+      document.getElementById("judge-refused-added").textContent = state.refused_added || 0;
+    }
+
+    async function pollJudgeProgress() {
+      try {
+        const r = await fetch("/api/judge/status");
+        const data = await r.json();
+        const state = data.status || {};
+        setJudgeProgress(state);
+        // Refresh ready list as new rows pass through
+        loadReady();
+        if (state.running) {
+          setTimeout(pollJudgeProgress, 4000);
+        } else {
+          // Done
+          document.getElementById("judge-progress").hidden = true;
+          document.getElementById("judge-more-btn").disabled = false;
+          loadStats();
+          if (state.error) {
+            showToast("Judge failed: " + state.error, true);
+          } else {
+            const r = state.ready_added || 0;
+            const x = state.refused_added || 0;
+            showToast(`Judge complete: ${r} ready, ${x} refused.`);
+          }
+        }
+      } catch (e) {
+        // Network blip — retry once
+        setTimeout(pollJudgeProgress, 6000);
+      }
+    }
+
+    async function startJudgeBatch(limit) {
+      try {
+        const r = await fetch("/api/judge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        hideJudgeForm();
+        document.getElementById("judge-more-btn").disabled = true;
+        document.getElementById("judge-progress").hidden = false;
+        setJudgeProgress(data.status || { limit });
+        showToast(`Judging ${limit} discoveries — this runs in the background.`);
+        pollJudgeProgress();
+      } catch (e) {
+        showToast("Couldn't start judge: " + e.message, true);
+      }
+    }
+
     async function runGhostCheck(btn) {
       btn.disabled = true;
       const original = btn.textContent;
@@ -2218,6 +2432,30 @@
         return;
       }
 
+      // Judge more — open form
+      if (ev.target.closest("#judge-more-btn")) {
+        const btn = document.getElementById("judge-more-btn");
+        if (btn && !btn.disabled) showJudgeForm();
+        return;
+      }
+
+      // Judge more — confirm
+      if (ev.target.closest("#judge-confirm")) {
+        const limit = parseInt(document.getElementById("judge-limit-input").value, 10);
+        if (!limit || limit < 1) {
+          showToast("Batch size must be at least 1.", true);
+          return;
+        }
+        startJudgeBatch(limit);
+        return;
+      }
+
+      // Judge more — cancel
+      if (ev.target.closest("#judge-cancel")) {
+        hideJudgeForm();
+        return;
+      }
+
       // Open / close charts modal
       if (ev.target.closest("#open-charts-btn")) {
         openChartsModal();
@@ -2353,12 +2591,19 @@
       }
     });
 
-    // Status dropdown change (applications tab)
+    // Status dropdown change (applications tab) + judge-limit input change
     document.addEventListener("change", (ev) => {
       const sel = ev.target.closest(".status-select");
-      if (!sel) return;
-      const appId = sel.getAttribute("data-app-id");
-      if (appId) updateAppStatus(appId, sel.value, sel);
+      if (sel) {
+        const appId = sel.getAttribute("data-app-id");
+        if (appId) updateAppStatus(appId, sel.value, sel);
+        return;
+      }
+    });
+    document.addEventListener("input", (ev) => {
+      if (ev.target && ev.target.id === "judge-limit-input") {
+        updateJudgeCostEstimate();
+      }
     });
 
     // Submit reject form on Ctrl/Cmd+Enter while textarea is focused
@@ -2383,6 +2628,15 @@
     loadApplications();
     loadRefused();
     loadStats();
+    // If a judge run is in progress on the server, pick up the indicator
+    fetch("/api/judge/status").then(r => r.json()).then(d => {
+      if (d?.status?.running) {
+        document.getElementById("judge-more-btn").disabled = true;
+        document.getElementById("judge-progress").hidden = false;
+        setJudgeProgress(d.status);
+        pollJudgeProgress();
+      }
+    }).catch(() => {});
   </script>
 </body>
 </html>
