@@ -199,7 +199,7 @@
     .tabs .tab {
       background: transparent;
       border: none;
-      padding: 10px 14px 10px 16px;
+      padding: 10px 14px 10px 12px;
       font-family: inherit;
       font-size: 14px;
       font-weight: 500;
@@ -212,8 +212,27 @@
       letter-spacing: 0.02em;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      gap: 10px;
+    }
+
+    .tabs .tab .tab-icon {
+      width: 26px;
+      height: 26px;
+      flex: 0 0 auto;
+      object-fit: contain;
+      opacity: 0.65;
+      transition: opacity 0.12s ease, filter 0.12s ease;
+      filter: drop-shadow(0 0 4px rgba(232, 155, 193, 0.15));
+    }
+
+    .tabs .tab:hover .tab-icon,
+    .tabs .tab.active .tab-icon {
+      opacity: 1;
+      filter: drop-shadow(0 0 6px rgba(232, 155, 193, 0.35));
+    }
+
+    .tabs .tab .tab-label {
+      flex: 1 1 auto;
     }
 
     .tabs .tab:hover {
@@ -1478,7 +1497,16 @@
     .status-interviewing { background: #1F3A2C;            color: #95C9AC;         border: 1px solid #2D6A4F; }
     .status-offered      { background: #234735;            color: #95E0B0;         border: 1px solid #6BA890; }
     .status-rejected     { background: #3F2030;            color: #F2AED0;         border: 1px solid var(--blush); }
-    .status-ghosted      { background: #2A2438;            color: #9685A8;         border: 1px solid var(--card-border); }
+    .status-ghosted      { background: #2A2438;            color: #9685A8;         border: 1px solid var(--card-border); display: inline-flex; align-items: center; gap: 6px; }
+
+    .status-ghosted::before {
+      content: "";
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      background: url("/static/charon_hourglass.png") center / contain no-repeat;
+      flex: 0 0 auto;
+    }
 
     .card .applied-meta {
       color: var(--ink-muted);
@@ -1743,16 +1771,20 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="ready">
-          <span>Ready</span><span class="tab-count" id="count-ready">—</span>
+          <img class="tab-icon" src="/static/charon_compass.png" alt="">
+          <span class="tab-label">Ready</span><span class="tab-count" id="count-ready">—</span>
         </button>
         <button class="tab" data-tab="applications">
-          <span>Applied</span><span class="tab-count" id="count-applications">—</span>
+          <img class="tab-icon" src="/static/charon_key.png" alt="">
+          <span class="tab-label">Applied</span><span class="tab-count" id="count-applications">—</span>
         </button>
         <button class="tab" data-tab="refused">
-          <span>Refused</span><span class="tab-count" id="count-refused">—</span>
+          <img class="tab-icon" src="/static/charon_book.png" alt="">
+          <span class="tab-label">Refused</span><span class="tab-count" id="count-refused">—</span>
         </button>
         <button class="tab" data-tab="sirens">
-          <span>Sirens</span>
+          <img class="tab-icon" src="/static/charon_star.png" alt="">
+          <span class="tab-label">Sirens</span>
         </button>
       </nav>
     </aside>
