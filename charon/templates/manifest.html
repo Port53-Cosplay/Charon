@@ -1223,6 +1223,27 @@
       font-style: italic;
     }
 
+    .card.gathered {
+      opacity: 0.92;
+    }
+
+    .card.gathered .head .placeholder-score {
+      flex: 0 0 auto;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border: 1.5px dashed var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink-faint);
+      font-size: 11px;
+      font-style: italic;
+      letter-spacing: 0.02em;
+      text-align: center;
+      line-height: 1.1;
+    }
+
     .card.refused .refused-reason {
       background: var(--bg-soft);
       border-left: 3px solid var(--ink-faint);
@@ -1770,6 +1791,10 @@
       </div>
 
       <nav class="tabs">
+        <button class="tab" data-tab="gathered">
+          <img class="tab-icon" src="/static/charon_ore.png" alt="">
+          <span class="tab-label">Gathered</span><span class="tab-count" id="count-gathered">—</span>
+        </button>
         <button class="tab active" data-tab="ready">
           <img class="tab-icon" src="/static/charon_compass.png" alt="">
           <span class="tab-label">Ready</span><span class="tab-count" id="count-ready">—</span>
@@ -1806,6 +1831,12 @@
           </svg>
         </button>
       </div>
+
+      <section class="tab-pane" data-pane="gathered" hidden>
+        <div id="gathered-container" class="ready-list">
+          <div class="state"><div class="glyph">·</div>Loading the queue…</div>
+        </div>
+      </section>
 
       <section class="tab-pane" data-pane="ready">
         <div class="pane-toolbar">
@@ -2312,6 +2343,77 @@
       backdrop.setAttribute("aria-hidden", "true");
     }
 
+    // ── Gathered tab (un-judged queue) ─────────────────────────
+
+    function renderGatheredCard(d) {
+      const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
+      const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
+      const enrichBadge = d.enrichment_tier
+        ? `<span class="badge" title="Enrichment tier">${escapeHtml(d.enrichment_tier)}</span>`
+        : `<span class="badge" title="Awaiting enrichment" style="background:transparent;border:1px dashed var(--card-border);color:var(--ink-faint)">awaiting enrich</span>`;
+      const location = d.location ? `<div class="location">${escapeHtml(d.location)}</div>` : "";
+      const posting = d.url
+        ? `<a class="posting-link" href="${escapeHtml(d.url)}" target="_blank" rel="noopener">View posting →</a>`
+        : "";
+
+      return `
+        <article class="card gathered" data-id="${d.id}">
+          <div class="head">
+            <div class="titles">
+              <div class="company">${escapeHtml(d.company || "")} <span class="id">· #${d.id}</span></div>
+              <div class="role">${escapeHtml(d.role || "")}</div>
+            </div>
+            <div class="placeholder-score" title="Not yet judged">un-<br>judged</div>
+          </div>
+          ${location}
+          <div class="meta">
+            ${tierBadge}
+            ${atsBadge}
+            ${enrichBadge}
+          </div>
+          <div class="actions">
+            ${posting}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderGathered(gathered, total) {
+      const container = document.getElementById("gathered-container");
+      const chipTotal = (total != null) ? total : gathered.length;
+      document.getElementById("count-gathered").textContent = chipTotal;
+      if (gathered.length === 0) {
+        container.innerHTML = `
+          <div class="state">
+            <div class="glyph">·</div>
+            Nothing waiting in the queue. Run <code>charon gather</code> to pull new postings.
+          </div>`;
+        return;
+      }
+      const cards = gathered.map(renderGatheredCard).join("");
+      const capped = (total != null && total > gathered.length)
+        ? `<div class="state" style="padding:14px 20px;text-align:left;font-size:12px;border-style:solid;border-color:var(--card-border);margin-top:14px">
+             Showing the <strong>${gathered.length}</strong> newest of <strong>${total}</strong> queued. Use <strong>Judge more</strong> on the Ready tab to score them.
+           </div>`
+        : "";
+      container.innerHTML = cards + capped;
+    }
+
+    async function loadGathered() {
+      try {
+        const r = await fetch("/api/gathered");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        renderGathered(data.gathered || [], data.total);
+      } catch (e) {
+        document.getElementById("gathered-container").innerHTML = `
+          <div class="state">
+            <div class="glyph">·</div>
+            Couldn't load gathered list. ${escapeHtml(e.message)}
+          </div>`;
+      }
+    }
+
     // ── Refused tab ────────────────────────────────────────────
 
     function renderRefusedCard(d) {
@@ -2797,9 +2899,11 @@
         const data = await r.json();
         const state = data.status || {};
         setJudgeProgress(state);
-        // Refresh ready list AND stats as new rows pass through — stats
-        // band stays live instead of waiting for the run to finish.
+        // Refresh ready, gathered (rows are leaving the queue), AND stats
+        // as new rows pass through. Stats band stays live instead of
+        // waiting for the run to finish.
         loadReady();
+        loadGathered();
         loadStats();
         if (state.running) {
           setTimeout(pollJudgeProgress, 4000);
@@ -2896,6 +3000,7 @@
       if (name === "applications") loadApplications();
       if (name === "ready") loadReady();
       if (name === "refused") loadRefused();
+      if (name === "gathered") loadGathered();
       if (name === "sirens" && !_sirensCurrentQuestion) loadMagicalQuestion();
       loadStats();
     }
@@ -3351,6 +3456,7 @@
     loadReady();
     loadApplications();
     loadRefused();
+    loadGathered();
     loadStats();
 
     // Background tabs get throttled by browsers — refresh whenever the
@@ -3365,6 +3471,7 @@
           if (name === "ready") loadReady();
           else if (name === "applications") loadApplications();
           else if (name === "refused") loadRefused();
+          else if (name === "gathered") loadGathered();
         }
       }
     });

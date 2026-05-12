@@ -61,6 +61,48 @@ def _ready_discoveries() -> list[dict[str, Any]]:
     return [_summarize_discovery(r) for r in rows]
 
 
+def _gathered_discoveries(limit: int = 200) -> list[dict[str, Any]]:
+    """Un-judged discoveries — the queue waiting for a judge pass.
+
+    Sorted by discovered_at DESC so the freshest postings show first.
+    Filters out enrichment_tier='failed' rows (same as judge's pool)
+    since those are orphaned and can't be judged. Includes pre-enrich
+    rows (enrichment_tier IS NULL) so the user can see what's still in
+    the early pipeline.
+    """
+    from charon.db import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM discoveries "
+            "WHERE judged_at IS NULL "
+            "AND (enrichment_tier IS NULL OR enrichment_tier != 'failed') "
+            "ORDER BY discovered_at DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        row = dict(r)
+        out.append({
+            "id": row["id"],
+            "company": row.get("company"),
+            "role": row.get("role"),
+            "url": row.get("url"),
+            "location": row.get("location"),
+            "tier": row.get("tier"),
+            "category": row.get("category"),
+            "ats": row.get("ats"),
+            "enrichment_tier": row.get("enrichment_tier"),
+            "discovered_at": row.get("discovered_at"),
+        })
+    return out
+
+
 def _refused_discoveries(limit: int = 200) -> list[dict[str, Any]]:
     """Discoveries the judge filtered out — 'refused' in the UI's voice.
 
@@ -826,6 +868,22 @@ class _Handler(BaseHTTPRequestHandler):
                 conn.close()
             self._serve_json({
                 "refused": _refused_discoveries(),
+                "total": total,
+            })
+            return
+        if path == "/api/gathered":
+            from charon.db import get_connection
+            conn = get_connection()
+            try:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM discoveries "
+                    "WHERE judged_at IS NULL "
+                    "AND (enrichment_tier IS NULL OR enrichment_tier != 'failed')"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            self._serve_json({
+                "gathered": _gathered_discoveries(),
                 "total": total,
             })
             return
