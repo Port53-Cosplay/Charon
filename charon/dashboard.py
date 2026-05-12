@@ -815,7 +815,19 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json({"ready": _ready_discoveries()})
             return
         if path == "/api/refused":
-            self._serve_json({"refused": _refused_discoveries()})
+            from charon.db import get_connection
+            conn = get_connection()
+            try:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM discoveries "
+                    "WHERE screened_status = 'rejected' AND judged_at IS NOT NULL"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            self._serve_json({
+                "refused": _refused_discoveries(),
+                "total": total,
+            })
             return
         if path == "/api/stats":
             qs = urllib.parse.parse_qs(parsed.query or "")

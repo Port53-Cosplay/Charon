@@ -2360,18 +2360,26 @@
       `;
     }
 
-    function renderRefused(refused) {
+    function renderRefused(refused, total) {
       const container = document.getElementById("refused-container");
-      document.getElementById("count-refused").textContent = refused.length;
+      // Tab chip shows the *full* refused total, not the 200-row display slice.
+      const chipTotal = (total != null) ? total : refused.length;
+      document.getElementById("count-refused").textContent = chipTotal;
       if (refused.length === 0) {
         container.innerHTML = `
           <div class="state">
             <div class="glyph">·</div>
-            No refused discoveries. (Or none in the most recent 200.)
+            No refused discoveries yet.
           </div>`;
         return;
       }
-      container.innerHTML = refused.map(renderRefusedCard).join("");
+      const cards = refused.map(renderRefusedCard).join("");
+      const cappedNote = (total != null && total > refused.length)
+        ? `<div class="state" style="padding:14px 20px;text-align:left;font-size:12px;border-style:solid;border-color:var(--card-border);margin-top:14px">
+             Showing the <strong>${refused.length}</strong> highest-scoring of <strong>${total}</strong> refused. Run <code>charon judge --list rejected</code> to see them all.
+           </div>`
+        : "";
+      container.innerHTML = cards + cappedNote;
     }
 
     async function loadRefused() {
@@ -2379,7 +2387,7 @@
         const r = await fetch("/api/refused");
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
-        renderRefused(data.refused || []);
+        renderRefused(data.refused || [], data.total);
       } catch (e) {
         document.getElementById("refused-container").innerHTML = `
           <div class="state">
@@ -2404,7 +2412,9 @@
         cardEl.classList.add("is-gone");
         showToast(`#${id} sent back to Ready.`);
         setTimeout(() => {
-          renderRefused(data.refused || []);
+          // The unreject endpoint returns refused list but not total;
+          // re-fetch to get a fresh count for the chip.
+          loadRefused();
           renderList(data.ready || []);
           loadStats();
         }, 320);
