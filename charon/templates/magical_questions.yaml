@@ -1,0 +1,64 @@
+# Cybersecurity-themed "magical questions" — open, reflective prompts
+# that invite a real voice rather than buzzword answers. Used by the
+# Sirens tab as an inspiration prompt under the brain-dump textarea.
+#
+# Bar (intentional): no "what's your favorite [tool/language]", no
+# tell-me-about-a-time-you-had-conflict, no STAR-method bait. These
+# are questions a real practitioner could turn over while making
+# coffee.
+
+questions:
+  # Origin / identity
+  - "What was your first 'security incident' as a kid? (locked diary, secret club, hidden journal — whatever made you think about who-knows-what.)"
+  - "What's a story from your pre-security career that turns out to be a security story?"
+  - "When did you stop being afraid of something in security that used to intimidate you?"
+
+  # Counterfactual / redesign
+  - "If you could redesign one widely-deployed security control, which would you pick and why?"
+  - "What's a security control you'd hand to your past self in college?"
+  - "If you had to rebuild the security industry from scratch with one rule, what would the rule be?"
+
+  # Mythological / metaphorical
+  - "If the CIA triad were a tarot spread, what would each card mean?"
+  - "If malware had a hierarchy of needs (Maslow-style), what's at the base?"
+  - "If your career path were a constellation, what shape would it draw?"
+  - "Your tradecraft has a heritage — what older, non-tech field is it actually descended from?"
+  - "If your home network were sentient, what would it gossip about?"
+
+  # Honest / vulnerable
+  - "What's a security concept you secretly find harder to grasp than you should?"
+  - "What's a security failure (yours, or one you witnessed) that taught you more than any success?"
+  - "What's a question about your work you've been turning over but don't have an answer for yet?"
+  - "What's a piece of security advice you don't take yourself?"
+
+  # Wonder / aesthetic
+  - "What's the most beautiful piece of security thinking you've ever encountered?"
+  - "Who's an unsung patron saint of your particular corner of security?"
+  - "What's a thing you do at work that feels like magic to people who don't do it?"
+
+  # Past / future self
+  - "Five years from now, what would your security-self tell your security-self-now?"
+  - "What did you believe about security at the start of your career that you don't anymore?"
+  - "What's something you're allowed to like about your work that doesn't fit the cool-detached-hacker aesthetic?"
+
+  # Insider observations
+  - "What part of security culture do you wish would die in a fire?"
+  - "What's something the rest of the industry is sleeping on?"
+  - "What's a 'security-adjacent' job (librarian, locksmith, accountant, ethnographer) that does the work better than most security teams?"
+  - "What's a thing about your work that nobody warned you about?"
+  - "Where does security thinking end and just plain thinking begin?"
+
+  # Teaching / translation
+  - "If you had to teach security to a room of poets, what's the first lesson?"
+  - "What's a piece of advice from outside security that ended up being the best security advice you've gotten?"
+  - "If you could invite three thinkers from any field (not just tech) to a security roundtable, who and why?"
+
+  # Daily / craft
+  - "What's a small daily ritual that's quietly saved your work life?"
+  - "What does 'good enough' look like in your work — and when did you stop chasing perfect?"
+  - "If your job were a recipe, what would the ingredient list say?"
+  - "What's a tool, technique, or framework everyone uses that you've quietly given up on?"
+
+  # Humans-shaped
+  - "What's something you've learned about humans (any humans, anywhere) from doing security work?"
+  - "What's a moment when the human-fix turned out to be more elegant than the technical-fix?"

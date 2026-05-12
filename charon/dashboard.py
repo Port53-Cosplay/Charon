@@ -708,6 +708,43 @@ def _salary_lookup(discovery_id: int) -> dict[str, Any]:
         raise DashboardError(str(e)) from e
 
 
+def _sirens_polish(payload: dict[str, Any]) -> dict[str, Any]:
+    """Bridge to charon.sirens.polish_post — handles brain-dump polish.
+
+    Optionally saves the draft to ~/.charon/sirens/drafts/ when the
+    payload has `save: true` so refresh-friendly draft history is
+    available even if the browser tab dies.
+    """
+    from charon.sirens import SirensError, polish_post, save_draft
+
+    brain_dump = (payload.get("brain_dump") or "").strip() if isinstance(payload, dict) else ""
+    if not brain_dump:
+        raise DashboardError("brain_dump is required.")
+    magical_question = payload.get("magical_question") if isinstance(payload, dict) else None
+    context = payload.get("context") if isinstance(payload, dict) else None
+    try:
+        result = polish_post(
+            brain_dump,
+            magical_question=magical_question,
+            context=context,
+        )
+    except SirensError as e:
+        raise DashboardError(str(e)) from e
+    if isinstance(payload, dict) and payload.get("save"):
+        try:
+            saved = save_draft({
+                "name": payload.get("name"),
+                "magical_question": magical_question,
+                "dump": brain_dump,
+                "polished_post": result.get("post", ""),
+            })
+            result["draft_path"] = saved["path"]
+            result["draft_id"] = saved["id"]
+        except Exception as e:  # noqa: BLE001 — non-fatal
+            result["draft_save_error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
 def _open_offerings_folder(discovery_id: int) -> dict[str, Any]:
     """Open the offering's folder in the user's file manager.
 
@@ -779,6 +816,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/judge/status":
             self._serve_json({"status": _judge_status_snapshot()})
+            return
+        if path == "/api/sirens/question":
+            from charon.sirens import random_magical_question
+            self._serve_json({"question": random_magical_question()})
+            return
+        if path == "/api/sirens/drafts":
+            from charon.sirens import list_drafts
+            self._serve_json({"drafts": list_drafts()})
             return
         if path == "/api/applications":
             qs = urllib.parse.parse_qs(parsed.query or "")
@@ -868,6 +913,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json(
                 {"ok": True, "contacts": summary, "ready": _ready_discoveries()}
             )
+            return
+        if path == "/api/sirens/polish":
+            body = self._read_json_body() or {}
+            try:
+                result = _sirens_polish(body)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "result": result})
             return
         if path.startswith("/api/salary/"):
             try:

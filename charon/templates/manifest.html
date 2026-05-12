@@ -587,6 +587,236 @@
       font-size: 12px;
     }
 
+    /* ── Sirens ──────────────────────────────────────────────── */
+
+    .sirens-pane {
+      max-width: 760px;
+    }
+
+    .sirens-intro {
+      margin-bottom: 18px;
+    }
+
+    .sirens-intro h3 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 28px;
+      color: var(--plum);
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+
+    .sirens-intro p {
+      color: var(--ink-soft);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .sirens-question {
+      background: var(--lilac-soft);
+      border: 1px solid var(--lilac);
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 14px;
+      position: relative;
+    }
+
+    .sirens-question-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--plum-soft);
+      margin-bottom: 6px;
+    }
+
+    .sirens-question-text {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 17px;
+      color: var(--plum);
+      line-height: 1.4;
+      letter-spacing: -0.005em;
+      padding-right: 90px;
+    }
+
+    .sirens-shuffle {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      background: transparent;
+      border: 1px solid var(--lilac);
+      color: var(--plum-soft);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .sirens-shuffle:hover {
+      background: var(--lilac);
+      color: var(--plum);
+    }
+
+    .sirens-textarea {
+      width: 100%;
+      min-height: 200px;
+      max-height: 480px;
+      resize: vertical;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--ink);
+      background: var(--paper);
+      box-shadow: var(--card-shadow);
+    }
+
+    .sirens-textarea::placeholder {
+      color: var(--ink-faint);
+      font-style: italic;
+    }
+
+    .sirens-textarea:focus {
+      outline: none;
+      border-color: var(--plum-soft);
+      box-shadow: 0 0 0 3px rgba(104, 69, 160, 0.12);
+    }
+
+    .sirens-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .sirens-char-count {
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sirens-actions .spacer { flex: 1 1 auto; }
+
+    .sirens-actions button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 7px 16px;
+      border-radius: 9px;
+      cursor: pointer;
+    }
+
+    .sirens-actions .cancel-btn {
+      background: transparent;
+      color: var(--ink-muted);
+      border: 1px solid transparent;
+    }
+
+    .sirens-actions .cancel-btn:hover { color: var(--ink-soft); background: var(--bg-soft); }
+
+    .sirens-actions .confirm-btn {
+      background: var(--plum-soft);
+      color: white;
+      border: 1px solid var(--plum-soft);
+      font-weight: 600;
+      padding: 7px 22px;
+    }
+
+    .sirens-actions .confirm-btn:hover { background: var(--plum); }
+    .sirens-actions .confirm-btn[disabled] { opacity: 0.6; cursor: wait; }
+
+    .sirens-output {
+      margin-top: 24px;
+      background: var(--paper);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .sirens-output h4 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 18px;
+      color: var(--plum);
+      margin-bottom: 4px;
+    }
+
+    .sirens-output .out-meta {
+      font-size: 12px;
+      color: var(--ink-muted);
+      margin-bottom: 14px;
+    }
+
+    .sirens-output .out-meta .over {
+      color: var(--blush-deep);
+      font-weight: 600;
+    }
+
+    .sirens-output .out-post {
+      white-space: pre-wrap;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg-soft);
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+
+    .sirens-output .out-notes {
+      font-size: 12.5px;
+      color: var(--ink-muted);
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+
+    .sirens-output .out-warnings {
+      background: #FFF1DD;
+      border-left: 3px solid #E4C77A;
+      padding: 8px 12px;
+      margin: 10px 0;
+      font-size: 12px;
+      color: #8A6520;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .sirens-output .out-warnings ul { padding-left: 18px; margin-top: 4px; }
+
+    .sirens-output .out-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .sirens-output .out-actions button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 7px 16px;
+      border-radius: 9px;
+      cursor: pointer;
+    }
+
+    .sirens-output .copy-btn {
+      background: var(--blush);
+      color: var(--blush-deep);
+      border: 1px solid var(--blush-hover);
+      font-weight: 600;
+    }
+
+    .sirens-output .copy-btn:hover { background: var(--blush-hover); }
+
+    .sirens-output .save-btn {
+      background: transparent;
+      color: var(--plum-soft);
+      border: 1px solid var(--lilac);
+    }
+
+    .sirens-output .save-btn:hover { background: var(--lilac-soft); color: var(--plum); }
+
     /* On narrow viewports, drop the sidebar back to top */
     @media (max-width: 760px) {
       .shell {
@@ -1354,6 +1584,9 @@
         <button class="tab" data-tab="refused">
           <span>Refused</span><span class="tab-count" id="count-refused">—</span>
         </button>
+        <button class="tab" data-tab="sirens">
+          <span>Sirens</span>
+        </button>
       </nav>
     </aside>
 
@@ -1410,6 +1643,36 @@
       <section class="tab-pane" data-pane="refused" hidden>
         <div id="refused-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading refused discoveries…</div>
+        </div>
+      </section>
+
+      <section class="tab-pane" data-pane="sirens" hidden>
+        <div class="sirens-pane">
+          <div class="sirens-intro">
+            <h3>Sirens</h3>
+            <p>Brain-dump first, edit later. Sirens polishes what you wrote — preserves your voice, kills LinkedIn corporate-speak. The magical question below is just a prompt; ignore it, follow it, do whatever.</p>
+          </div>
+
+          <div class="sirens-question" id="sirens-question-box">
+            <div class="sirens-question-label">A question to turn over:</div>
+            <div class="sirens-question-text" id="sirens-question-text">Loading…</div>
+            <button class="sirens-shuffle" id="sirens-shuffle-btn" title="Another question">↻ another</button>
+          </div>
+
+          <textarea
+            id="sirens-textarea"
+            class="sirens-textarea"
+            placeholder="Brain-dump here. Run-ons, parentheticals, half-thoughts, the whole mess. Sirens will tidy without sanding off your voice."
+          ></textarea>
+
+          <div class="sirens-actions">
+            <span class="sirens-char-count" id="sirens-char-count">0 chars</span>
+            <div class="spacer"></div>
+            <button class="cancel-btn" id="sirens-clear-btn">Clear</button>
+            <button class="confirm-btn" id="sirens-polish-btn">Polish</button>
+          </div>
+
+          <div id="sirens-output" class="sirens-output" hidden></div>
         </div>
       </section>
     </main>
@@ -2066,6 +2329,128 @@
       }
     }
 
+    // ── Sirens ────────────────────────────────────────────────
+
+    let _sirensCurrentQuestion = "";
+    let _sirensLastOutput = null;
+
+    async function loadMagicalQuestion() {
+      try {
+        const r = await fetch("/api/sirens/question");
+        const data = await r.json();
+        _sirensCurrentQuestion = data.question || "";
+        document.getElementById("sirens-question-text").textContent =
+          _sirensCurrentQuestion || "(no questions configured)";
+      } catch (e) {
+        _sirensCurrentQuestion = "";
+        document.getElementById("sirens-question-text").textContent =
+          "Couldn't load — write whatever you want anyway.";
+      }
+    }
+
+    function updateSirensCharCount() {
+      const n = document.getElementById("sirens-textarea").value.length;
+      document.getElementById("sirens-char-count").textContent = `${n} char${n === 1 ? "" : "s"}`;
+    }
+
+    async function polishSirens() {
+      const dump = document.getElementById("sirens-textarea").value.trim();
+      if (!dump) {
+        showToast("Nothing to polish — write something first.", true);
+        return;
+      }
+      const btn = document.getElementById("sirens-polish-btn");
+      btn.disabled = true;
+      btn.textContent = "Polishing…";
+      try {
+        const r = await fetch("/api/sirens/polish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brain_dump: dump,
+            magical_question: _sirensCurrentQuestion || null,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        _sirensLastOutput = data.result || {};
+        renderSirensOutput(_sirensLastOutput);
+      } catch (e) {
+        showToast("Polish failed: " + e.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Polish";
+      }
+    }
+
+    function renderSirensOutput(result) {
+      const box = document.getElementById("sirens-output");
+      const post = result.post || "";
+      const chars = result.char_count || post.length;
+      const overLimit = result.over_limit;
+      const notes = result.notes || "";
+      const warnings = result.voice_warnings || [];
+
+      const charsLabel = overLimit
+        ? `<span class="over">${chars} chars — over LinkedIn's 3000 limit</span>`
+        : `${chars} chars`;
+
+      const warningsHtml = warnings.length
+        ? `<div class="out-warnings"><strong>Voice watch:</strong><ul>${
+            warnings.map(w => `<li>${escapeHtml(w)}</li>`).join("")
+          }</ul></div>`
+        : "";
+
+      box.innerHTML = `
+        <h4>Polished</h4>
+        <div class="out-meta">${charsLabel}</div>
+        <div class="out-post" id="sirens-post-text">${escapeHtml(post)}</div>
+        ${notes ? `<div class="out-notes">${escapeHtml(notes)}</div>` : ""}
+        ${warningsHtml}
+        <div class="out-actions">
+          <button class="copy-btn" id="sirens-copy-btn">Copy</button>
+          <button class="save-btn" id="sirens-save-btn">Save draft</button>
+        </div>
+      `;
+      box.hidden = false;
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    async function copySirensPost() {
+      if (!_sirensLastOutput?.post) return;
+      try {
+        await navigator.clipboard.writeText(_sirensLastOutput.post);
+        showToast("Copied to clipboard.");
+      } catch (e) {
+        showToast("Couldn't copy: " + e.message, true);
+      }
+    }
+
+    async function saveSirensDraft() {
+      if (!_sirensLastOutput?.post) return;
+      const dump = document.getElementById("sirens-textarea").value.trim();
+      try {
+        const r = await fetch("/api/sirens/polish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Re-uses the same endpoint with save:true; the server will
+          // re-polish (cheap) and persist. Cleaner than a separate
+          // save-only endpoint that would have to take the polished
+          // output from the client.
+          body: JSON.stringify({
+            brain_dump: dump,
+            magical_question: _sirensCurrentQuestion || null,
+            save: true,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        showToast(`Draft saved.`);
+      } catch (e) {
+        showToast("Save failed: " + e.message, true);
+      }
+    }
+
     // ── Judge more (Ready pane) ────────────────────────────────
 
     function updateJudgeCostEstimate() {
@@ -2208,6 +2593,7 @@
       if (name === "applications") loadApplications();
       if (name === "ready") loadReady();
       if (name === "refused") loadRefused();
+      if (name === "sirens" && !_sirensCurrentQuestion) loadMagicalQuestion();
       loadStats();
     }
 
@@ -2457,6 +2843,37 @@
         return;
       }
 
+      // Sirens: shuffle question
+      if (ev.target.closest("#sirens-shuffle-btn")) {
+        loadMagicalQuestion();
+        return;
+      }
+      // Sirens: clear textarea
+      if (ev.target.closest("#sirens-clear-btn")) {
+        const ta = document.getElementById("sirens-textarea");
+        ta.value = "";
+        updateSirensCharCount();
+        document.getElementById("sirens-output").hidden = true;
+        _sirensLastOutput = null;
+        ta.focus();
+        return;
+      }
+      // Sirens: polish
+      if (ev.target.closest("#sirens-polish-btn")) {
+        polishSirens();
+        return;
+      }
+      // Sirens: copy
+      if (ev.target.closest("#sirens-copy-btn")) {
+        copySirensPost();
+        return;
+      }
+      // Sirens: save draft
+      if (ev.target.closest("#sirens-save-btn")) {
+        saveSirensDraft();
+        return;
+      }
+
       // Open / close charts modal
       if (ev.target.closest("#open-charts-btn")) {
         openChartsModal();
@@ -2604,6 +3021,9 @@
     document.addEventListener("input", (ev) => {
       if (ev.target && ev.target.id === "judge-limit-input") {
         updateJudgeCostEstimate();
+      }
+      if (ev.target && ev.target.id === "sirens-textarea") {
+        updateSirensCharCount();
       }
     });
 
