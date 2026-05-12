@@ -84,6 +84,73 @@
       height: auto;
     }
 
+    /* Ornamental gold rule with a centered lantern — separates the
+       sidebar header (avatar + banner) from the tab list. */
+    .sidebar-ornament {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 18px 0 14px;
+      color: var(--plum-soft);
+    }
+
+    .sidebar-ornament::before,
+    .sidebar-ornament::after {
+      content: "";
+      flex: 1 1 auto;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    }
+
+    .sidebar-ornament .lantern {
+      width: 18px;
+      height: 22px;
+      color: var(--plum-soft);
+      flex: 0 0 auto;
+      filter: drop-shadow(0 0 4px rgba(245, 208, 224, 0.6));
+    }
+
+    /* Lantern glyph that sits before Fraunces section headers */
+    .with-lantern {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .with-lantern .lantern {
+      width: 16px;
+      height: 20px;
+      color: var(--plum-soft);
+      flex: 0 0 auto;
+      filter: drop-shadow(0 0 3px rgba(245, 208, 224, 0.7));
+    }
+
+    /* Decorative end caps on chart-panel + section h3s — a thin gold
+       rule under the title fading to transparent at the ends, with
+       a tiny diamond glyph mid-fade. Less "section heading", more
+       "illuminated manuscript marker". */
+    .chart-panel h3,
+    .sirens-intro h3,
+    .state.hero .title {
+      position: relative;
+      padding-bottom: 6px;
+    }
+
+    .chart-panel h3::after,
+    .sirens-intro h3::after,
+    .state.hero .title::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 1px;
+      background: linear-gradient(90deg,
+        var(--gold) 0%,
+        var(--gold-soft) 40%,
+        transparent 100%);
+    }
+
     .main {
       flex: 1;
       min-width: 0;
@@ -938,15 +1005,36 @@
 
     .card .score {
       flex: 0 0 auto;
-      background: var(--gold-soft);
-      color: var(--gold-deep);
-      border: 1px solid var(--gold);
-      border-radius: 999px;
-      padding: 4px 12px;
-      font-size: 13px;
-      font-weight: 600;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 30%, #F5E5BA 0%, #E4C77A 55%, #C9A961 100%);
+      color: #5C4310;
+      border: 1.5px solid #B8985A;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14.5px;
+      font-weight: 700;
       font-variant-numeric: tabular-nums;
-      white-space: nowrap;
+      letter-spacing: -0.01em;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+      box-shadow:
+        inset 0 1px 2px rgba(255, 255, 255, 0.55),
+        inset 0 -1px 2px rgba(106, 74, 15, 0.25),
+        0 2px 4px rgba(106, 74, 15, 0.12);
+      position: relative;
+    }
+
+    /* Coin rim: subtle inner ring */
+    .card .score::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      border: 1px dashed rgba(106, 74, 15, 0.18);
+      pointer-events: none;
     }
 
     .card .meta {
@@ -1015,7 +1103,7 @@
     .card .closed-btn {
       position: absolute;
       top: 6px;
-      right: 8px;
+      left: 8px;
       background: transparent;
       border: none;
       color: var(--ink-faint);
@@ -1607,6 +1695,27 @@
   </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <!-- Charon's lantern: hook + hexagonal body + pink glow inside -->
+      <symbol id="lantern" viewBox="0 0 20 24">
+        <!-- hook -->
+        <path d="M10 1 Q10 3 8 3.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        <!-- top cap -->
+        <path d="M7 4 L13 4 L12 6 L8 6 Z" fill="currentColor"/>
+        <!-- body frame -->
+        <path d="M5 6.5 L15 6.5 L14 18 L6 18 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        <!-- glow inside -->
+        <ellipse cx="10" cy="12.5" rx="2.2" ry="3" fill="#F5D0E0" opacity="0.85"/>
+        <ellipse cx="10" cy="12.5" rx="1" ry="1.5" fill="#FFF1F6"/>
+        <!-- vertical struts -->
+        <line x1="10" y1="6.5" x2="10" y2="18" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+        <!-- base -->
+        <path d="M5.5 18 L14.5 18 L14 20 L6 20 Z" fill="currentColor"/>
+      </symbol>
+    </defs>
+  </svg>
+
   <div class="shell">
     <aside class="sidebar">
       <div class="avatar">
@@ -1616,6 +1725,10 @@
         <h1>The Crossing</h1>
         <div class="sub">DeAnna's funnel · ferryman view</div>
       </header>
+
+      <div class="sidebar-ornament" aria-hidden="true">
+        <svg class="lantern"><use href="#lantern"/></svg>
+      </div>
 
       <nav class="tabs">
         <button class="tab active" data-tab="ready">
@@ -1692,7 +1805,7 @@
       <section class="tab-pane" data-pane="sirens" hidden>
         <div class="sirens-pane">
           <div class="sirens-intro">
-            <h3>Sirens</h3>
+            <h3 class="with-lantern"><svg class="lantern" aria-hidden="true"><use href="#lantern"/></svg>Sirens</h3>
             <p>Brain-dump first, edit later. Sirens polishes what you wrote — preserves your voice, kills LinkedIn corporate-speak. The magical question below is just a prompt; ignore it, follow it, do whatever.</p>
           </div>
 
@@ -1734,14 +1847,14 @@
       </header>
 
       <div class="chart-panel">
-        <h3>The crossing</h3>
+        <h3 class="with-lantern"><svg class="lantern" aria-hidden="true"><use href="#lantern"/></svg>The crossing</h3>
         <div class="caption">Each tier of the Styx — who makes it across, who doesn't.</div>
         <div class="funnel-rows" id="funnel-rows"></div>
       </div>
 
       <div class="charts-row">
         <div class="chart-panel">
-          <h3>The fates</h3>
+          <h3 class="with-lantern"><svg class="lantern" aria-hidden="true"><use href="#lantern"/></svg>The fates</h3>
           <div class="caption">Where your applications end up.</div>
           <div class="donut-wrap">
             <svg id="donut-svg" width="160" height="160" viewBox="0 0 160 160"></svg>
@@ -1749,7 +1862,7 @@
           </div>
         </div>
         <div class="chart-panel">
-          <h3>The rhythm</h3>
+          <h3 class="with-lantern"><svg class="lantern" aria-hidden="true"><use href="#lantern"/></svg>The rhythm</h3>
           <div class="caption">Applications submitted each week.</div>
           <svg id="series-svg" class="series-svg" viewBox="0 0 320 160" preserveAspectRatio="none"></svg>
         </div>
