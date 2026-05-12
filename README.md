@@ -12,7 +12,7 @@
 
 Named after the ferryman of the underworld. Because job hunting is already hell.
 
-**Current version:** v0.5.0 (Phases 0–5 shipped). v2 work in progress — see [ROADMAP.md](ROADMAP.md).
+**Current version:** v0.10.0 (Phases 0–10 shipped). Phase 11 next — see [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -27,7 +27,7 @@ It runs on AI judgment, not keyword matching. The AI is told what your dealbreak
 ## Install
 
 ```bash
-git clone https://github.com/Pickle-Pixel/Charon.git
+git clone https://github.com/Port53-Cosplay/Charon.git
 cd Charon
 python -m venv .venv
 source .venv/Scripts/activate   # Windows
@@ -80,9 +80,22 @@ charon judge --all                       # score ghost + redflag + alignment + r
 charon judge --list ready                # score-sorted apply-to-these list
 charon provision --id <N>                # forge + petition + auto-render for one ready job
 charon render --id <N>                   # re-render an offering's .md to .html
-charon contacts --id <N>                 # surface LinkedIn contacts for the role
+charon contacts --id <N>                 # LinkedIn contacts at the company
+charon salary --id <N>                   # candidate-calibrated salary range (web search)
 charon manifest                          # open the dashboard in your browser
 ```
+
+### Dashboard (`charon manifest`)
+
+Local HTTP dashboard with five tabs covering the full funnel:
+
+- **Awaiting** — un-judged queue, anchored to the lifetime total
+- **Ready** — score-sorted, per-card actions for Prep materials / Open folder / Salary intel / Find contacts / Mark applied / Not for me, plus a corner X for closed postings. Click any card to expand the detail view (full posting, judgement reasoning, dealbreakers, flags, alignment & resume-match chips).
+- **Applied** — tracked applications with inline status dropdowns, 45-day archive on terminal statuses, Mark stranded toolbar
+- **Refused** — score-sorted refusals with the judge's reason quoted; "Send to ready" overrides
+- **Sirens** — voice-true LinkedIn post writer. Magical-question prompt above a brain-dump textarea; polish through Sonnet using the same `voice` block in `profile.yaml` that petition uses; best-time-to-post panel below the output.
+
+Plus **Charon's Pulse** charts modal (funnel waterfall, fates donut, weekly rhythm). Dark theme, coin score badges, illustrated tab icons. Loopback-only (`127.0.0.1`) — nothing exposed to the network.
 
 ### Application tracking
 
@@ -92,7 +105,7 @@ charon apply --list                      # all tracked applications
 charon apply --list --status interviewing
 charon apply --update <id> --status rejected
 charon apply --stats                     # funnel stats
-charon apply --ghost-check               # mark stale apps as ghosted
+charon apply --ghost-check               # mark stale apps as stranded (21+ days silence)
 ```
 
 ### Inbox monitoring
@@ -150,7 +163,8 @@ Lower is better for ghost and red flag scores. Higher is better for alignment sc
 | Red flags | 0–100% (lower better) | Toxic / dealbreaker signal density |
 | Values alignment (dossier) | 0–100 (higher better) | Company match against your weighted values |
 | Role alignment | 0–100 (higher better) | Role match against your target career direction |
-| Hunt combined | 0–100 (higher better) | Weighted combined "worth applying?" score |
+| Resume match | 0–100 (higher better) | Your resume's overlap with this posting's asks (direct / adjacent / stretch / mismatch) |
+| Combined score | 0–100 (higher better) | Weighted "worth applying?" score (see `judge.weights` in profile) |
 
 The role alignment scorer is **discipline-aware**. A "Security Engineer" posting that's 80% Terraform isn't the same as a pen test role, and Charon scores them differently even when keyword overlap looks identical.
 
@@ -163,7 +177,7 @@ If you've deployed the daily ops scanner (see HOWTO.md), every morning it:
 - Pulls your local Charon DB to the source-of-truth server
 - Scans your Gmail for new replies from companies you've applied to
 - Auto-updates application statuses
-- Marks applications as ghosted after 21 days of silence
+- Marks applications as stranded after 21 days of silence
 - Emails you a digest if anything happened
 
 Silent days = no email. The digest only fires when there's something worth knowing.
@@ -204,7 +218,9 @@ See [RESPONSIBLE_USE.md](RESPONSIBLE_USE.md) for usage guidelines.
 
 ## What's next
 
-v2 is in planning. The thesis: stop being a per-URL tool, become a funnel. Bulk discovery (`gather`) → enrichment (`enrich`) → batch judgement (`judge`) → tailored materials (`forge` + `petition`) → manual submit via local dashboard (`manifest`). All AI leverage on the writing, none on the submitting.
+v2's thesis shipped through v0.10.0: per-URL tool became a full funnel. Bulk discovery (`gather`) → enrichment (`enrich`) → batch judgement (`judge`) → tailored materials (`forge` + `petition` + `render`) → salary intel + contacts research → manual submit via the local dashboard (`manifest`) → voice-true LinkedIn posts (Sirens). All AI leverage on the thinking and writing, none on the submitting.
+
+**Phase 11 (next):** cron-driven daily integration. The ops server runs `gather` + `enrich` + `judge` overnight so the morning Ready list is fresh. `forge` / `petition` stay manual.
 
 Full plan in [ROADMAP.md](ROADMAP.md). Shipped history in [CHANGELOG.md](CHANGELOG.md).
 

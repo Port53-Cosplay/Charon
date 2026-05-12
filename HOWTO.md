@@ -149,13 +149,17 @@ charon apply --id 3 --status interviewing
 # Valid statuses: applied, acknowledged, responded, interviewing, offered, rejected, ghosted
 ```
 
-### Check for Ghosted Applications
+### Mark Stranded Applications
 
 ```bash
 charon apply --ghost-check
 ```
 
-Marks any application with 21+ days of silence as ghosted. The daily scanner does this automatically, but you can run it manually too.
+Marks any application with 21+ days of silence as stranded. The flag name stays `--ghost-check` for backwards compatibility, but the user-facing label is "Stranded" — souls Charon couldn't ferry waited on the wrong shore of the Styx for 100 years.
+
+Considers `applied / acknowledged / responded` rows anchored to `applied_at` (an automated acknowledgment email doesn't reset the silence clock — it's the silence in disguise), and `interviewing` rows anchored to `updated_at` (a real interview round does reset). `offered / rejected / ghosted` are explicitly skipped (terminal states).
+
+The daily scanner does this automatically. The dashboard's Applied tab has a "Mark stranded" button that does the same thing.
 
 ### Scan Your Inbox Manually
 
@@ -532,6 +536,56 @@ category in the output file. Contact list saves alongside resume.md
 and cover_letter.md so the whole application packet lives in one
 folder. Opt-in only — `provision` does NOT auto-run this, so you only
 pay for searches on roles you actually plan to outreach for.
+
+### Get a Salary Range
+
+`charon salary` pulls a fair-market salary range that's calibrated to
+THIS candidate (your actual resume + target roles) against THIS
+specific posting, with current web-search-grounded market data.
+
+```bash
+charon salary --id 2607
+# writes salary_intel.md to the offering folder
+```
+
+Uses Sonnet with web search (~$0.05 per call). The prompt is given
+your full resume, target_roles from profile, and the posting itself,
+then searches Levels.fyi / Glassdoor / BLS / Robert Half / recent
+comp threads to ground the numbers. The output rationale explicitly
+names how your background shifted the range (a decade of fraud-
+investigation experience pushes the ask above true entry-level
+despite a recent degree).
+
+Saved as `salary_intel.md` in the offering folder — low / mid / high
+range, confidence level, rationale, experience-adjustment paragraph,
+negotiation guidance, posting's stated range if any, and source
+list. Dashboard surfaces this as the `$` button on Ready cards.
+
+### Sirens (LinkedIn Posts in Your Voice)
+
+`charon manifest` includes a Sirens tab — voice-true LinkedIn post
+writer. There's no CLI command for Sirens; it lives entirely in the
+dashboard.
+
+The flow: open the Sirens tab, glance at the magical question above
+the textarea (one of 35 cybersecurity-themed reflective prompts —
+hit "↻ another" if it doesn't land), then brain-dump into the
+textarea. Run-ons, half-thoughts, parentheticals, the whole mess.
+Click **Polish**. Sonnet processes it for ~5-10s using the voice
+block in your `profile.yaml` (the same source `petition` uses for
+cover letters, so your posts and letters share one calibrated voice).
+
+The output card shows the polished post (under LinkedIn's 3000-char
+limit), the model's notes on what it changed, and any voice-warning
+bubbles if it caught itself drifting toward AI-speak. A best-time-
+to-post panel underneath tells you whether to post now (green =
+Tue/Wed/Thu peak window) or wait until the next peak (countdown
+shown).
+
+Drafts save to `~/.charon/sirens/drafts/` as JSON. The system prompt
+explicitly bans "🚀", "Excited to announce", "I'm thrilled", "deep
+dive", "game-changer", engagement CTAs, performative gratitude, and
+em-dash overuse.
 
 ### Browse the Funnel in a Browser (`manifest`)
 
