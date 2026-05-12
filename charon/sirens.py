@@ -71,9 +71,15 @@ def random_magical_question() -> str | None:
 # ── voice prompt ────────────────────────────────────────────────────
 
 
-def _voice_block(profile: dict[str, Any]) -> str:
+def voice_block_from_profile(profile: dict[str, Any]) -> str:
     """Pull the voice description from profile.yaml. Falls back to a
-    minimal safety net if the voice block is missing."""
+    minimal safety net if the voice block is missing.
+
+    Shared by Sirens (posts) and petition (cover letters) so both flows
+    speak with the same voice. Tone-of-output rules (length, structure,
+    banned phrases) stay in each caller's prompt — only the voice
+    description itself comes from here.
+    """
     voice = profile.get("voice") if isinstance(profile, dict) else None
     if isinstance(voice, dict):
         desc = voice.get("description")
@@ -85,6 +91,10 @@ def _voice_block(profile: dict[str, Any]) -> str:
         "contractions. Read aloud — if no real person would say it, "
         "rewrite."
     )
+
+
+# Backwards-compat shim for any internal callers
+_voice_block = voice_block_from_profile
 
 
 SIRENS_SYSTEM_TEMPLATE = """\
@@ -267,4 +277,5 @@ __all__ = [
     "random_magical_question",
     "save_draft",
     "list_drafts",
+    "voice_block_from_profile",
 ]

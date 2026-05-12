@@ -32,7 +32,21 @@ from charon.tailor import (
 )
 
 
-PETITION_SYSTEM_PROMPT = """\
+_DEFAULT_VOICE_BLOCK = """\
+- Conversational, not corporate. The letter should sound like one human \
+addressing another about real work, not a template filled in with mad-libs.
+- Specific over abstract, always. "Spent two years investigating fraud at \
+Citi, including a document-forgery ring that triggered an FBI investigation" \
+beats "Extensive experience in financial crimes." Real beats vague.
+- Vary sentence length. Some short. Others longer because the actual \
+thought needs more setup. Robotic uniform sentences signal AI.
+- Contractions ("I'm," "we'd," "didn't") are fine where they fit. Read \
+the sentence aloud — if no real person would say it that way, rewrite.
+- Use "I think" or "I've been thinking about" naturally where they fit, \
+but don't make them tics."""
+
+
+PETITION_SYSTEM_TEMPLATE = """\
 You are Charon's cover letter engine. Given a candidate's resume + a job \
 posting + the analyzer's notes on overlap and gaps, you write a tailored \
 cover letter as a real person would write it. Not as an AI imitating one.
@@ -77,22 +91,14 @@ already on the resume. The recruiter will see the resume.
 
 VOICE — match these traits:
 
-- Conversational, not corporate. The letter should sound like one human \
-addressing another about real work, not a template filled in with mad-libs.
-- Specific over abstract, always. "Spent two years investigating fraud at \
-Citi, including a document-forgery ring that triggered an FBI investigation" \
-beats "Extensive experience in financial crimes." Real beats vague.
-- Vary sentence length. Some short. Others longer because the actual \
-thought needs more setup. Robotic uniform sentences signal AI.
-- Contractions ("I'm," "we'd," "didn't") are fine where they fit. Read \
-the sentence aloud — if no real person would say it that way, rewrite.
-- ONE associative connection or parenthetical aside is good — it makes \
-the letter feel human. Two starts to feel performative. Don't force it.
+{voice_block}
+
+LETTER-SPECIFIC TONAL NOTES (apply on top of the voice above):
+
+- A cover letter is tighter than a post — ONE associative connection or \
+parenthetical aside is good; two starts to feel performative. Don't force it.
 - Light mythology or metaphor is okay if it lands naturally and serves \
-the point. Don't reach for it. The letter should feel grounded, not \
-poetic.
-- Use "I think" or "I've been thinking about" naturally where they fit, \
-but don't make them tics.
+the point. Don't reach for it. The letter should feel grounded, not poetic.
 - Honest about gaps. If the role wants something the candidate doesn't \
 have, say so plainly with what they bring instead. Concrete past examples \
 of picking up new things. Not "I'm a fast learner."
@@ -123,6 +129,35 @@ no "Dear Hiring Manager," at the start unless it actually fits naturally \
 (usually it doesn't — modern cover letters often skip the salutation \
 entirely or open with the candidate's name as a level-1 header followed \
 by the letter body). No commentary outside the letter."""
+
+
+# Backwards-compat constant: the rendered template with the default
+# voice block baked in. Tests and any external callers that reach for
+# `PETITION_SYSTEM_PROMPT` keep working. Runtime uses
+# build_petition_system_prompt(profile) below so it picks up
+# profile.yaml's voice block if present.
+PETITION_SYSTEM_PROMPT = PETITION_SYSTEM_TEMPLATE.format(
+    voice_block=_DEFAULT_VOICE_BLOCK
+)
+
+
+def build_petition_system_prompt(profile: dict[str, Any] | None) -> str:
+    """Render the petition system prompt with the profile's voice block.
+
+    Falls back to _DEFAULT_VOICE_BLOCK (the original inline petition voice)
+    if the profile has no voice block. Shared with Sirens via
+    charon.sirens.voice_block_from_profile so both flows speak with the
+    same voice when profile.yaml has one defined.
+    """
+    from charon.sirens import voice_block_from_profile
+    voice = voice_block_from_profile(profile or {})
+    # voice_block_from_profile returns either the profile voice or a
+    # short safety-net string. If we got the safety-net (no profile voice
+    # configured), use the richer _DEFAULT_VOICE_BLOCK instead so
+    # petition keeps its full prior voice rather than the short fallback.
+    if "Conversational, specific" in voice and "engagement-bait" in voice:
+        voice = _DEFAULT_VOICE_BLOCK
+    return PETITION_SYSTEM_TEMPLATE.format(voice_block=voice)
 
 
 PETITION_USER_TEMPLATE = """\
@@ -284,9 +319,10 @@ def petition_discovery(
         judgement_hints=_judgement_hints_for_letter(discovery),
     )
 
+    system_prompt = build_petition_system_prompt(profile)
     try:
         generated, usage = _tailor._generate(
-            PETITION_SYSTEM_PROMPT,
+            system_prompt,
             user_prompt,
             model=model,
             max_tokens=cfg["max_tokens"],
@@ -306,7 +342,7 @@ def petition_discovery(
         model=model,
         usage=usage,
         unverified=unverified,
-        system_prompt=PETITION_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_prompt=user_prompt,
         generated=generated,
         discovery=discovery,
@@ -327,4 +363,6 @@ def petition_discovery(
 __all__ = [
     "petition_discovery",
     "PETITION_SYSTEM_PROMPT",
+    "PETITION_SYSTEM_TEMPLATE",
+    "build_petition_system_prompt",
 ]
