@@ -4,28 +4,55 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-Phase 10 is mid-build. The dashboard ships in its first usable form
-alongside the supporting deterministic-render layer and a small
-LinkedIn-contacts surfacing helper.
+(Nothing pending — see ROADMAP.md for the next phase.)
+
+## [0.10.0] — 2026-05-12
+
+Phase 10 ships. `charon manifest` is a full local dashboard that lets
+you run the whole funnel (Awaiting → Ready → Applied → Refused) plus
+Sirens (voice-true LinkedIn post writer) from a browser instead of
+shell loops. Dark "candlelit underworld" theme, coin score badges,
+illustrated tab icons, Charon's Pulse charts modal, judge-more from
+the dashboard, salary intel, closed-posting one-click, 45-day archive.
 
 ### Added
 
 - **`charon manifest`** — local HTTP dashboard. Default port 7777,
-  auto-opens browser, binds to loopback only. Single "Ready" tab in
-  this cut: score-sorted cards with score badges, sub-score pips,
-  ATS/tier/materials badges, and per-card actions:
-  - **Mark applied** — bridge that writes the application row AND flips
-    the discovery's `screened_status` to `applied` atomically. Applied
-    jobs drop off the ready list immediately.
-  - **Not for me** — soft rejection with an optional "why?" textarea.
-    Reason persists to `judgement_reason` for future filtering.
-  - **Prep materials** (on cards without offerings) — runs forge +
-    petition + render server-side, ~30s, card refreshes when done.
-  - **Open folder** (on cards with offerings) — opens the offering's
-    folder via `click.launch`.
-  - **Find contacts** (on cards with offerings) — runs the LinkedIn
-    contact search, saves to `linkedin_contacts.md`, adds a "contacts"
-    badge to the card.
+  auto-opens browser, binds to loopback only. Sticky sidebar with
+  five tabs:
+  - **Awaiting** — un-judged queue, oldest pipeline state. Read-only
+    cards with a header showing "X of Y lifetime · waiting to be
+    scored."
+  - **Ready** — score-sorted judged-passing discoveries. Each card has
+    the polished funnel of actions: View posting · Prep materials
+    (forge + petition + render server-side, ~30s) · Open folder · $
+    salary intel (web-search-grounded, resume-calibrated) · Find
+    contacts (LinkedIn search) · Mark applied · Not for me (with
+    optional "why?"). Plus a corner X for one-click closed-posting
+    rejection. Click any card to expand the detail view: full
+    posting, judgement reasoning, dealbreakers (pink), yellow flags
+    (amber), green flags (sage), role-alignment overlap/gaps as chips,
+    resume-match overlap/gaps/transferable, ghost-job summary.
+  - **Applied** — every tracked application. Status badges color-coded,
+    relative-time "applied N days ago," inline status dropdown that
+    flips the row's status atomically. Per-row "Open folder" / "Find
+    contacts" buttons when the application links back to a discovery.
+    Toolbar **Mark stranded** runs the broadened ghost-check.
+  - **Refused** — score-sorted refusals (capped to 200 most-recent for
+    display, tab chip shows the true total). Each card pins the
+    judge's reason in a quoted block and replaces Apply/Reject with
+    a single **Send to ready** button that overrides the judge
+    without re-running it.
+  - **Sirens** — voice-true LinkedIn post writer. Magical-question
+    prompt above the brain-dump textarea (35 cybersecurity-themed
+    reflective questions in `templates/magical_questions.yaml`, shuffle
+    for a new one). Polish runs through Sonnet, output card shows the
+    polished post, char count vs. LinkedIn's 3000 limit, the model's
+    notes on what it changed, voice-warning bubbles if it caught
+    itself drifting corporate, plus Copy / Save Draft buttons. Drafts
+    persist to `~/.charon/sirens/drafts/`. Best-time-to-post panel
+    below the post indicates current window (peak/ok/cold) and counts
+    down to the next peak window in local time.
 - **`charon render`** — deterministic markdown → styled HTML for an
   offering's `resume.md` and `cover_letter.md`. Pure Python via
   `markdown-it-py` token walk + section dispatch — no AI calls. CSS is
@@ -41,6 +68,45 @@ LinkedIn-contacts surfacing helper.
   existing `dossier.find_contacts` web-search helper; opt-in so the
   per-call web-search cost (~$0.10-$0.20) is only paid for roles
   you actually want to outreach for.
+- **`charon salary --id <N>`** — pulls a fair-market salary range
+  for the specific candidate + posting. Calls Sonnet with web search
+  on (Levels.fyi, Glassdoor, BLS, Robert Half) and is given the
+  candidate's resume + profile target_roles, so the range reflects
+  THIS candidate's actual experience level rather than a generic
+  role-title number. Saves to the offering folder as
+  `salary_intel.md`. ~$0.05/call.
+- **Charon's Pulse charts modal** — accessible via a chart icon in
+  the stats band. Three visualizations:
+  - **The Crossing** — funnel waterfall (Gathered → Judged → Ready
+    → Applied → Engaged → Offered) with animated bars and
+    conversion percentages.
+  - **The Fates** — donut breakdown of application statuses (applied
+    / acknowledged / responded / interviewing / offered / rejected /
+    stranded), colors match the dashboard's status badges.
+  - **The Rhythm** — weekly time series of submitted applications
+    with an engaged-replies dashed overlay.
+  Pure SVG, no chart library.
+- **Stats band** at the top of the main pane — six counters
+  (Gathered / Judged / Ready / Applied / Stranded / Reply rate) with
+  Fraunces serif numerals, gold + plum coloring, the chart-modal
+  trigger on the right.
+- **Judge from the dashboard** — Ready tab toolbar grows a "Judge
+  more" button. Inline form with batch size + cost estimate. Runs
+  in a worker thread so the dashboard stays responsive; progress
+  bar polls every 4s and refreshes ready/awaiting/stats live as
+  rows pass through. Refresh-friendly — page reload during a run
+  picks up the indicator.
+- **45-day archive** for Applied — terminal-status applications
+  (stranded / rejected / offered) older than 45 days drop out of
+  the dashboard's default view, with a small footnote pointing at
+  `charon apply --list` for the full record.
+- **Voice block migration to `profile.yaml`** — DeAnna's voice
+  description moves from inline prompts to a single canonical
+  source. Sirens reads it; petition (cover letters) retrofits to
+  read the same block so posts and letters share one voice
+  calibration. Letter-specific tonal rules (parenthetical limit,
+  gap-handling guidance, mythology restraint) stay in petition's
+  template as a separate "letter-specific tonal notes" section.
 
 ### Changed
 
@@ -53,6 +119,49 @@ LinkedIn-contacts surfacing helper.
   DESC` (was `discovered_at DESC`) and prints the posting URL beneath
   each row. The ready list is now genuinely an "apply to these, in
   this order" view.
+- **"Ghosted" → "Stranded"** in user-facing text everywhere (dashboard
+  labels, toasts, CLI output). DB enum stays `ghosted` — no migration.
+  Mythological fit: souls Charon couldn't ferry stayed stranded on
+  the wrong shore of the Styx for 100 years.
+- **Stranded rule broadened**. The auto-strand sweep
+  (`apply --ghost-check`) used to only touch `applied`-status rows.
+  Now considers `applied / acknowledged / responded` as stale-able
+  too — anchored to `applied_at` so an automated acknowledgment
+  email doesn't reset the silence clock. `interviewing` is also
+  stale-able but anchored to `updated_at` (a real interview round
+  resets the clock). `offered / rejected / ghosted` are explicitly
+  skipped. Calendar-day truncation in the SQL avoids the
+  off-by-hours floating-point edge that was missing 20.95-day rows.
+- **Refused tab chip** shows the full lifetime refused total, not
+  the 200-row display slice. List cards stay capped for display
+  with a footer note pointing at `charon judge --list rejected` for
+  the full record.
+- **Judge pool** now excludes `enrichment_tier='failed'` rows. Those
+  131 Cisco postings with empty descriptions used to sit at the
+  front of the unjudged queue and get re-picked every batch, only
+  to error out at "no usable description." Now they fall out of the
+  pool entirely.
+- **Dashboard worker** buckets errored judge rows as "skipped"
+  separately from "refused" so the progress display is honest when
+  rows fail before the AI call.
+
+### Theme / look
+
+- **Dark "candlelit underworld" theme** — deep plum-black background,
+  warm cream text, brighter pinks and golds that glow against the
+  dark. Charon avatar and boat hero get a soft pink drop-shadow halo
+  so the illustrations look candlelit instead of cut-out.
+- **Coin score badges** — 50px circle with a radial gold gradient,
+  raised inset highlight, dashed inner rim. Replaces the gold pill
+  on every Ready/Refused card.
+- **Lantern glyphs** by Fraunces section headers (Charon's Pulse
+  panels, Sirens intro). Reused via inline SVG `<symbol>` defs.
+- **Sidebar ornament** — thin gold rule with a centered lantern
+  between the avatar/banner and the tab list.
+- **Illustrated tab icons** for all five tabs (compass / rune / key /
+  book / star), generated by DeAnna in Gemini. 44px, dimmed at
+  rest, glow on hover/active.
+- **Hourglass glyph** on Stranded status badges in Applied.
 
 ### Docs / planning
 
@@ -60,22 +169,27 @@ LinkedIn-contacts surfacing helper.
   LinkedIn post writer embedded as a 5th tab in `manifest`, with
   voice prompt migrating to `profile.yaml` (canonical source for both
   Sirens and petition).
-- **ROADMAP §11.5 (Known Workflow Gaps)** picked up two entries:
-  - No `--tier` filter on `judge` (can't say "judge tier_1 first").
-  - No discovery <-> application bridge in the CLI: `apply --add` still
-    requires manual `--company`/`--role`/`--url` (the dashboard's
-    Mark Applied button is the only place this is closed today).
+- **ROADMAP §11.5 (Known Workflow Gaps)** picked up four entries:
+  - No `--tier` filter on `judge`
+  - No discovery <-> application bridge in the CLI (`apply --add`
+    still requires manual `--company`/`--role`/`--url`)
+  - Language/location dealbreaker patterns the judge keeps missing
+    (Chinese, Portugal, UK, federal-adjacent)
+  - Petition retrofit — closed in 0.10.0 ✓
 - `charon funnel` cheat sheet grew steps 6 (render) and 7 (manifest).
 - HOWTO.md adds sections for render, contacts, and the manifest
   dashboard.
 
 ### Dependencies
 
-- Added `markdown-it-py >= 3.0` (used by `charon render`). Already a
-  common transitive dep; small, pure-Python, no native build.
+- Added `markdown-it-py >= 3.0` (used by `charon render`). Small,
+  pure-Python, no native build.
 
-Next: more tabs on the dashboard (Gathered / Judged / Provisioned /
-Crossed) and the Sirens tab.
+### Phase 10 complete
+
+The dashboard is the new daily flow. Phase 11 (daily ops integration
+— cron-driven gather + enrich + judge on the ops server) is next per
+ROADMAP.
 
 ## [0.9.6] — 2026-05-05
 
@@ -541,7 +655,8 @@ Pre-v2 baseline. Tagged retroactively to mark the end of v1 development before t
 - No prior tags. v0.5.0 is the first.
 - Single contributor.
 
-[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.6...HEAD
+[Unreleased]: https://github.com/Pickle-Pixel/Charon/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.6...v0.10.0
 [0.9.6]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/Pickle-Pixel/Charon/compare/v0.9.0...v0.9.5
 [0.9.0]: https://github.com/Pickle-Pixel/Charon/compare/v0.8.5...v0.9.0

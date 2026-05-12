@@ -432,11 +432,18 @@ charon offerings --open --id N         # open offerings folder
 
 ---
 
-### Phase 10 — `manifest` `[~]` (mid-build)
+### Phase 10 — `manifest` `[x]` (shipped v0.10.0 — 2026-05-12)
 **Target version:** v0.10.0
 **Complexity:** L
 **Goal:** Local HTML dashboard showing the funnel end-to-end. The ferryman's passenger manifest.
-**Status:** First slice shipped (uncommitted at time of writing) — Ready tab with apply / reject / prep-materials / open-folder / find-contacts. Render module (`charon/render.py`) and contacts helper (`charon/contacts.py`) supporting it. Remaining: Gathered / Judged / Provisioned / Crossed tabs, stats panel, detail view, Sirens tab, voice-block migration in `profile.yaml`. See CHANGELOG.md [Unreleased] for the shipped bits.
+**Status:** Shipped. Five tabs (Awaiting / Ready / Applied / Refused / Sirens), full per-card detail view, stats band + Charon's Pulse charts modal, judge-more from the dashboard, salary intel, closed-posting one-click, 45-day archive, dark "candlelit underworld" theme with illustrated tab icons and coin score badges. Voice block migrated to `profile.yaml` and petition retrofitted to read from the same source. See CHANGELOG.md [0.10.0] for the full feature list.
+
+**What we skipped from the original spec** (judged not worth building):
+- **Gathered tab as originally specced** — we shipped "Awaiting" instead (un-judged queue, anchored to lifetime total). Same idea, better name.
+- **Judged tab** — Ready and Refused cover both halves of "everything scored" with better workflow ergonomics than a combined view.
+- **Provisioned tab** — already surfaced via the "materials" badge on Ready cards; a dedicated tab would have been redundant.
+
+**What we added beyond the spec:** salary intel, closed-posting one-click, 45-day archive, ghost-rule broadening (acknowledged/responded/interviewing now stale-able), "Stranded" rename, dark theme, illustrated icons, Charon's Pulse charts modal, judge-more from the dashboard, magical-question prompts for Sirens, best-time-to-post panel.
 
 **Scope:**
 - New module: `charon/dashboard.py` (CLI command name: `manifest`; Python `http.server` based)
@@ -630,6 +637,7 @@ Update this after every phase ships. Last entry on top.
 
 | Date | Version | Phase | Status | Notes |
 |---|---|---|---|---|
+| 2026-05-12 | 0.10.0 | 10 | shipped | `charon manifest` dashboard. Five tabs (Awaiting / Ready / Applied / Refused / Sirens) + Charon's Pulse charts modal + dark "candlelit underworld" theme + illustrated tab icons + coin score badges. Salary intel, closed-posting one-click, 45-day archive, voice block in profile.yaml shared by Sirens + petition. Ghost rule broadened (acknowledged/responded/interviewing now stale-able). "Ghosted" → "Stranded" rename. 469 tests. |
 | 2026-05-05 | 0.9.6 | 9.3 | shipped | `charon provision` (forge + petition wrapper) and `charon offerings` (browse materials). Phase 9 complete. 438 tests. |
 | 2026-05-05 | 0.9.5 | 9.2 | shipped | `charon petition` writes voice-tuned cover letters. Geographic-fabrication rule added after first live run hallucinated "I'm in the UK." 426 tests. Live: re-petitioned Coalfire honestly, surfaced UK-only requirement. |
 | 2026-05-05 | 0.9.0 | 9.1 | shipped | `charon forge` tailors resumes per ready discovery. Post-gen verifier flags fabricated numerical claims. 417 tests. Live: forged Coalfire SOC role at $0.005, verifier clean. |
