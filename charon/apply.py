@@ -85,6 +85,45 @@ def track_application(
     return get_application(app_id)
 
 
+def track_application_from_discovery(
+    discovery_id: int,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Bridge: track an application using fields from an existing discovery.
+
+    Looks up the discovery, pulls company/role/url, creates the application,
+    and flips the discovery's `screened_status` to 'applied' atomically so
+    the row drops off `judge --list ready`. Shared by the CLI
+    `apply --add --id <N>` flow and the dashboard's Mark applied button.
+    """
+    from charon.db import get_discovery, mark_discovery_applied
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise ApplyError(f"No discovery with id {discovery_id}.")
+    if discovery.get("screened_status") == "applied":
+        raise ApplyError(f"Discovery #{discovery_id} is already marked applied.")
+
+    company = (discovery.get("company") or "").strip()
+    role = (discovery.get("role") or "").strip()
+    if not company or not role:
+        raise ApplyError(
+            f"Discovery #{discovery_id} is missing company or role — can't add."
+        )
+
+    app = track_application(
+        company=company,
+        role=role,
+        url=discovery.get("url"),
+        notes=notes,
+    )
+    mark_discovery_applied(discovery_id)
+    if isinstance(app, dict):
+        app = dict(app)
+        app["discovery_id"] = discovery_id
+    return app
+
+
 def update_status(app_id: int, status: str) -> dict[str, Any] | None:
     """Update an application's status."""
     status = status.lower().strip()

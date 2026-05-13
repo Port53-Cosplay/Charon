@@ -630,6 +630,7 @@ def update_discovery_enrichment(
 
 def get_unenriched_discoveries(
     ats: str | None = None,
+    slug: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Discoveries that haven't been enriched yet (enrichment_tier IS NULL)."""
@@ -638,6 +639,9 @@ def get_unenriched_discoveries(
     if ats:
         clauses.append("ats = ?")
         params.append(ats)
+    if slug:
+        clauses.append("slug = ?")
+        params.append(slug)
 
     sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
     sql += " ORDER BY discovered_at DESC"
@@ -782,10 +786,15 @@ def update_discovery_classification(
 
 def get_unjudged_discoveries(
     ats: str | None = None,
+    slug: str | None = None,
+    tier: str | list[str] | None = None,
     require_enriched: bool = True,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Discoveries that haven't been judged yet (judged_at IS NULL).
+
+    Optional filters: `ats` (one value), `slug` (one employer), `tier`
+    (one tier or a list, e.g. ['tier_1','tier_2'] to combine).
 
     By default requires enrichment_tier IS NOT NULL AND a non-empty
     full_description — judging without a description is pointless.
@@ -804,6 +813,14 @@ def get_unjudged_discoveries(
     if ats:
         clauses.append("ats = ?")
         params.append(ats)
+    if slug:
+        clauses.append("slug = ?")
+        params.append(slug)
+    if tier:
+        tiers = [tier] if isinstance(tier, str) else list(tier)
+        placeholders = ",".join("?" for _ in tiers)
+        clauses.append(f"tier IN ({placeholders})")
+        params.extend(tiers)
 
     sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
     sql += " ORDER BY discovered_at DESC"

@@ -1396,14 +1396,18 @@ def digest(send: bool, preview: bool) -> None:
 
 
 @cli.command("apply")
-@click.option("--add", is_flag=True, help="Track a new application.")
-@click.option("--company", help="Company name.")
-@click.option("--role", help="Role/position title.")
-@click.option("--url", "app_url", help="Job posting URL.")
+@click.option("--add", is_flag=True, help="Track a new application. "
+              "Combine with --id <N> to pull company/role/url from a discovery, "
+              "or with --company/--role/--url to enter them manually.")
+@click.option("--company", help="Company name (manual --add mode).")
+@click.option("--role", help="Role/position title (manual --add mode).")
+@click.option("--url", "app_url", help="Job posting URL (manual --add mode).")
 @click.option("--notes", help="Notes about the application.")
 @click.option("--list", "list_apps", is_flag=True, help="List tracked applications.")
-@click.option("--status", help="Filter by status or update status (with --id).")
-@click.option("--id", "app_id", type=int, help="Application ID for status update.")
+@click.option("--status", help="Filter by status or update status (with --id and no --add).")
+@click.option("--id", "id_arg", type=int,
+              help="With --add: discovery ID to pull fields from. "
+                   "Without --add: application ID for status update.")
 @click.option("--remove", "remove_id", type=int, help="Remove an application by ID.")
 @click.option("--ghost-check", is_flag=True, help="Mark stale applications as stranded (21+ days of silence).")
 @click.option("--stats", is_flag=True, help="Show application statistics.")
@@ -1415,14 +1419,14 @@ def apply_cmd(
     notes: str | None,
     list_apps: bool,
     status: str | None,
-    app_id: int | None,
+    id_arg: int | None,
     remove_id: int | None,
     ghost_check: bool,
     stats: bool,
 ) -> None:
     """Track job applications. The ferryman keeps a ledger."""
     # Determine action
-    if not any([add, list_apps, ghost_check, stats, app_id, remove_id]):
+    if not any([add, list_apps, ghost_check, stats, id_arg, remove_id]):
         list_apps = True
 
     if remove_id:
@@ -1438,11 +1442,34 @@ def apply_cmd(
         return
 
     if add:
+        # Two modes: from a discovery (--id <N>) or manual (--company/--role).
+        if id_arg is not None:
+            if company or role or app_url:
+                print_warning(
+                    "--id supplied; ignoring --company/--role/--url. "
+                    "Fields will come from the discovery row."
+                )
+            from charon.apply import track_application_from_discovery
+            try:
+                app = track_application_from_discovery(id_arg, notes=notes)
+            except ApplyError as e:
+                print_error(str(e))
+                return
+            print_success(
+                f"Application #{app['id']} tracked from discovery #{id_arg}: "
+                f"{app['company']} - {app['role']}"
+            )
+            print_info("Discovery flipped to 'applied' — it'll drop off Ready.")
+            if app.get("email_domain"):
+                print_info(f"Email domain detected: {app['email_domain']}")
+            return
+
+        # Manual mode — original behavior
         if not company:
-            print_error("--company is required when adding an application.")
+            print_error("--company is required when adding an application (or pass --id <discovery>).")
             return
         if not role:
-            print_error("--role is required when adding an application.")
+            print_error("--role is required when adding an application (or pass --id <discovery>).")
             return
 
         try:
@@ -1456,22 +1483,22 @@ def apply_cmd(
             print_info(f"Email domain detected: {app['email_domain']}")
         return
 
-    if app_id and status:
+    if id_arg and status:
         try:
-            app = update_status(app_id, status)
+            app = update_status(id_arg, status)
         except ApplyError as e:
             print_error(str(e))
             return
 
         if app:
-            print_success(f"Application #{app_id} updated: {app['company']} -> {status}")
+            print_success(f"Application #{id_arg} updated: {app['company']} -> {status}")
             if status == "interviewing" and not app.get("dossier_at"):
                 print_warning(
                     f"No dossier on file for {app['company']}. "
                     f"Run: charon dossier --company \"{app['company']}\""
                 )
         else:
-            print_error(f"Application #{app_id} not found.")
+            print_error(f"Application #{id_arg} not found.")
         return
 
     if ghost_check:
@@ -1909,6 +1936,7 @@ def gather_cmd(
 @click.option("--id", "discovery_id", type=int, help="Enrich a single discovery by ID.")
 @click.option("--all", "enrich_all", is_flag=True, help="Enrich all unenriched discoveries.")
 @click.option("--ats", help="Limit batch to one ATS (e.g. workday).")
+@click.option("--slug", help="Limit batch to one employer (matches companies.yaml slug).")
 @click.option("--force", is_flag=True, help="Re-enrich even already-enriched discoveries.")
 @click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
 @click.option("--rate-limit", type=float, default=None,
@@ -1918,6 +1946,7 @@ def enrich_cmd(
     discovery_id: int | None,
     enrich_all: bool,
     ats: str | None,
+    slug: str | None,
     force: bool,
     limit: int | None,
     rate_limit: float | None,
@@ -1982,6 +2011,8 @@ def enrich_cmd(
         scope = []
         if ats:
             scope.append(f"ats={ats}")
+        if slug:
+            scope.append(f"slug={slug}")
         if force:
             scope.append("force")
         if limit:
@@ -1990,7 +2021,11 @@ def enrich_cmd(
             print_info("Scope: " + " ".join(scope))
 
         from charon.db import get_unenriched_discoveries, get_discoveries
-        targets = get_discoveries(ats=ats, limit=limit) if force else get_unenriched_discoveries(ats=ats, limit=limit)
+        targets = (
+            get_discoveries(ats=ats, slug=slug, limit=limit)
+            if force
+            else get_unenriched_discoveries(ats=ats, slug=slug, limit=limit)
+        )
         if not targets:
             print_info("Nothing to enrich.")
             return
@@ -2006,6 +2041,7 @@ def enrich_cmd(
         try:
             enrich_batch(
                 ats=ats,
+                slug=slug,
                 force=force,
                 limit=limit,
                 profile=prof,
@@ -2067,6 +2103,10 @@ def _print_enrich_line(result: dict) -> None:
 @click.option("--id", "discovery_id", type=int, help="Judge a single discovery by ID.")
 @click.option("--all", "judge_all", is_flag=True, help="Judge all unjudged enriched discoveries.")
 @click.option("--ats", help="Limit batch to one ATS.")
+@click.option("--slug", help="Limit batch to one employer (matches companies.yaml slug).")
+@click.option("--tier", "tier_filter", multiple=True,
+              type=click.Choice(["tier_1", "tier_2", "tier_3"]),
+              help="Limit batch to one or more tiers. Repeatable: --tier tier_1 --tier tier_2.")
 @click.option("--rejudge", is_flag=True, help="Re-run judges even on already-judged discoveries.")
 @click.option("--reclassify", is_flag=True,
               help="Re-apply the ready/rejected gating to existing scores. No AI calls. "
@@ -2087,6 +2127,8 @@ def judge_cmd(
     discovery_id: int | None,
     judge_all: bool,
     ats: str | None,
+    slug: str | None,
+    tier_filter: tuple[str, ...],
     rejudge: bool,
     reclassify: bool,
     status_filter: str | None,
@@ -2261,11 +2303,16 @@ def judge_cmd(
 
     if judge_all:
         from charon.db import get_unjudged_discoveries, get_discoveries
-        targets = (
-            get_discoveries(ats=ats, status=status_filter, limit=limit)
-            if rejudge
-            else get_unjudged_discoveries(ats=ats, limit=limit)
-        )
+        tier_list = list(tier_filter) if tier_filter else None
+        if rejudge:
+            targets = get_discoveries(ats=ats, slug=slug, status=status_filter, limit=limit)
+            if tier_list:
+                tiers_set = set(tier_list)
+                targets = [t for t in targets if t.get("tier") in tiers_set]
+        else:
+            targets = get_unjudged_discoveries(
+                ats=ats, slug=slug, tier=tier_list, limit=limit,
+            )
         if status_filter and not rejudge:
             print_warning(
                 "--status is ignored without --rejudge. Unjudged rows have no "
@@ -2290,6 +2337,10 @@ def judge_cmd(
         scope = []
         if ats:
             scope.append(f"ats={ats}")
+        if slug:
+            scope.append(f"slug={slug}")
+        if tier_list:
+            scope.append(f"tier={'+'.join(tier_list)}")
         if rejudge:
             scope.append("rejudge")
         if status_filter:
@@ -2314,6 +2365,8 @@ def judge_cmd(
         try:
             judge_batch(
                 ats=ats,
+                slug=slug,
+                tier=tier_list,
                 rejudge=rejudge,
                 status=status_filter,
                 limit=limit,

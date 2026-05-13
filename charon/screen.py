@@ -353,6 +353,8 @@ def judge_one_id(
 def judge_batch(
     *,
     ats: str | None = None,
+    slug: str | None = None,
+    tier: str | list[str] | None = None,
     rejudge: bool = False,
     status: str | None = None,
     limit: int | None = None,
@@ -362,17 +364,23 @@ def judge_batch(
 ) -> list[dict[str, Any]]:
     """Judge many discoveries. Default: only unjudged + already-enriched.
 
-    With rejudge=True, picks up everything matching the ats/status/limit
-    filters regardless of prior judgement state. Reads the configured
-    resume once upfront and threads it through all per-discovery calls.
+    With rejudge=True, picks up everything matching the
+    ats/slug/tier/status/limit filters regardless of prior judgement
+    state. Reads the configured resume once upfront and threads it
+    through all per-discovery calls.
 
     `status` filter only applies when rejudge=True (unjudged rows have
     status='new' by default).
     """
     if rejudge:
-        targets = get_discoveries(ats=ats, status=status, limit=limit)
+        targets = get_discoveries(ats=ats, slug=slug, status=status, limit=limit)
+        if tier:
+            tiers = {tier} if isinstance(tier, str) else set(tier)
+            targets = [t for t in targets if t.get("tier") in tiers]
     else:
-        targets = get_unjudged_discoveries(ats=ats, limit=limit)
+        targets = get_unjudged_discoveries(
+            ats=ats, slug=slug, tier=tier, limit=limit
+        )
 
     # Load resume once for the whole batch
     resume_text = _maybe_load_resume(profile)

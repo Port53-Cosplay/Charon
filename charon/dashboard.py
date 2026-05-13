@@ -360,7 +360,12 @@ def _judge_status_snapshot() -> dict[str, Any]:
         return dict(_judge_state)
 
 
-def _judge_worker(limit: int, ats: str | None) -> None:
+def _judge_worker(
+    limit: int,
+    ats: str | None,
+    slug: str | None,
+    tier: list[str] | None,
+) -> None:
     from datetime import datetime, timezone
     from charon.profile import load_profile
     from charon.screen import judge_batch
@@ -384,6 +389,8 @@ def _judge_worker(limit: int, ats: str | None) -> None:
         profile = load_profile()
         judge_batch(
             ats=ats,
+            slug=slug,
+            tier=tier,
             limit=limit,
             profile=profile,
             on_progress=on_progress,
@@ -397,7 +404,12 @@ def _judge_worker(limit: int, ats: str | None) -> None:
             _judge_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _start_judge_batch(limit: int, ats: str | None = None) -> dict[str, Any]:
+def _start_judge_batch(
+    limit: int,
+    ats: str | None = None,
+    slug: str | None = None,
+    tier: list[str] | None = None,
+) -> dict[str, Any]:
     """Kick off a judge batch in a worker thread.
 
     Returns the initial state snapshot. Frontend polls /api/judge/status
@@ -422,7 +434,7 @@ def _start_judge_batch(limit: int, ats: str | None = None) -> dict[str, Any]:
             "error": None,
         })
     threading.Thread(
-        target=_judge_worker, args=(limit, ats), daemon=True
+        target=_judge_worker, args=(limit, ats, slug, tier), daemon=True
     ).start()
     return _judge_status_snapshot()
 
@@ -610,30 +622,16 @@ def _round1(v: float | None) -> float | None:
 def _apply_to_discovery(discovery_id: int, notes: str | None) -> dict[str, Any]:
     """Bridge: record an application + flip the discovery's status.
 
-    Pulls company/role/url from the discovery row so the caller doesn't
-    have to retype them. Returns the new application record.
+    Delegates to the shared `apply.track_application_from_discovery`
+    helper so the CLI's `apply --add --id <N>` and this dashboard path
+    end up writing identical rows.
     """
-    from charon.apply import ApplyError, track_application
-    from charon.db import get_discovery, mark_discovery_applied
-
-    discovery = get_discovery(discovery_id)
-    if discovery is None:
-        raise DashboardError(f"No discovery with id {discovery_id}.")
-    if discovery.get("screened_status") == "applied":
-        raise DashboardError(f"Discovery #{discovery_id} is already marked applied.")
+    from charon.apply import ApplyError, track_application_from_discovery
 
     try:
-        app = track_application(
-            company=discovery["company"],
-            role=discovery["role"],
-            url=discovery.get("url"),
-            notes=notes,
-        )
+        return track_application_from_discovery(discovery_id, notes=notes)
     except ApplyError as e:
         raise DashboardError(str(e)) from e
-
-    mark_discovery_applied(discovery_id)
-    return app
 
 
 def _reject_discovery(discovery_id: int, reason: str | None) -> dict[str, Any]:
@@ -1018,17 +1016,35 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/judge":
             body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                body = {}
             try:
-                limit = int(body.get("limit", 100)) if isinstance(body, dict) else 100
+                limit = int(body.get("limit", 100))
             except (TypeError, ValueError):
                 self._serve_status(HTTPStatus.BAD_REQUEST, "limit must be an integer")
                 return
-            ats = body.get("ats") if isinstance(body, dict) else None
+            ats = body.get("ats")
             if ats is not None and not isinstance(ats, str):
                 self._serve_status(HTTPStatus.BAD_REQUEST, "ats must be a string")
                 return
+            slug = body.get("slug")
+            if slug is not None and not isinstance(slug, str):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "slug must be a string")
+                return
+            tier_raw = body.get("tier")
+            tier: list[str] | None = None
+            if tier_raw is not None:
+                if isinstance(tier_raw, str):
+                    tier = [tier_raw] if tier_raw else None
+                elif isinstance(tier_raw, list):
+                    tier = [t for t in tier_raw if isinstance(t, str) and t]
+                    if not tier:
+                        tier = None
+                else:
+                    self._serve_status(HTTPStatus.BAD_REQUEST, "tier must be a string or list of strings")
+                    return
             try:
-                snap = _start_judge_batch(limit, ats=ats)
+                snap = _start_judge_batch(limit, ats=ats, slug=slug, tier=tier)
             except DashboardError as e:
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return

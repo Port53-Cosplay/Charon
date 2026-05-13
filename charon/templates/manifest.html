@@ -604,8 +604,8 @@
 
     .judge-form[hidden] { display: none; }
 
-    .judge-form input[type="number"] {
-      width: 70px;
+    .judge-form input[type="number"],
+    .judge-form select {
       padding: 5px 8px;
       border: 1px solid var(--card-border);
       border-radius: 6px;
@@ -616,7 +616,11 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .judge-form input[type="number"]:focus {
+    .judge-form input[type="number"] { width: 70px; }
+    .judge-form select { padding-right: 24px; }
+
+    .judge-form input[type="number"]:focus,
+    .judge-form select:focus {
       outline: none;
       border-color: var(--plum-soft);
       box-shadow: 0 0 0 3px rgba(104, 69, 160, 0.12);
@@ -1866,6 +1870,15 @@
           <label>Batch size:
             <input type="number" id="judge-limit-input" min="1" max="500" value="100">
           </label>
+          <label>Tier:
+            <select id="judge-tier-input">
+              <option value="">any</option>
+              <option value="tier_1">tier_1 only</option>
+              <option value="tier_2">tier_2 only</option>
+              <option value="tier_3">tier_3 only</option>
+              <option value="tier_1,tier_2">tier_1 + 2 (high-signal first)</option>
+            </select>
+          </label>
           <span class="cost-est">≈ <span id="judge-cost">$2–$5</span> in API spend · <span id="judge-time">5–10 min</span></span>
           <div class="spacer"></div>
           <button class="cancel-btn" id="judge-cancel">Cancel</button>
@@ -2952,12 +2965,14 @@
       }
     }
 
-    async function startJudgeBatch(limit) {
+    async function startJudgeBatch(limit, tier) {
+      const body = { limit };
+      if (tier && tier.length) body.tier = tier;
       try {
         const r = await fetch("/api/judge", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ limit }),
+          body: JSON.stringify(body),
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
@@ -3266,7 +3281,9 @@
           showToast("Batch size must be at least 1.", true);
           return;
         }
-        startJudgeBatch(limit);
+        const tierRaw = document.getElementById("judge-tier-input").value;
+        const tier = tierRaw ? tierRaw.split(",") : null;
+        startJudgeBatch(limit, tier);
         return;
       }
 

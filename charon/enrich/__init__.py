@@ -144,6 +144,7 @@ def enrich_one_id(
 def enrich_batch(
     *,
     ats: str | None = None,
+    slug: str | None = None,
     force: bool = False,
     limit: int | None = None,
     profile: dict[str, Any] | None = None,
@@ -159,9 +160,9 @@ def enrich_batch(
     delay = rate_limit_seconds if rate_limit_seconds is not None else cfg["rate_limit_seconds"]
 
     if force:
-        targets = get_discoveries(ats=ats, limit=limit)
+        targets = get_discoveries(ats=ats, slug=slug, limit=limit)
     else:
-        targets = get_unenriched_discoveries(ats=ats, limit=limit)
+        targets = get_unenriched_discoveries(ats=ats, slug=slug, limit=limit)
 
     results: list[dict[str, Any]] = []
     for i, discovery in enumerate(targets):
