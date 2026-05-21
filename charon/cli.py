@@ -3014,6 +3014,63 @@ def contacts_cmd(discovery_id: int) -> None:
         print_info(f"Saved: {result['path']}")
 
 
+@cli.command("pull-db")
+@click.option("--dry-run", is_flag=True,
+              help="Show what would be pulled without writing anything.")
+@click.option("--yes", is_flag=True, help="Skip the overwrite confirmation.")
+def pull_db_cmd(dry_run: bool, yes: bool) -> None:
+    """Pull the live DB down from the portal (one-way: portal -> local).
+
+    Fetches a fresh snapshot from the deployed portal so local dev sees
+    current data. Backs up the existing local DB first. NEVER pushes
+    local changes back up.
+    """
+    from charon.dbsync import SyncError, load_sync_config, pull_db
+
+    section_header("PULL DB")
+    try:
+        cfg = load_sync_config()
+    except SyncError as e:
+        print_error(str(e))
+        return
+
+    local_disp = cfg.get("local_db_path") or "~/.charon/charon.db"
+    print_info(f"Source: {cfg['remote_user']}@{cfg['remote_host']}:{cfg['remote_db_path']}")
+    print_info(f"Target: {local_disp}")
+
+    if not dry_run and not yes:
+        print_warning("This overwrites your local DB (a timestamped backup is made first).")
+        if not click.confirm("Pull and overwrite?", default=False):
+            print_info("Aborted.")
+            return
+
+    try:
+        result = pull_db(dry_run=dry_run)
+    except SyncError as e:
+        print_error(str(e))
+        return
+
+    before = result.get("before") or {}
+    after = result.get("after") or {}
+
+    def _fmt(counts: dict) -> str:
+        if not counts:
+            return "(none)"
+        return ", ".join(f"{k}={v}" for k, v in counts.items())
+
+    console.print()
+    print_info(f"Local before: {_fmt(before)}")
+    print_info(f"Portal data:  {_fmt(after)}  ({result['bytes']:,} bytes)")
+
+    if dry_run:
+        print_info("Dry run - nothing written.")
+        return
+
+    if result.get("backup"):
+        print_info(f"Backed up old local DB to {result['backup']}")
+    print_success(f"Pulled live DB to {result['local_db_path']}")
+
+
 @cli.command("manifest")
 @click.option("--port", type=int, default=None, help="Custom port (default 7777).")
 @click.option("--no-open", is_flag=True, help="Don't auto-open the browser.")

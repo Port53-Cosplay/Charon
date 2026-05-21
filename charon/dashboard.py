@@ -53,6 +53,28 @@ class DashboardError(Exception):
 # ── data layer ──────────────────────────────────────────────────────
 
 
+def _env_info() -> dict[str, Any]:
+    """Report whether this is the deployed portal or a local dev instance.
+
+    The deployed VM sets CHARON_DEPLOYMENT=portal (or =production). Anything
+    else — unset, "dev", "local" — is treated as a local instance and the
+    dashboard shows a banner warning that actions here don't sync to the
+    portal's live data. Default-to-local is deliberate: the dangerous case
+    is fat-fingering a real action into a stale local DB, so local is
+    flagged unless production explicitly opts out.
+    """
+    import os
+    from charon.db import DB_PATH
+
+    deployment = (os.environ.get("CHARON_DEPLOYMENT") or "").strip().lower()
+    is_portal = deployment in ("portal", "production", "prod")
+    return {
+        "deployment": deployment or "local",
+        "is_local": not is_portal,
+        "db_path": str(DB_PATH),
+    }
+
+
 def _ready_discoveries() -> list[dict[str, Any]]:
     from charon.db import get_discoveries
 
@@ -892,6 +914,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/judge/status":
             self._serve_json({"status": _judge_status_snapshot()})
+            return
+        if path == "/api/env":
+            self._serve_json({"env": _env_info()})
             return
         if path == "/api/sirens/question":
             from charon.sirens import random_magical_question

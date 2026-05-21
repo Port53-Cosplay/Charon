@@ -56,6 +56,33 @@
 
     /* ── layout ──────────────────────────────────────────────── */
 
+    .dev-banner {
+      background: repeating-linear-gradient(
+        45deg, #3D2D14, #3D2D14 12px, #443318 12px, #443318 24px);
+      border-bottom: 1px solid var(--gold);
+      color: var(--gold-deep);
+      font-size: 13px;
+      text-align: center;
+      padding: 8px 16px;
+      letter-spacing: 0.02em;
+      position: sticky;
+      top: 0;
+      z-index: 150;
+    }
+
+    .dev-banner[hidden] { display: none; }
+
+    .dev-banner strong { color: #F5E0B5; }
+
+    .dev-banner code {
+      background: rgba(0,0,0,0.3);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .dev-banner a { color: #F5E0B5; text-decoration: underline; }
+
     .shell {
       max-width: 1180px;
       margin: 0 auto;
@@ -1797,6 +1824,8 @@
     </defs>
   </svg>
 
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
   <div class="shell">
     <aside class="sidebar">
       <div class="avatar">
@@ -3495,6 +3524,24 @@
       if (confirmBtn) confirmBtn.click();
     });
 
+    async function loadEnvBanner() {
+      try {
+        const r = await fetch("/api/env");
+        if (!r.ok) return;
+        const data = await r.json();
+        const env = data.env || {};
+        if (env.is_local) {
+          const banner = document.getElementById("dev-banner");
+          banner.innerHTML =
+            `<strong>Local instance</strong> — actions here do <strong>not</strong> sync to the portal. ` +
+            `Live job-hunt data lives at <a href="https://charon.empire12.net" target="_blank" rel="noopener">charon.empire12.net</a>. ` +
+            `This DB: <code>${escapeHtml(env.db_path || "?")}</code>`;
+          banner.hidden = false;
+        }
+      } catch (e) { /* silent — banner is advisory */ }
+    }
+
+    loadEnvBanner();
     loadReady();
     loadApplications();
     loadRefused();

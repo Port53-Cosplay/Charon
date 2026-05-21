@@ -1,6 +1,7 @@
 """SQLite history and watchlist database."""
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,7 +10,26 @@ from typing import Any
 from charon.profile import ensure_charon_dir
 
 
-DB_PATH = ensure_charon_dir() / "charon.db"
+def _resolve_db_path() -> Path:
+    """Resolve the DB location.
+
+    `CHARON_DB_PATH` env var overrides the default so local development
+    can point at a throwaway DB (e.g. ~/.charon/charon-dev.db) and keep
+    the real data untouched. Without it, defaults to ~/.charon/charon.db.
+
+    This is the dev/prod separation guard: the deployed portal on the
+    VM uses the default path against the live DB; a local dev session
+    can set CHARON_DB_PATH to avoid ever writing to a DB that matters.
+    """
+    override = os.environ.get("CHARON_DB_PATH")
+    if override:
+        p = Path(override).expanduser()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    return ensure_charon_dir() / "charon.db"
+
+
+DB_PATH = _resolve_db_path()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS history (

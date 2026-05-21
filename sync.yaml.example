@@ -1,0 +1,20 @@
+# charon pull-db config — copy to ~/.charon/sync.yaml and fill in.
+#
+# `charon pull-db` reads this to fetch the live DB from the deployed
+# portal down to your local machine (ONE-WAY: portal -> local). It is
+# never committed (the real file lives at ~/.charon/sync.yaml and is
+# gitignored) — these are infra connection details, not repo content.
+
+# Required ------------------------------------------------------------
+remote_host: port53.empire12.net          # the portal host (or VM IP)
+remote_user: charon                        # ssh user on the portal
+remote_db_path: /home/charon/.charon/charon.db   # live DB on the portal
+
+# Optional ------------------------------------------------------------
+# jump_host: ops                           # ssh -J <jump> if the portal
+#                                          # isn't directly reachable
+# ssh_key: ~/.ssh/id_ed25519               # explicit key if not default
+# local_db_path: ~/.charon/charon.db       # where to write locally;
+#                                          # defaults to Charon's DB path.
+#                                          # Point at charon-dev.db to keep
+#                                          # the pulled snapshot separate.

@@ -34,6 +34,9 @@ Thumbs.db
 # Charon user data (never commit)
 profile.yaml
 charon.db
+charon-dev.db
+charon.db.bak-*
+sync.yaml
 dossiers/
 resume/
 *.docx
