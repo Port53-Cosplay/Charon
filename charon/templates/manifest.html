@@ -2034,6 +2034,22 @@
         { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
       ));
 
+    // Compact rendering of {low, high, currency} -> "$100K–$130K".
+    // Returns null if the structured data isn't there (caller falls back).
+    function formatSalaryRange(s) {
+      if (!s || typeof s !== "object") return null;
+      const cur = s.currency || "USD";
+      const sym = cur === "USD" ? "$" : "";
+      const fmt = (n) => {
+        if (typeof n !== "number") return null;
+        if (n >= 1000) return `${sym}${Math.round(n/1000)}K`;
+        return `${sym}${n}`;
+      };
+      const lo = fmt(s.low), hi = fmt(s.high);
+      if (!lo || !hi) return null;
+      return `${lo}–${hi}`;
+    }
+
     function showToast(message, isError = false) {
       const t = document.getElementById("toast");
       t.textContent = message;
@@ -2146,7 +2162,7 @@
         ? `<span class="badge" title="LinkedIn contacts saved to folder">contacts</span>`
         : "";
       const salaryBadge = d.has_salary
-        ? `<span class="badge" title="Salary intel saved to folder">salary</span>`
+        ? `<span class="badge salary-badge" data-id="${d.id}" title="Click to open the full salary intel in a new tab" style="cursor:pointer">${formatSalaryRange(d.salary_data) || "salary"}</span>`
         : "";
       const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
       const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
@@ -3563,6 +3579,14 @@
         const card = salaryBtn.closest(".card");
         const id = salaryBtn.getAttribute("data-id");
         if (id && card) fetchSalary(id, card);
+        return;
+      }
+
+      // Salary badge — open the full intel markdown in a new tab
+      const salaryBadge = ev.target.closest(".salary-badge");
+      if (salaryBadge) {
+        const id = salaryBadge.getAttribute("data-id");
+        if (id) window.open(`/api/offerings/${id}/salary_intel.md`, "_blank", "noopener");
         return;
       }
 

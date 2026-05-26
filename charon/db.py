@@ -122,6 +122,7 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN forged_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN offerings_path TEXT",
     "ALTER TABLE discoveries ADD COLUMN petition_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN salary_data TEXT",
 ]
 
 

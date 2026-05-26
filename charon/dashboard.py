@@ -22,6 +22,7 @@ import socket
 import threading
 import urllib.parse
 import webbrowser
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -720,6 +721,17 @@ def _update_status(app_id: int, status: str) -> dict[str, Any]:
     return {"id": app_id, "status": app.get("status")}
 
 
+def _parse_salary_data(raw: Any) -> dict[str, Any] | None:
+    """Parse the JSON blob from discoveries.salary_data, tolerating
+    nulls and malformed rows."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
     """Cherry-pick fields the dashboard cares about — keeps the JSON tight."""
     from charon.contacts import CONTACTS_FILENAME
@@ -767,6 +779,7 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "petition_at": r.get("petition_at"),
         "has_contacts": has_contacts,
         "has_salary": has_salary,
+        "salary_data": _parse_salary_data(r.get("salary_data")),
         # Detail-view fields (loaded eagerly so click-to-expand is instant)
         "full_description": r.get("full_description"),
         "judgement_reason": r.get("judgement_reason"),
@@ -981,13 +994,36 @@ def _find_contacts(discovery_id: int) -> dict[str, Any]:
 
 def _salary_lookup(discovery_id: int) -> dict[str, Any]:
     """Bridge: pull salary intel for a discovery with web search + resume
-    context, persist to its offerings folder. ~20-40s on Sonnet."""
+    context, persist to its offerings folder, AND cache the structured
+    numbers on the discovery row so the card can show the range without
+    re-parsing the markdown. ~20-40s on Sonnet."""
+    from charon.db import get_connection
     from charon.salary import SalaryError, suggest_salary_for_discovery
 
     try:
-        return suggest_salary_for_discovery(discovery_id)
+        result = suggest_salary_for_discovery(discovery_id)
     except SalaryError as e:
         raise DashboardError(str(e)) from e
+
+    cached = {
+        "currency": result.get("currency") or "USD",
+        "low": result.get("low"),
+        "mid": result.get("mid"),
+        "high": result.get("high"),
+        "confidence": result.get("confidence"),
+        "posted_range": result.get("posted_range"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE discoveries SET salary_data = ? WHERE id = ?",
+            (json.dumps(cached), discovery_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return result
 
 
 def _sirens_polish(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1034,6 +1070,8 @@ _OFFERING_ALLOWED_FILES = {
     "resume.md",
     "forge_audit.md",
     "petition_audit.md",
+    "salary_intel.md",
+    "linkedin_contacts.md",
 }
 
 
