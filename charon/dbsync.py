@@ -10,12 +10,23 @@ this command.
 Connection details live in ~/.charon/sync.yaml (gitignored — infra
 specifics stay out of the public repo):
 
+    # Direct mode — PC has SSH to remote_host directly
     remote_host: port53.empire12.net
     remote_user: charon
     remote_db_path: /home/charon/.charon/charon.db
     jump_host: ops                       # optional — ssh -J
     ssh_key: ~/.ssh/id_ed25519           # optional
     local_db_path: ~/.charon/charon.db   # optional, defaults to DB_PATH
+
+Or "bastion mode" when PC reaches the remote only through another
+host that already has fleet keys — the bastion runs the base64 read
+on PC's behalf, and PC doesn't need a key on the final target:
+
+    via_host: ops                        # PC SSHes here
+    via_user: root                       # user on the bastion
+    remote_host: 192.168.14.149          # target IP, accessed FROM bastion
+    remote_user: root                    # user on the target
+    remote_db_path: /home/charon/.charon/charon.db
 
 Binary-safe transfer: base64-over-SSH. Windows OpenSSH SCP truncates
 binary files (per the project's infra notes), so the remote
@@ -59,7 +70,8 @@ def load_sync_config() -> dict[str, Any]:
             f"  remote_host: <portal host>\n"
             f"  remote_user: <ssh user>\n"
             f"  remote_db_path: /home/charon/.charon/charon.db\n"
-            f"Optional: jump_host, ssh_key, local_db_path."
+            f"Optional: jump_host, via_host (bastion mode), ssh_key, "
+            f"local_db_path. See sync.yaml.example."
         )
     with path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
@@ -72,20 +84,44 @@ def load_sync_config() -> dict[str, Any]:
 
 
 def _build_ssh_cmd(cfg: dict[str, Any]) -> list[str]:
-    """Build the ssh argv. No shell=True — args are a list, and the
-    remote command quotes the remote path with shlex for the remote
-    POSIX shell."""
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+    """Build the ssh argv. No shell=True — args are a list, and remote
+    paths are shlex-quoted for the remote POSIX shell.
+
+    Two modes:
+      direct: ssh -J <jump>? user@host "base64 -w0 <path>"
+      bastion (via_host): ssh via_user@via_host "ssh user@host 'base64 ...'"
+
+    In bastion mode, the bastion (e.g. ops) uses its OWN authorized keys
+    to reach the final target, so the PC doesn't need a key on the
+    target. Useful when the PC reaches only the bastion.
+    """
+    base = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+    key = cfg.get("ssh_key")
+    if key:
+        base += ["-i", str(Path(key).expanduser())]
+
+    inner_quoted_path = shlex.quote(str(cfg["remote_db_path"]))
+    base64_cmd = f"base64 -w0 {inner_quoted_path}"
+
+    via_host = cfg.get("via_host")
+    if via_host:
+        via_user = cfg.get("via_user") or cfg["remote_user"]
+        # The PC's outer ssh runs an inner ssh on the bastion. The inner
+        # command (base64 ...) gets single-quoted for the bastion's
+        # shell. shlex.quote on the whole inner ssh handles that.
+        inner_ssh = (
+            f"ssh -o BatchMode=yes -o ConnectTimeout=15 "
+            f"{cfg['remote_user']}@{cfg['remote_host']} "
+            f"{shlex.quote(base64_cmd)}"
+        )
+        return base + [f"{via_user}@{via_host}", inner_ssh]
+
+    cmd = list(base)
     jump = cfg.get("jump_host")
     if jump:
         cmd += ["-J", str(jump)]
-    key = cfg.get("ssh_key")
-    if key:
-        cmd += ["-i", str(Path(key).expanduser())]
     cmd.append(f"{cfg['remote_user']}@{cfg['remote_host']}")
-    # Remote: base64 the DB with no line wrapping. shlex.quote guards
-    # the remote path against spaces / shell metacharacters.
-    cmd.append(f"base64 -w0 {shlex.quote(str(cfg['remote_db_path']))}")
+    cmd.append(base64_cmd)
     return cmd
 
 

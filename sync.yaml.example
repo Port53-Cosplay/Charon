@@ -6,15 +6,25 @@
 # gitignored) — these are infra connection details, not repo content.
 
 # Required ------------------------------------------------------------
-remote_host: port53.empire12.net          # the portal host (or VM IP)
-remote_user: charon                        # ssh user on the portal
+remote_host: 192.168.14.149                 # the portal VM (internal IP
+                                            # or hostname your bastion/PC
+                                            # can reach)
+remote_user: root                           # ssh user on the portal VM
 remote_db_path: /home/charon/.charon/charon.db   # live DB on the portal
 
+# Bastion mode --------------------------------------------------------
+# When the PC can reach the portal only through another host that
+# already has fleet keys (the Empire12 setup — PC reaches ops, ops
+# reaches port53). The bastion runs the base64 read on PC's behalf,
+# so the PC doesn't need a key on the final target.
+via_host: ops                                # PC SSHes here
+via_user: root                               # user on the bastion
+
 # Optional ------------------------------------------------------------
-# jump_host: ops                           # ssh -J <jump> if the portal
-#                                          # isn't directly reachable
-# ssh_key: ~/.ssh/id_ed25519               # explicit key if not default
-# local_db_path: ~/.charon/charon.db       # where to write locally;
-#                                          # defaults to Charon's DB path.
-#                                          # Point at charon-dev.db to keep
-#                                          # the pulled snapshot separate.
+# jump_host: ops                            # alt: ssh -J <jump> (requires
+#                                           # PC's key on the final target)
+# ssh_key: ~/.ssh/id_ed25519                # explicit key if not default
+# local_db_path: ~/.charon/charon-dev.db    # where to write locally;
+#                                           # defaults to Charon's DB path.
+#                                           # Point at charon-dev.db to
+#                                           # keep the snapshot separate.
