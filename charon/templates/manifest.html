@@ -2229,6 +2229,19 @@
 
     function renderList(ready) {
       const container = document.getElementById("list-container");
+      // Don't clobber an in-progress "Not for me" form. If the user has
+      // the reason textarea focused or has typed anything, defer the
+      // re-render until the next call (after confirm/cancel closes the
+      // form). The count badge still updates so the polling feedback
+      // during a judge run isn't entirely silent.
+      const openForm = container.querySelector(".reject-form:not([hidden])");
+      if (openForm) {
+        const ta = openForm.querySelector("textarea");
+        if (ta && (document.activeElement === ta || ta.value.length > 0)) {
+          document.getElementById("count-ready").textContent = ready.length;
+          return;
+        }
+      }
       document.getElementById("count-ready").textContent = ready.length;
       if (ready.length === 0) {
         container.innerHTML = `
