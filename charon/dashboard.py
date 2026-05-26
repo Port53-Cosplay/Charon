@@ -1027,6 +1027,75 @@ def _sirens_polish(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+_OFFERING_ALLOWED_FILES = {
+    "cover_letter.html",
+    "cover_letter.md",
+    "resume.html",
+    "resume.md",
+    "forge_audit.md",
+    "petition_audit.md",
+}
+
+
+def _resolve_offering_file(discovery_id: int, filename: str) -> tuple[Path, dict[str, Any]]:
+    """Validate (discovery_id, filename) and return the on-disk Path plus the
+    discovery row. Used by the offering-file download endpoint. Raises
+    DashboardError on any validation failure — never returns an unsafe path.
+    """
+    from charon.db import get_discovery
+
+    if filename not in _OFFERING_ALLOWED_FILES:
+        raise DashboardError(f"Filename not allowed: {filename}")
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+    folder_raw = discovery.get("offerings_path")
+    if not folder_raw:
+        raise DashboardError(f"No offerings folder for #{discovery_id}.")
+    folder = Path(folder_raw).resolve()
+    if not folder.is_dir():
+        raise DashboardError(f"Offerings folder missing on disk: {folder_raw}")
+
+    target = (folder / filename).resolve()
+    try:
+        target.relative_to(folder)
+    except ValueError as e:
+        raise DashboardError("Path escapes offerings folder.") from e
+    if not target.is_file():
+        raise DashboardError(f"{filename} not generated for #{discovery_id}.")
+    return target, discovery
+
+
+def _candidate_name_from_resume() -> str:
+    """Read the first non-empty line of the candidate's resume — by
+    convention the candidate's name. Falls back to 'Candidate' on any
+    error (missing resume, unreadable, etc.)."""
+    from charon.profile import load_profile
+    from charon.resume_match import load_resume_text
+
+    try:
+        profile = load_profile()
+        text = load_resume_text(profile.get("resume_path", "")) or ""
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                return stripped
+    except Exception:  # noqa: BLE001
+        pass
+    return "Candidate"
+
+
+def _pdf_friendly_title(discovery: dict[str, Any], kind: str) -> str:
+    """Build a job-specific title for the offering HTML so that browser
+    'Save as PDF' uses something like 'DeAnna Shanks - Company - Role -
+    Cover Letter' as the default filename."""
+    candidate = _candidate_name_from_resume()
+    company = (discovery.get("company") or "").strip() or "Company"
+    role = (discovery.get("role") or "").strip() or "Role"
+    return f"{candidate} - {company} - {role} - {kind}"
+
+
 def _open_offerings_folder(discovery_id: int) -> dict[str, Any]:
     """Open the offering's folder in the user's file manager.
 
@@ -1123,6 +1192,9 @@ class _Handler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query or "")
             include_charts = qs.get("charts", ["0"])[0] in {"1", "true", "yes"}
             self._serve_json({"stats": _stats(include_charts=include_charts)})
+            return
+        if path.startswith("/api/offerings/"):
+            self._serve_offering_file(path)
             return
         if path == "/api/judge/status":
             self._serve_json({"status": _judge_status_snapshot()})
@@ -1421,6 +1493,66 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_offering_file(self, path: str) -> None:
+        """GET /api/offerings/<discovery_id>/<filename>.
+
+        Serves a single offering file inline so the browser opens it in
+        a tab. For .html files, rewrites the <title> on the fly with a
+        job-specific name so "Save as PDF" auto-fills a useful
+        filename. Validates discovery_id, whitelists filename, and
+        confirms the resolved path stays inside the offerings folder.
+        """
+        parts = path[len("/api/offerings/"):].split("/")
+        if len(parts) != 2:
+            self._serve_status(HTTPStatus.NOT_FOUND, "Not found")
+            return
+        try:
+            discovery_id = int(parts[0])
+        except ValueError:
+            self._serve_status(HTTPStatus.BAD_REQUEST, "discovery_id must be an integer")
+            return
+        filename = parts[1]
+        try:
+            target, discovery = _resolve_offering_file(discovery_id, filename)
+        except DashboardError as e:
+            self._serve_status(HTTPStatus.NOT_FOUND, str(e))
+            return
+
+        try:
+            body = target.read_bytes()
+        except OSError as e:
+            self._serve_status(HTTPStatus.INTERNAL_SERVER_ERROR, f"Read error: {e}")
+            return
+
+        if filename.endswith(".html"):
+            kind = "Cover Letter" if "cover" in filename else "Resume" if "resume" in filename else "Document"
+            new_title = _pdf_friendly_title(discovery, kind)
+            # Single-shot title rewrite — keep it precise to avoid touching
+            # any other <title>-looking string in the document body.
+            import re
+            text = body.decode("utf-8", errors="replace")
+            text = re.sub(
+                r"<title>[^<]*</title>",
+                "<title>" + new_title.replace("<", "&lt;").replace(">", "&gt;") + "</title>",
+                text,
+                count=1,
+            )
+            body = text.encode("utf-8")
+            ctype = "text/html; charset=utf-8"
+        elif filename.endswith(".md"):
+            ctype = "text/plain; charset=utf-8"
+        else:
+            ctype = "application/octet-stream"
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        # Inline: browser opens in tab, doesn't trigger download
+        self.send_header("Content-Disposition", "inline")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)

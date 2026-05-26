@@ -2172,7 +2172,7 @@
 
       // Materials state — prep or open
       const materialsBtn = hasOfferings
-        ? `<button class="open-btn" data-id="${d.id}">Open folder</button>`
+        ? `<button class="open-btn" data-id="${d.id}" title="Opens cover letter + resume in new tabs — Ctrl+P to save as PDF">Open materials</button>`
         : `<button class="prep-btn" data-id="${d.id}">Prep materials</button>`;
 
       // Contacts: only offered once materials exist (otherwise nowhere to save)
@@ -2667,7 +2667,7 @@
         : "";
 
       const folderBtn = a.has_offerings && a.discovery_id != null
-        ? `<button class="open-btn" data-id="${a.discovery_id}">Open folder</button>`
+        ? `<button class="open-btn" data-id="${a.discovery_id}" title="Opens cover letter + resume in new tabs — Ctrl+P to save as PDF">Open materials</button>`
         : "";
 
       const contactsBtn = a.has_offerings && a.discovery_id != null
@@ -3285,15 +3285,17 @@
       }
     }
 
-    async function openOfferings(id, cardEl) {
-      const btn = cardEl.querySelector(".open-btn");
+    function openOfferings(id, cardEl) {
+      // Open the cover letter and resume HTMLs in new tabs. Browser
+      // "Save as PDF" will pick up the per-tab title and auto-fill a
+      // job-specific filename (e.g. "DeAnna Shanks - Thoropass -
+      // Senior Associate InfoSec - Cover Letter.pdf").
       try {
-        const r = await fetch(`/api/open-offerings/${id}`, { method: "POST" });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-        showToast(`Opened offerings folder for #${id}.`);
+        window.open(`/api/offerings/${id}/cover_letter.html`, "_blank", "noopener");
+        window.open(`/api/offerings/${id}/resume.html`, "_blank", "noopener");
+        showToast(`Opened cover letter + resume for #${id} in new tabs.`);
       } catch (e) {
-        showToast("Couldn't open folder: " + e.message, true);
+        showToast("Couldn't open tabs: " + e.message, true);
       }
     }
 
