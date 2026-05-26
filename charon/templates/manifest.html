@@ -1911,7 +1911,8 @@
           <span class="cost-est">≈ <span id="judge-cost">$2–$5</span> in API spend · <span id="judge-time">5–10 min</span></span>
           <div class="spacer"></div>
           <button class="cancel-btn" id="judge-cancel">Cancel</button>
-          <button class="confirm-btn" id="judge-confirm">Confirm</button>
+          <button class="confirm-btn" id="judge-paste-prompt" title="Generate a prompt to paste into Claude Code — no API spend">Generate paste prompt</button>
+          <button class="confirm-btn" id="judge-confirm">Confirm (use API)</button>
         </div>
         <div id="judge-progress" class="judge-progress" hidden>
           <span class="nums"><span id="judge-processed">0</span>/<span id="judge-total">0</span></span>
@@ -1971,6 +1972,27 @@
   </div>
 
   <div id="toast" class="toast"></div>
+
+  <div id="paste-judge-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="paste-judge-title" style="max-width:880px">
+      <header>
+        <div>
+          <h2 id="paste-judge-title">Paste-judge — Claude Code does the work</h2>
+          <div class="sub"><span id="paste-judge-meta">—</span></div>
+        </div>
+        <button class="close-btn" id="paste-judge-close" aria-label="Close">×</button>
+      </header>
+      <div style="padding:0 4px 4px;font-size:13px;color:var(--ink-soft);line-height:1.5">
+        <p style="margin-bottom:10px">Copy the prompt below, paste into Claude Code (or claude.ai), and let it process. The bottom of the prompt has the SSH command Claude Code should run to write results into the live portal DB. When it's done, refresh this page to see updated counts.</p>
+        <p style="margin-bottom:14px;color:var(--ink-muted);font-size:12px">No API spend on Charon's side — Claude Code uses your subscription.</p>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button class="copy-btn" id="paste-judge-copy" style="background:var(--blush);color:var(--blush-deep);border:1px solid var(--blush-hover);font-weight:600;padding:7px 16px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:13px">Copy prompt</button>
+        <span id="paste-judge-copied" style="color:var(--success);font-size:12px;align-self:center;display:none">Copied!</span>
+      </div>
+      <textarea id="paste-judge-prompt" readonly style="width:100%;min-height:420px;max-height:60vh;resize:vertical;background:var(--bg-soft);color:var(--ink);border:1px solid var(--card-border);border-radius:10px;padding:12px;font-family:Consolas,Monaco,monospace;font-size:12px;line-height:1.5"></textarea>
+    </div>
+  </div>
 
   <div id="charts-modal" class="modal-backdrop" aria-hidden="true">
     <div class="modal" role="dialog" aria-labelledby="charts-title">
@@ -3017,6 +3039,53 @@
       }
     }
 
+    async function generatePastePrompt(limit, tier) {
+      const body = { limit };
+      if (tier && tier.length) body.tier = tier;
+      try {
+        const r = await fetch("/api/judge/prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        const meta = document.getElementById("paste-judge-meta");
+        const ta = document.getElementById("paste-judge-prompt");
+        meta.textContent = `Batch ${data.batch_id} — ${data.batch_size} discoveries: ${data.discovery_ids.join(", ")}`;
+        ta.value = data.prompt;
+        hideJudgeForm();
+        const modal = document.getElementById("paste-judge-modal");
+        modal.classList.add("open");
+        modal.setAttribute("aria-hidden", "false");
+        document.getElementById("paste-judge-copied").style.display = "none";
+      } catch (e) {
+        showToast("Couldn't generate paste prompt: " + e.message, true);
+      }
+    }
+
+    function closePasteJudgeModal() {
+      const modal = document.getElementById("paste-judge-modal");
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    async function copyPastePrompt() {
+      const ta = document.getElementById("paste-judge-prompt");
+      try {
+        await navigator.clipboard.writeText(ta.value);
+        const tag = document.getElementById("paste-judge-copied");
+        tag.style.display = "inline";
+        setTimeout(() => { tag.style.display = "none"; }, 2500);
+      } catch (e) {
+        // Fallback: select the textarea content
+        ta.select();
+        document.execCommand("copy");
+        showToast("Copied (fallback).");
+      }
+    }
+
     async function runGhostCheck(btn) {
       btn.disabled = true;
       const original = btn.textContent;
@@ -3319,6 +3388,34 @@
       // Judge more — cancel
       if (ev.target.closest("#judge-cancel")) {
         hideJudgeForm();
+        return;
+      }
+
+      // Judge more — generate paste prompt (uses Claude Code, not the API)
+      if (ev.target.closest("#judge-paste-prompt")) {
+        const limit = parseInt(document.getElementById("judge-limit-input").value, 10);
+        if (!limit || limit < 1) {
+          showToast("Batch size must be at least 1.", true);
+          return;
+        }
+        if (limit > 25) {
+          showToast("Paste size capped at 25 per batch.", true);
+          return;
+        }
+        const tierRaw = document.getElementById("judge-tier-input").value;
+        const tier = tierRaw ? tierRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
+        generatePastePrompt(limit, tier);
+        return;
+      }
+
+      // Paste-judge modal — close
+      if (ev.target.closest("#paste-judge-close") || ev.target.id === "paste-judge-modal") {
+        closePasteJudgeModal();
+        return;
+      }
+      // Paste-judge modal — copy
+      if (ev.target.closest("#paste-judge-copy")) {
+        copyPastePrompt();
         return;
       }
 

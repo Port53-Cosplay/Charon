@@ -461,6 +461,218 @@ def _start_judge_batch(
     return _judge_status_snapshot()
 
 
+def _generate_judge_prompt(limit: int, tier: list[str] | None = None) -> dict[str, Any]:
+    """Build a self-contained prompt for Claude Code to judge a batch of
+    discoveries without using the Charon API key. Returns the prompt
+    text + the discovery IDs included + a generated batch ID.
+
+    The prompt embeds: condensed analyzer instructions, the candidate's
+    profile context (target_roles, dealbreakers, etc.), a resume
+    excerpt, the discoveries to judge, the strict JSON output schema,
+    and the SSH-write command for writing results back to the live DB.
+    """
+    import uuid
+    from charon.db import get_unjudged_discoveries
+    from charon.profile import load_profile
+    from charon.resume_match import load_resume_text
+
+    if limit < 1 or limit > 25:
+        raise DashboardError("limit must be between 1 and 25 (paste size).")
+
+    targets = get_unjudged_discoveries(tier=tier, limit=limit)
+    if not targets:
+        raise DashboardError("Nothing to judge — the unjudged pool is empty.")
+
+    try:
+        profile = load_profile()
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Profile error: {e}") from e
+
+    resume_text = ""
+    resume_path = profile.get("resume_path", "") if isinstance(profile, dict) else ""
+    if resume_path:
+        try:
+            resume_text = load_resume_text(resume_path) or ""
+        except Exception:  # noqa: BLE001 — best-effort
+            resume_text = ""
+    if len(resume_text) > 3500:
+        resume_text = resume_text[:3500].rstrip() + "\n\n[truncated]"
+
+    target_roles = profile.get("target_roles") or []
+    dealbreakers = profile.get("dealbreakers") or []
+    yellow_flags = profile.get("yellow_flags") or []
+    green_flags = profile.get("green_flags") or []
+
+    batch_id = uuid.uuid4().hex[:12]
+    batch_ids = [t["id"] for t in targets]
+
+    # Discovery blocks — id + company + role + location + description.
+    # Cap each description so the prompt stays manageable.
+    discovery_blocks: list[str] = []
+    for t in targets:
+        desc = (t.get("full_description") or "").strip()
+        if len(desc) > 4500:
+            desc = desc[:4500].rstrip() + "\n[description truncated]"
+        block = (
+            f"--- DISCOVERY id={t['id']} ---\n"
+            f"Company: {t.get('company','')}\n"
+            f"Role: {t.get('role','')}\n"
+            f"Location: {t.get('location') or '(not specified)'}\n"
+            f"ATS: {t.get('ats') or '?'}\n\n"
+            f"Posting:\n{desc}"
+        )
+        discovery_blocks.append(block)
+    discoveries_section = "\n\n".join(discovery_blocks)
+
+    target_roles_str = "\n".join(f"  - {r}" for r in target_roles) or "  (none)"
+    dealbreakers_str = "\n".join(f"  - {d}" for d in dealbreakers) or "  (none)"
+    yellow_str = "\n".join(f"  - {f}" for f in yellow_flags) or "  (none)"
+    green_str = "\n".join(f"  - {f}" for f in green_flags) or "  (none)"
+
+    ingest_cmd = (
+        "ssh root@ops \"ssh 192.168.14.149 sudo -u charon "
+        "/home/charon/venv/bin/python /opt/charon-src/scripts/judge_ingest.py\""
+    )
+
+    prompt = f"""# Charon paste-judge — batch {batch_id} ({len(targets)} discoveries)
+
+You are Charon's batch judge. Score each posting below on four
+dimensions and write the JSON result back to Charon's database via
+the SSH command at the end. The candidate is DeAnna Shanks (security
+analyst, defensive-leaning, remote-only US).
+
+## SCORING DIMENSIONS
+
+For each discovery, produce four scores 0-100:
+
+**ghost_score** (lower = better, 0 = clearly real, 100 = clearly fake):
+  - Vague/generic description with no role specifics → high
+  - No salary band anywhere → moderate increase
+  - Posting language matches "we're hiring rockstars / ninjas" stock
+    cliches → moderate increase
+  - Specific tech stack + concrete day-to-day + recent dates → low
+  - Cap at 100 if posting reads "no longer accepting applications"
+    or similar closure language
+
+**redflag_score** (lower = better):
+  - Count dealbreaker hits (each hit = ~25 points; multiple hits cap
+    at 100). Dealbreakers list:
+{dealbreakers_str}
+  - Yellow flags add 5-10 each (these are concerns, not blockers):
+{yellow_str}
+  - Green flags REDUCE score 5-10 each:
+{green_str}
+  - Also capture each hit by category in judgement_detail.redflags
+
+**alignment_score** (higher = better, 0-100):
+  - How closely does the role fit the candidate's target_roles?
+{target_roles_str}
+  - Direct match (role title in the list) → 80-95
+  - Adjacent (related defensive security role) → 60-80
+  - Stretch (broader security but plausible) → 40-60
+  - Mismatch (offensive security, dev-heavy, GRC when target is SOC, etc.) → 0-40
+  - Capture `closest_target` (best-fit entry from target_roles) in
+    judgement_detail.role_alignment
+  - **Hard floor: alignment < 50 will be auto-refused regardless of
+    other scores. Use 50 as the line for "is this a security role
+    she'd actually want?"**
+
+**resume_match_score** (higher = better, 0-100):
+  - Overlap between the candidate's resume (below) and what the
+    posting actually asks for
+  - direct match (4-6+ years matching the asks) → 75-95
+  - adjacent (transferable skills cover most asks) → 55-75
+  - stretch (significant gaps but story to tell) → 35-55
+  - mismatch (asks for fundamentally different background) → 0-35
+  - Capture `match_type` (direct/adjacent/stretch/mismatch) in
+    judgement_detail.resume_match
+
+## CANDIDATE RESUME (source of truth — don't invent beyond this)
+
+{resume_text or '(no resume available — use generic security-analyst defaults)'}
+
+## DISCOVERIES TO JUDGE
+
+{discoveries_section}
+
+## REQUIRED OUTPUT
+
+A single JSON object with EXACTLY this shape (no markdown fences in the actual file you ingest):
+
+```json
+{{
+  "batch_id": "{batch_id}",
+  "judgements": [
+    {{
+      "discovery_id": <int>,
+      "ghost_score": <0-100>,
+      "redflag_score": <0-100>,
+      "alignment_score": <0-100>,
+      "resume_match_score": <0-100>,
+      "judgement_reason": "1-2 sentences for why this scored where it did",
+      "judgement_detail": {{
+        "ghostbust": {{ "ghost_score": <int>, "signals": [], "summary": "..." }},
+        "redflags": {{
+          "redflag_score": <int>,
+          "dealbreakers_found": [{{"flag": "...", "evidence": "...", "interpretation": "..."}}],
+          "yellow_flags_found": [...],
+          "green_flags_found": [...],
+          "summary": "..."
+        }},
+        "role_alignment": {{
+          "alignment_score": <int>,
+          "closest_target": "...",
+          "overlap": ["..."],
+          "gaps": ["..."],
+          "assessment": "1-2 sentences"
+        }},
+        "resume_match": {{
+          "match_score": <int>,
+          "match_type": "direct|adjacent|stretch|mismatch",
+          "overlap": ["..."],
+          "gaps": ["..."],
+          "transferable": ["..."],
+          "summary": "..."
+        }}
+      }}
+    }}
+  ]
+}}
+```
+
+## INGEST STEP — WRITE THE RESULT BACK TO CHARON
+
+After producing the JSON, save it to `/tmp/charon-judge-{batch_id}.json`,
+then run this command from DeAnna's PC to write the results into the
+live portal DB:
+
+```bash
+cat /tmp/charon-judge-{batch_id}.json | {ingest_cmd}
+```
+
+The ingest script will:
+- Parse + validate the JSON
+- Compute combined_score from her profile's judge.weights
+  (ghost 0.15, redflag 0.20, alignment 0.25, resume 0.40)
+- Apply alignment_floor=50 (auto-refuse below) and threshold=60
+- Apply dealbreaker auto-refuse (any dealbreaker = rejected regardless of combined)
+- Write each row's scores + screened_status + judged_at to the live DB
+- Print "OK #1234 ready 75.5" or "ERR #1234 reason" per row, then a summary
+
+After it finishes, tell DeAnna: "Done — N ready, M rejected. Refresh
+Charon to see updated counts."
+
+Discovery IDs in this batch: {batch_ids}
+"""
+
+    return {
+        "batch_id": batch_id,
+        "batch_size": len(targets),
+        "discovery_ids": batch_ids,
+        "prompt": prompt,
+    }
+
+
 def _ghost_check() -> dict[str, Any]:
     """Run the stale-applications sweep from the dashboard.
 
@@ -1038,6 +1250,34 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json(
                 {"ok": True, "salary": summary, "ready": _ready_discoveries()}
             )
+            return
+        if path == "/api/judge/prompt":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            try:
+                limit = int(body.get("limit", 5))
+            except (TypeError, ValueError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "limit must be an integer")
+                return
+            tier_raw = body.get("tier")
+            tier: list[str] | None = None
+            if tier_raw is not None:
+                if isinstance(tier_raw, str):
+                    tier = [tier_raw] if tier_raw else None
+                elif isinstance(tier_raw, list):
+                    tier = [t for t in tier_raw if isinstance(t, str) and t]
+                    if not tier:
+                        tier = None
+                else:
+                    self._serve_status(HTTPStatus.BAD_REQUEST, "tier must be a string or list of strings")
+                    return
+            try:
+                result = _generate_judge_prompt(limit, tier=tier)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, **result})
             return
         if path == "/api/judge":
             body = self._read_json_body() or {}
