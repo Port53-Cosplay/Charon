@@ -3057,7 +3057,7 @@
         ta.value = data.prompt;
         hideJudgeForm();
         const modal = document.getElementById("paste-judge-modal");
-        modal.classList.add("open");
+        modal.classList.add("show");
         modal.setAttribute("aria-hidden", "false");
         document.getElementById("paste-judge-copied").style.display = "none";
       } catch (e) {
@@ -3067,7 +3067,7 @@
 
     function closePasteJudgeModal() {
       const modal = document.getElementById("paste-judge-modal");
-      modal.classList.remove("open");
+      modal.classList.remove("show");
       modal.setAttribute("aria-hidden", "true");
     }
 
