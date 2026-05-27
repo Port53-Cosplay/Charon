@@ -3089,18 +3089,23 @@
       document.getElementById("judge-skipped").textContent = state.skipped || 0;
     }
 
+    // Refresh every tab count + lifetime stat strip during long-running
+    // operations. Cheap (small JSON, single-user dashboard) and keeps
+    // every counter in sync as work moves through the funnel.
+    function refreshFunnelState() {
+      loadReady();
+      loadGathered();
+      loadRefused();
+      loadStats();
+    }
+
     async function pollJudgeProgress() {
       try {
         const r = await fetch("/api/judge/status");
         const data = await r.json();
         const state = data.status || {};
         setJudgeProgress(state);
-        // Refresh ready, gathered (rows are leaving the queue), AND stats
-        // as new rows pass through. Stats band stays live instead of
-        // waiting for the run to finish.
-        loadReady();
-        loadGathered();
-        loadStats();
+        refreshFunnelState();
         if (state.running) {
           setTimeout(pollJudgeProgress, 4000);
         } else {
@@ -3141,7 +3146,7 @@
         const data = await r.json();
         const state = data.status || {};
         setCullProgress(state);
-        loadGathered();
+        refreshFunnelState();
         if (state.running) {
           setTimeout(pollCullProgress, 3000);
         } else {
@@ -3239,8 +3244,7 @@
         const data = await r.json();
         const state = data.status || {};
         setGatherProgress(state);
-        // New rows are landing in the queue — keep the Gathered list fresh
-        loadGathered();
+        refreshFunnelState();
         if (state.running) {
           setTimeout(pollGatherProgress, 3000);
         } else {
