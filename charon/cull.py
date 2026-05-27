@@ -1,11 +1,16 @@
-"""Cull — Gemini Flash pre-judge pass.
+"""Cull — DeepSeek pre-judge pass.
 
-A free, fast first-cut between gather and enrich. Looks at title +
+A cheap, fast first-cut between gather and enrich. Looks at title +
 company + location alone (no description fetch needed) and culls
 confident non-fits before they burn Sonnet tokens on enrichment and
 judging.
 
-Conservative by design: refuse only when Gemini reports high
+Uses DeepSeek V3 via its OpenAI-compatible API. At ~$0.27/M input
+tokens, a full cull of ~1500 unjudged rows costs roughly $0.08 — a
+rounding error compared to the Sonnet enrich + judge spend it
+prevents.
+
+Conservative by design: refuse only when the model reports high
 confidence in a mismatch. False negatives (passing a junk row) are
 cheap — the existing pipeline catches them downstream. False
 positives (refusing a good row) are bad — that row never sees Sonnet.
@@ -26,7 +31,8 @@ class CullError(Exception):
     """Raised when cull can't get a usable decision from the model."""
 
 
-_GEMINI_MODEL = "gemini-2.0-flash"
+_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+_DEEPSEEK_MODEL = "deepseek-chat"
 _SYSTEM_PROMPT = """You are a security-job filter for a candidate searching for defensive cybersecurity roles. Your only job is to drop the most-obviously-wrong postings before they get expensive analysis.
 
 You see only the role title, company, and location — no description. That is intentional.
@@ -48,21 +54,21 @@ confidence reflects YOUR certainty:
 
 def _resolve_api_key() -> str:
     """Try env first, fall back to Vault. Raises CullError if neither works."""
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if key:
         return key
 
     try:
         from charon.vault import get_secret  # type: ignore
-        v = get_secret("charon/gemini-api")
+        v = get_secret("charon/deepseek-api")
         if v and v.get("key"):
             return str(v["key"])
     except Exception:
         pass
 
     raise CullError(
-        "No Gemini API key found. Set GEMINI_API_KEY env var or store at "
-        "secret/empire12/charon/gemini-api in Vault."
+        "No DeepSeek API key found. Set DEEPSEEK_API_KEY env var or store at "
+        "secret/empire12/charon/deepseek-api in Vault."
     )
 
 
@@ -100,7 +106,6 @@ _JSON_RE = re.compile(r"\{.*?\}", re.DOTALL)
 def _parse_model_output(text: str) -> dict[str, Any]:
     """Extract the first JSON object from the model's response."""
     text = text.strip()
-    # Strip ```json fences if the model added them despite instructions
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
@@ -118,33 +123,40 @@ def _parse_model_output(text: str) -> dict[str, Any]:
 def cull_one(row: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     """Run cull on one discovery row.
 
-    Returns the decision dict: {"decision": "pass"|"refuse", "reason": str,
+    Returns {"decision": "pass"|"refuse", "reason": str,
     "confidence": "high"|"medium"|"low"}.
 
     Caller applies the conservative gate: only refuse when
     decision=='refuse' AND confidence=='high'.
     """
-    import google.generativeai as genai
+    # OpenAI SDK is OpenAI-compatible with DeepSeek's endpoint — just
+    # point base_url at api.deepseek.com and use the same Chat
+    # Completions surface.
+    from openai import OpenAI
 
     api_key = _resolve_api_key()
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        model_name=_GEMINI_MODEL,
-        system_instruction=_SYSTEM_PROMPT,
-        generation_config={
-            "temperature": 0.2,
-            "response_mime_type": "application/json",
-        },
-    )
+    client = OpenAI(api_key=api_key, base_url=_DEEPSEEK_BASE_URL)
+
     user_prompt = _build_user_prompt(row, profile)
     try:
-        resp = model.generate_content(user_prompt)
+        resp = client.chat.completions.create(
+            model=_DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            max_tokens=300,
+        )
     except Exception as e:  # noqa: BLE001
-        raise CullError(f"Gemini call failed: {type(e).__name__}: {e}") from e
+        raise CullError(f"DeepSeek call failed: {type(e).__name__}: {e}") from e
 
-    text = (resp.text or "").strip()
+    if not resp.choices:
+        raise CullError("DeepSeek returned no choices.")
+    text = (resp.choices[0].message.content or "").strip()
     if not text:
-        raise CullError("Gemini returned empty response.")
+        raise CullError("DeepSeek returned empty content.")
 
     parsed = _parse_model_output(text)
     decision = (parsed.get("decision") or "").strip().lower()
@@ -173,9 +185,6 @@ def apply_cull_decision(
     if decision["decision"] == "refuse" and decision["confidence"] == "high":
         reason = f"[cull] {decision['reason']}"
         mark_discovery_rejected(discovery_id, reason=reason)
-        # mark_discovery_rejected sets judged_at + screened_status; the
-        # culled_at marker is also set so the cull picker doesn't re-pick
-        # this row if we ever re-run cull on the full unjudged pool.
         mark_discovery_culled(discovery_id)
         return "refused"
     mark_discovery_culled(discovery_id)
