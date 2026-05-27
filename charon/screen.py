@@ -495,12 +495,24 @@ def reclassify_batch(
 
     results: list[dict[str, Any]] = []
     for discovery in targets:
+        prev_status = discovery.get("screened_status")
+        prev_reason = discovery.get("judgement_reason") or ""
+
+        # Human-set states are sacred. Reclassify only owns the
+        # automated ready/rejected gating; it must not clobber:
+        #   - applied (user committed to this posting)
+        #   - rows whose rejection came from cull or a one-click manual
+        #     refuse, identifiable by a known reason prefix/sentinel
+        if prev_status == "applied":
+            continue
+        if prev_reason.startswith("[cull]"):
+            continue
+        if prev_reason == "Manually refused — not interested":
+            continue
+
         new = reclassify_one(discovery, profile=profile, threshold=threshold)
         if new is None:
             continue
-        # Compare to existing classification
-        prev_status = discovery.get("screened_status")
-        prev_reason = discovery.get("judgement_reason")
         new["discovery_id"] = discovery["id"]
         new["company"] = discovery.get("company")
         new["role"] = discovery.get("role")
