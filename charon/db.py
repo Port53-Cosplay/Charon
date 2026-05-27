@@ -123,6 +123,7 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN offerings_path TEXT",
     "ALTER TABLE discoveries ADD COLUMN petition_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN salary_data TEXT",
+    "ALTER TABLE discoveries ADD COLUMN culled_at TEXT",
 ]
 
 
@@ -654,8 +655,15 @@ def get_unenriched_discoveries(
     slug: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Discoveries that haven't been enriched yet (enrichment_tier IS NULL)."""
-    clauses = ["enrichment_tier IS NULL"]
+    """Discoveries that haven't been enriched yet (enrichment_tier IS NULL).
+
+    Excludes rows already marked rejected — no point spending Sonnet tokens
+    enriching something the user or cull has already culled.
+    """
+    clauses = [
+        "enrichment_tier IS NULL",
+        "(screened_status IS NULL OR screened_status != 'rejected')",
+    ]
     params: list[Any] = []
     if ats:
         clauses.append("ats = ?")
@@ -753,26 +761,94 @@ def mark_discovery_applied(discovery_id: int) -> bool:
 
 def mark_discovery_rejected(discovery_id: int, reason: str | None = None) -> bool:
     """Flip a discovery's screened_status to 'rejected' with an optional reason.
-    Used by the dashboard's "Not for me" action. Returns True if updated.
+    Used by the dashboard's "Not for me" action and the cull + manual ✕
+    paths. Returns True if updated.
 
-    If a reason is provided, it overwrites judgement_reason — surfacing the
-    user's explicit rejection above whatever the AI judge said.
+    Two important details:
+
+    1. `judged_at` gets backfilled to NOW when it's currently NULL.
+       Without this, refusing an unjudged row from Gathered would leave it
+       in a half-state — invisible to the Refused tab (which requires
+       judged_at IS NOT NULL) but still pickable by the judge picker
+       (which requires judged_at IS NULL). The COALESCE preserves an AI
+       judgement timestamp when one already exists.
+
+    2. If the caller passes no reason, the column gets a sentinel string
+       so the Refused tab has something useful to show instead of an
+       empty cell. AI-judged refusals always have a reason already, so
+       this only fires for manual/cull refusals.
     """
+    final_reason = reason if reason else "Manually refused — not interested"
+    now_iso = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
-        if reason:
-            cursor = conn.execute(
-                "UPDATE discoveries SET screened_status = 'rejected', "
-                "judgement_reason = ? WHERE id = ?",
-                (reason, discovery_id),
-            )
-        else:
-            cursor = conn.execute(
-                "UPDATE discoveries SET screened_status = 'rejected' WHERE id = ?",
-                (discovery_id,),
-            )
+        cursor = conn.execute(
+            "UPDATE discoveries SET "
+            "  screened_status = 'rejected', "
+            "  judgement_reason = ?, "
+            "  judged_at = COALESCE(judged_at, ?) "
+            "WHERE id = ?",
+            (final_reason, now_iso, discovery_id),
+        )
         conn.commit()
         return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def mark_discovery_culled(discovery_id: int) -> bool:
+    """Mark a discovery as culled-passed: cull looked at it and let it
+    through to enrich. Sets culled_at = NOW. Does NOT touch screened_status
+    or judged_at. Returns True if updated.
+
+    For culled-FAIL rows, call mark_discovery_rejected instead.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET culled_at = ? WHERE id = ?",
+            (now_iso, discovery_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_unculled_discoveries(
+    ats: str | None = None,
+    slug: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Discoveries that haven't been culled yet.
+
+    Filter: culled_at IS NULL AND judged_at IS NULL AND not-rejected.
+    These are the candidates Gemini cull would look at next.
+    """
+    clauses = [
+        "culled_at IS NULL",
+        "judged_at IS NULL",
+        "(screened_status IS NULL OR screened_status != 'rejected')",
+    ]
+    params: list[Any] = []
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+    if slug:
+        clauses.append("slug = ?")
+        params.append(slug)
+
+    sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY discovered_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

@@ -1204,6 +1204,30 @@
 
     .card .closed-btn svg { width: 13px; height: 13px; display: block; }
 
+    /* "Not interested" — corner ✕ on Gathered cards. Same affordance
+       as closed-btn but lives on the right (closed-btn is on the
+       left) so the two don't crowd, and renders a text glyph since
+       there's no SVG. */
+    .card .not-interested-btn {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      background: transparent;
+      border: none;
+      color: var(--ink-faint);
+      padding: 2px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      font-family: inherit;
+      opacity: 0;
+      transition: opacity 120ms ease, color 120ms ease;
+    }
+    .card:hover .not-interested-btn { opacity: 0.7; }
+    .card .not-interested-btn:hover { color: var(--blush-deep); opacity: 1; }
+    .card .not-interested-btn[disabled] { opacity: 0.3; cursor: wait; }
+
     .card .actions .apply-btn {
       background: var(--blush);
       color: var(--blush-deep);
@@ -1888,6 +1912,7 @@
         </div>
         <div class="pane-toolbar">
           <button id="gather-btn" title="Harvest fresh job postings from configured employers">Harvest from sources</button>
+          <button id="cull-btn" title="Run a free Gemini pre-judge pass — kills obvious non-fits before Sonnet sees them">Cull the queue</button>
         </div>
         <div id="gather-form" class="judge-form" hidden>
           <label>ATS:
@@ -1914,6 +1939,29 @@
           <span class="nums"><span id="gather-completed">0</span>/<span id="gather-total">0</span></span>
           <div class="progress-bar"><div class="progress-fill" id="gather-fill"></div></div>
           <span class="breakdown">new +<span id="gather-new">0</span> · dupes <span id="gather-dupes">0</span> · errors <span id="gather-errors">0</span></span>
+        </div>
+        <div id="cull-form" class="judge-form" hidden>
+          <label>Batch size:
+            <input type="number" id="cull-limit-input" min="1" max="500" value="100">
+          </label>
+          <label>ATS:
+            <select id="cull-ats-input">
+              <option value="">all</option>
+              <option value="greenhouse">greenhouse</option>
+              <option value="lever">lever</option>
+              <option value="ashby">ashby</option>
+              <option value="workday">workday</option>
+            </select>
+          </label>
+          <span class="cost-est">Free (Gemini Flash) · ~7 min per 100 rows (15 RPM)</span>
+          <div class="spacer"></div>
+          <button class="cancel-btn" id="cull-cancel">Cancel</button>
+          <button class="confirm-btn" id="cull-confirm">Cull</button>
+        </div>
+        <div id="cull-progress" class="judge-progress" hidden>
+          <span class="nums"><span id="cull-processed">0</span>/<span id="cull-total">0</span></span>
+          <div class="progress-bar"><div class="progress-fill" id="cull-fill"></div></div>
+          <span class="breakdown">passed +<span id="cull-passed">0</span> · refused +<span id="cull-refused">0</span> · errors <span id="cull-errors">0</span></span>
         </div>
         <div id="gathered-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading the queue…</div>
@@ -2500,6 +2548,7 @@
 
       return `
         <article class="card gathered" data-id="${d.id}">
+          <button class="not-interested-btn" data-id="${d.id}" title="Not interested — refuse without judging" aria-label="Not interested">×</button>
           <div class="head">
             <div class="titles">
               <div class="company">${escapeHtml(d.company || "")} <span class="id">· #${d.id}</span></div>
@@ -3074,6 +3123,104 @@
       }
     }
 
+    function setCullProgress(state) {
+      const processed = state.processed || 0;
+      const total = state.limit || 0;
+      document.getElementById("cull-processed").textContent = processed;
+      document.getElementById("cull-total").textContent = total;
+      document.getElementById("cull-passed").textContent = state.passed || 0;
+      document.getElementById("cull-refused").textContent = state.refused || 0;
+      document.getElementById("cull-errors").textContent = state.errors || 0;
+      const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 0;
+      document.getElementById("cull-fill").style.width = pct + "%";
+    }
+
+    async function pollCullProgress() {
+      try {
+        const r = await fetch("/api/cull/status");
+        const data = await r.json();
+        const state = data.status || {};
+        setCullProgress(state);
+        loadGathered();
+        if (state.running) {
+          setTimeout(pollCullProgress, 3000);
+        } else {
+          document.getElementById("cull-progress").hidden = true;
+          document.getElementById("cull-btn").disabled = false;
+          if (state.error && (state.processed || 0) === 0) {
+            showToast("Cull failed: " + state.error, true);
+          } else {
+            const p = state.passed || 0;
+            const x = state.refused || 0;
+            const e = state.errors || 0;
+            const errPart = e > 0 ? `, ${e} errors` : "";
+            const errSuffix = state.error ? ` (${state.error})` : "";
+            showToast(`Cull complete: ${p} passed, ${x} refused${errPart}${errSuffix}.`);
+            loadStats();
+          }
+        }
+      } catch (err) {
+        setTimeout(pollCullProgress, 6000);
+      }
+    }
+
+    async function startCull(limit, ats) {
+      const body = { limit };
+      if (ats) body.ats = ats;
+      try {
+        const r = await fetch("/api/cull", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        hideCullForm();
+        document.getElementById("cull-btn").disabled = true;
+        document.getElementById("cull-progress").hidden = false;
+        setCullProgress(data.status || {});
+        showToast(`Culling up to ${limit} rows — runs in the background.`);
+        pollCullProgress();
+      } catch (e) {
+        showToast("Couldn't start cull: " + e.message, true);
+      }
+    }
+
+    function showCullForm() {
+      document.getElementById("cull-form").hidden = false;
+      document.getElementById("cull-btn").disabled = true;
+    }
+    function hideCullForm() {
+      document.getElementById("cull-form").hidden = true;
+      document.getElementById("cull-btn").disabled = false;
+    }
+
+    async function refuseFromGathered(id, cardEl) {
+      // One-click ✕ — no reason form. Optimistic fade-and-remove.
+      const btn = cardEl.querySelector(".not-interested-btn");
+      if (btn) btn.disabled = true;
+      cardEl.style.transition = "opacity 220ms ease, transform 220ms ease";
+      cardEl.style.opacity = "0";
+      cardEl.style.transform = "translateX(8px)";
+      try {
+        const r = await fetch(`/api/reject/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: null }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        setTimeout(() => { cardEl.remove(); loadGathered(); loadStats(); }, 230);
+        showToast(`Refused #${id}.`);
+      } catch (e) {
+        // Restore card on failure
+        cardEl.style.opacity = "1";
+        cardEl.style.transform = "";
+        if (btn) btn.disabled = false;
+        showToast("Couldn't refuse: " + e.message, true);
+      }
+    }
+
     function setGatherProgress(state) {
       const completed = state.completed_employers || 0;
       const total = state.total_employers || 0;
@@ -3506,6 +3653,35 @@
       if (ev.target.closest("#judge-more-btn")) {
         const btn = document.getElementById("judge-more-btn");
         if (btn && !btn.disabled) showJudgeForm();
+        return;
+      }
+
+      // Not-interested ✕ on Gathered cards — one-click refuse
+      const notInterested = ev.target.closest(".not-interested-btn");
+      if (notInterested) {
+        const card = notInterested.closest(".card");
+        const id = notInterested.getAttribute("data-id");
+        if (id && card) refuseFromGathered(id, card);
+        return;
+      }
+
+      // Cull — open form
+      if (ev.target.closest("#cull-btn")) {
+        const btn = document.getElementById("cull-btn");
+        if (btn && !btn.disabled) showCullForm();
+        return;
+      }
+      // Cull — confirm
+      if (ev.target.closest("#cull-confirm")) {
+        const limit = parseInt(document.getElementById("cull-limit-input").value, 10);
+        if (!limit || limit < 1) { showToast("Batch size must be at least 1.", true); return; }
+        const ats = document.getElementById("cull-ats-input").value || null;
+        startCull(limit, ats);
+        return;
+      }
+      // Cull — cancel
+      if (ev.target.closest("#cull-cancel")) {
+        hideCullForm();
         return;
       }
 

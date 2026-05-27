@@ -377,6 +377,19 @@ _judge_state: dict[str, Any] = {
     "error": None,
 }
 
+_cull_lock = threading.Lock()
+_cull_state: dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "limit": 0,
+    "processed": 0,
+    "passed": 0,
+    "refused": 0,
+    "errors": 0,
+    "error": None,
+}
+
 _gather_lock = threading.Lock()
 _gather_state: dict[str, Any] = {
     "running": False,
@@ -399,6 +412,94 @@ _gather_state: dict[str, Any] = {
 def _judge_status_snapshot() -> dict[str, Any]:
     with _judge_lock:
         return dict(_judge_state)
+
+
+def _cull_status_snapshot() -> dict[str, Any]:
+    with _cull_lock:
+        return dict(_cull_state)
+
+
+def _cull_worker(limit: int, ats: str | None, slug: str | None) -> None:
+    from charon.cull import CullError, apply_cull_decision, cull_one
+    from charon.db import get_unculled_discoveries
+    from charon.profile import load_profile
+
+    try:
+        profile = load_profile()
+    except Exception as e:  # noqa: BLE001
+        with _cull_lock:
+            _cull_state["error"] = f"profile load failed: {e}"
+            _cull_state["running"] = False
+            _cull_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        return
+
+    try:
+        rows = get_unculled_discoveries(ats=ats, slug=slug, limit=limit)
+    except Exception as e:  # noqa: BLE001
+        with _cull_lock:
+            _cull_state["error"] = f"picker failed: {e}"
+            _cull_state["running"] = False
+            _cull_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        return
+
+    with _cull_lock:
+        _cull_state["limit"] = len(rows)
+
+    for row in rows:
+        try:
+            decision = cull_one(row, profile)
+            outcome = apply_cull_decision(row["id"], decision)
+            with _cull_lock:
+                _cull_state["processed"] += 1
+                if outcome == "refused":
+                    _cull_state["refused"] += 1
+                else:
+                    _cull_state["passed"] += 1
+        except CullError as e:
+            # Rate limit / API failure / unparseable response — skip, continue
+            with _cull_lock:
+                _cull_state["processed"] += 1
+                _cull_state["errors"] += 1
+                if _cull_state["error"] is None:
+                    _cull_state["error"] = str(e)
+        except Exception as e:  # noqa: BLE001
+            with _cull_lock:
+                _cull_state["processed"] += 1
+                _cull_state["errors"] += 1
+                if _cull_state["error"] is None:
+                    _cull_state["error"] = f"{type(e).__name__}: {e}"
+
+    with _cull_lock:
+        _cull_state["running"] = False
+        _cull_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _start_cull_batch(
+    limit: int,
+    ats: str | None = None,
+    slug: str | None = None,
+) -> dict[str, Any]:
+    """Kick off a cull batch in a worker thread."""
+    if limit < 1 or limit > 500:
+        raise DashboardError("limit must be between 1 and 500.")
+    with _cull_lock:
+        if _cull_state["running"]:
+            raise DashboardError("A cull batch is already running.")
+        _cull_state.update({
+            "running": True,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "limit": limit,
+            "processed": 0,
+            "passed": 0,
+            "refused": 0,
+            "errors": 0,
+            "error": None,
+        })
+    threading.Thread(
+        target=_cull_worker, args=(limit, ats, slug), daemon=True
+    ).start()
+    return _cull_status_snapshot()
 
 
 def _gather_status_snapshot() -> dict[str, Any]:
@@ -1355,6 +1456,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/gather/status":
             self._serve_json({"status": _gather_status_snapshot()})
             return
+        if path == "/api/cull/status":
+            self._serve_json({"status": _cull_status_snapshot()})
+            return
         if path == "/api/env":
             self._serve_json({"env": _env_info()})
             return
@@ -1506,6 +1610,28 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, **result})
+            return
+        if path == "/api/cull":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            try:
+                limit = int(body.get("limit", 100))
+            except (TypeError, ValueError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "limit must be an integer")
+                return
+            ats = body.get("ats")
+            if ats is not None and (not isinstance(ats, str) or not ats):
+                ats = None
+            slug = body.get("slug")
+            if slug is not None and (not isinstance(slug, str) or not slug):
+                slug = None
+            try:
+                snap = _start_cull_batch(limit=limit, ats=ats, slug=slug)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "status": snap})
             return
         if path == "/api/gather":
             body = self._read_json_body() or {}
