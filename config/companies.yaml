@@ -33,9 +33,6 @@ gather:
     - { slug: thoropass,            name: "Thoropass",           tier: tier_1, category: grc,                       notes: "Compliance + audit, integrated" }
     - { slug: align,                name: "A-LIGN",              tier: tier_1, category: audit,                     notes: "Audit firm. Verified: 195 'A-LIGN' mentions in job content; PCI QSA / ISO / FedRAMP roles. Greenhouse, not Workday." }
 
-    # Bug bounty platforms (tier_1 per spec)
-    - { slug: bugcrowd,             name: "Bugcrowd",            tier: tier_1, category: offsec,                    notes: "Bug bounty platform" }
-
     # Security services / VAR / consulting
     - { slug: guidepointsecurity,   name: "GuidePoint Security", tier: tier_1, category: security_product_general,  notes: "Security consulting/VAR. Broad role mix: AppSec, cloud, AI sec, PAM, vendor specialists. Dossier 76.1 (2026-05-07). Watch: regional culture varies. Slug 'guidepoint' is the financial-research firm — wrong company." }
 
@@ -62,12 +59,6 @@ gather:
     # Identity
     - { slug: okta,                 name: "Okta",                tier: tier_3, category: identity,                  notes: "Includes Auth0 jobs since Okta acquired" }
     - { slug: yubico,               name: "Yubico",              tier: tier_2, category: identity,                  notes: "Hardware identity. Some roles also on Lever." }
-
-    # Offensive / pen test (boutiques)
-    - { slug: bishopfox,            name: "Bishop Fox",          tier: tier_2, category: offsec,                    notes: "Pen test boutique" }
-    - { slug: synack,               name: "Synack",              tier: tier_2, category: offsec,                    notes: "Crowdsourced pen test" }
-    - { slug: praetorian,           name: "Praetorian",          tier: tier_2, category: offsec,                    notes: "Offensive security" }
-    - { slug: specterops,           name: "SpecterOps",          tier: tier_2, category: offsec,                    notes: "Offensive + BloodHound" }
 
     # AI security / AI labs
     - { slug: hiddenlayer,          name: "HiddenLayer",         tier: tier_2, category: ai_security,               notes: "AI red team postings here" }
@@ -97,9 +88,6 @@ gather:
     # GRC
     - { slug: vanta,                name: "Vanta",               tier: tier_1, category: grc,                       notes: "GRC + automated SOC 2" }
     - { slug: drata,                name: "Drata",               tier: tier_1, category: grc,                       notes: "Continuous compliance" }
-
-    # Bug bounty
-    - { slug: hackerone,            name: "HackerOne",           tier: tier_1, category: offsec,                    notes: "Bug bounty platform" }
 
     # Identity
     - { slug: 1password,            name: "1Password",           tier: tier_2, category: identity,                  notes: "Password / identity" }

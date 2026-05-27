@@ -377,10 +377,125 @@ _judge_state: dict[str, Any] = {
     "error": None,
 }
 
+_gather_lock = threading.Lock()
+_gather_state: dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "ats": None,
+    "slug": None,
+    "dry_run": False,
+    "current_employer": None,
+    "completed_employers": 0,
+    "total_employers": 0,
+    "total_new": 0,
+    "total_dupes": 0,
+    "total_errors": 0,
+    "summaries": [],   # most recent per-employer summaries (truncated)
+    "error": None,
+}
+
 
 def _judge_status_snapshot() -> dict[str, Any]:
     with _judge_lock:
         return dict(_judge_state)
+
+
+def _gather_status_snapshot() -> dict[str, Any]:
+    with _gather_lock:
+        snap = dict(_gather_state)
+        # summaries list is mutable; copy to detach
+        snap["summaries"] = list(snap["summaries"])
+        return snap
+
+
+def _gather_worker(
+    ats: str | None,
+    slug: str | None,
+    dry_run: bool,
+) -> None:
+    from charon.gather import gather_registry, list_employers, load_registry
+
+    def on_progress(summary: dict[str, Any]) -> None:
+        with _gather_lock:
+            _gather_state["completed_employers"] += 1
+            _gather_state["current_employer"] = None
+            _gather_state["total_new"] += int(summary.get("new", 0) or 0)
+            _gather_state["total_dupes"] += int(summary.get("dupes", 0) or 0)
+            if summary.get("error"):
+                _gather_state["total_errors"] += 1
+            keep = {
+                "ats": summary.get("ats"),
+                "slug": summary.get("slug"),
+                "name": summary.get("name"),
+                "new": summary.get("new"),
+                "dupes": summary.get("dupes"),
+                "error": summary.get("error"),
+            }
+            # Keep the tail so the UI can render recent activity without
+            # ballooning the JSON; full list is in stdout if anyone needs it.
+            _gather_state["summaries"].append(keep)
+            if len(_gather_state["summaries"]) > 50:
+                _gather_state["summaries"] = _gather_state["summaries"][-50:]
+
+    try:
+        # Pre-count total employers for the progress bar
+        registry = load_registry()
+        pairs = list_employers(registry, ats=ats)
+        if slug:
+            pairs = [(a, e) for a, e in pairs if e.get("slug") == slug]
+        with _gather_lock:
+            _gather_state["total_employers"] = len(pairs)
+
+        gather_registry(
+            ats=ats,
+            slug=slug,
+            dry_run=dry_run,
+            on_progress=on_progress,
+        )
+    except Exception as e:  # noqa: BLE001
+        with _gather_lock:
+            _gather_state["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        with _gather_lock:
+            _gather_state["running"] = False
+            _gather_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _gather_state["current_employer"] = None
+
+
+def _start_gather(
+    ats: str | None = None,
+    slug: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Kick off a gather run in a worker thread.
+
+    Returns the initial state snapshot. Frontend polls /api/gather/status
+    until `running` is False.
+    """
+    with _gather_lock:
+        if _gather_state["running"]:
+            raise DashboardError("A gather run is already in progress.")
+        _gather_state.update({
+            "running": True,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "ats": ats,
+            "slug": slug,
+            "dry_run": dry_run,
+            "current_employer": None,
+            "completed_employers": 0,
+            "total_employers": 0,
+            "total_new": 0,
+            "total_dupes": 0,
+            "total_errors": 0,
+            "summaries": [],
+            "error": None,
+        })
+    threading.Thread(
+        target=_gather_worker, args=(ats, slug, dry_run), daemon=True
+    ).start()
+    return _gather_status_snapshot()
 
 
 def _judge_worker(
@@ -1237,6 +1352,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/judge/status":
             self._serve_json({"status": _judge_status_snapshot()})
             return
+        if path == "/api/gather/status":
+            self._serve_json({"status": _gather_status_snapshot()})
+            return
         if path == "/api/env":
             self._serve_json({"env": _env_info()})
             return
@@ -1388,6 +1506,24 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, **result})
+            return
+        if path == "/api/gather":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            ats = body.get("ats")
+            if ats is not None and (not isinstance(ats, str) or not ats):
+                ats = None
+            slug = body.get("slug")
+            if slug is not None and (not isinstance(slug, str) or not slug):
+                slug = None
+            dry_run = bool(body.get("dry_run", False))
+            try:
+                snap = _start_gather(ats=ats, slug=slug, dry_run=dry_run)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "status": snap})
             return
         if path == "/api/judge":
             body = self._read_json_body() or {}

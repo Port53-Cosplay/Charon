@@ -1886,6 +1886,35 @@
         <div class="awaiting-header" id="awaiting-header">
           <span><strong id="awaiting-count">—</strong> of <strong id="awaiting-lifetime">—</strong> lifetime · waiting to be scored</span>
         </div>
+        <div class="pane-toolbar">
+          <button id="gather-btn" title="Harvest fresh job postings from configured employers">Harvest from sources</button>
+        </div>
+        <div id="gather-form" class="judge-form" hidden>
+          <label>ATS:
+            <select id="gather-ats-input">
+              <option value="">all</option>
+              <option value="greenhouse">greenhouse</option>
+              <option value="lever">lever</option>
+              <option value="ashby">ashby</option>
+              <option value="workday">workday</option>
+            </select>
+          </label>
+          <label>Slug:
+            <input type="text" id="gather-slug-input" placeholder="(optional, one employer)" style="width:160px">
+          </label>
+          <label style="display:flex;align-items:center;gap:5px">
+            <input type="checkbox" id="gather-dryrun-input"> dry-run
+          </label>
+          <span class="cost-est">No API spend · ~1 min for all employers</span>
+          <div class="spacer"></div>
+          <button class="cancel-btn" id="gather-cancel">Cancel</button>
+          <button class="confirm-btn" id="gather-confirm">Harvest</button>
+        </div>
+        <div id="gather-progress" class="judge-progress" hidden>
+          <span class="nums"><span id="gather-completed">0</span>/<span id="gather-total">0</span></span>
+          <div class="progress-bar"><div class="progress-fill" id="gather-fill"></div></div>
+          <span class="breakdown">new +<span id="gather-new">0</span> · dupes <span id="gather-dupes">0</span> · errors <span id="gather-errors">0</span></span>
+        </div>
         <div id="gathered-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading the queue…</div>
         </div>
@@ -3045,6 +3074,83 @@
       }
     }
 
+    function setGatherProgress(state) {
+      const completed = state.completed_employers || 0;
+      const total = state.total_employers || 0;
+      document.getElementById("gather-completed").textContent = completed;
+      document.getElementById("gather-total").textContent = total;
+      document.getElementById("gather-new").textContent = state.total_new || 0;
+      document.getElementById("gather-dupes").textContent = state.total_dupes || 0;
+      document.getElementById("gather-errors").textContent = state.total_errors || 0;
+      const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
+      document.getElementById("gather-fill").style.width = pct + "%";
+    }
+
+    async function pollGatherProgress() {
+      try {
+        const r = await fetch("/api/gather/status");
+        const data = await r.json();
+        const state = data.status || {};
+        setGatherProgress(state);
+        // New rows are landing in the queue — keep the Gathered list fresh
+        loadGathered();
+        if (state.running) {
+          setTimeout(pollGatherProgress, 3000);
+        } else {
+          document.getElementById("gather-progress").hidden = true;
+          document.getElementById("gather-btn").disabled = false;
+          if (state.error) {
+            showToast("Gather failed: " + state.error, true);
+          } else {
+            const n = state.total_new || 0;
+            const d = state.total_dupes || 0;
+            const e = state.total_errors || 0;
+            const errPart = e > 0 ? `, ${e} errors` : "";
+            const dryPart = state.dry_run ? " (dry-run — nothing written)" : "";
+            showToast(`Harvest complete: ${n} new, ${d} dupes${errPart}${dryPart}.`);
+            loadStats();
+          }
+        }
+      } catch (err) {
+        setTimeout(pollGatherProgress, 6000);
+      }
+    }
+
+    async function startGather(ats, slug, dryRun) {
+      const body = {};
+      if (ats) body.ats = ats;
+      if (slug) body.slug = slug;
+      if (dryRun) body.dry_run = true;
+      try {
+        const r = await fetch("/api/gather", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+
+        hideGatherForm();
+        document.getElementById("gather-btn").disabled = true;
+        document.getElementById("gather-progress").hidden = false;
+        setGatherProgress(data.status || {});
+        const what = slug ? slug : (ats || "all sources");
+        showToast(`Harvesting from ${what} — runs in the background.`);
+        pollGatherProgress();
+      } catch (e) {
+        showToast("Couldn't start gather: " + e.message, true);
+      }
+    }
+
+    function showGatherForm() {
+      document.getElementById("gather-form").hidden = false;
+      document.getElementById("gather-btn").disabled = true;
+    }
+    function hideGatherForm() {
+      document.getElementById("gather-form").hidden = true;
+      document.getElementById("gather-btn").disabled = false;
+    }
+
     async function startJudgeBatch(limit, tier) {
       const body = { limit };
       if (tier && tier.length) body.tier = tier;
@@ -3400,6 +3506,26 @@
       if (ev.target.closest("#judge-more-btn")) {
         const btn = document.getElementById("judge-more-btn");
         if (btn && !btn.disabled) showJudgeForm();
+        return;
+      }
+
+      // Harvest — open form
+      if (ev.target.closest("#gather-btn")) {
+        const btn = document.getElementById("gather-btn");
+        if (btn && !btn.disabled) showGatherForm();
+        return;
+      }
+      // Harvest — confirm
+      if (ev.target.closest("#gather-confirm")) {
+        const ats = document.getElementById("gather-ats-input").value || null;
+        const slug = (document.getElementById("gather-slug-input").value || "").trim() || null;
+        const dryRun = document.getElementById("gather-dryrun-input").checked;
+        startGather(ats, slug, dryRun);
+        return;
+      }
+      // Harvest — cancel form
+      if (ev.target.closest("#gather-cancel")) {
+        hideGatherForm();
         return;
       }
 
