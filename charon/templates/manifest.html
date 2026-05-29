@@ -3516,6 +3516,14 @@
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
 
         cardEl.classList.add("is-gone");
+        // Clear + hide this card's reject form before the re-render. The
+        // renderList guard skips rebuilding while a reject textarea has
+        // content (so background polls don't wipe in-progress typing) —
+        // but this card is on its way out, so clear it to let the
+        // rebuild through and close the empty gap it leaves behind.
+        const ta = form.querySelector("textarea");
+        if (ta) ta.value = "";
+        form.hidden = true;
         const reasonNote = reason ? ` Reason saved.` : "";
         showToast(`Rejected #${id}.${reasonNote}`);
         setTimeout(() => { renderList(data.ready || []); }, 320);
