@@ -308,11 +308,15 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
         offerings_path = link.get("offerings_path")
 
         has_contacts = False
+        has_resume = False
+        has_letter = False
         if offerings_path:
             try:
                 has_contacts = (Path(offerings_path) / CONTACTS_FILENAME).exists()
             except OSError:
                 has_contacts = False
+            has_resume = _offering_has(offerings_path, "resume")
+            has_letter = _offering_has(offerings_path, "cover_letter")
 
         days_since = None
         applied_at = app.get("applied_at")
@@ -359,6 +363,8 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
             "offerings_path": offerings_path,
             "has_offerings": bool(offerings_path),
             "has_contacts": has_contacts,
+            "has_resume": has_resume,
+            "has_letter": has_letter,
             "is_archived": is_archived,
         })
     return out, archived_count
@@ -948,6 +954,17 @@ def _parse_salary_data(raw: Any) -> dict[str, Any] | None:
         return None
 
 
+def _offering_has(offerings_path: str, stem: str) -> bool:
+    """True if <offerings_path>/<stem>.html or .md exists. Used to decide
+    which 'Open' buttons to show (resume always; cover letter only when
+    petition ran)."""
+    try:
+        folder = Path(offerings_path)
+        return (folder / f"{stem}.html").exists() or (folder / f"{stem}.md").exists()
+    except OSError:
+        return False
+
+
 def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
     """Cherry-pick fields the dashboard cares about — keeps the JSON tight."""
     from charon.contacts import CONTACTS_FILENAME
@@ -955,6 +972,8 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
     offerings_path = r.get("offerings_path")
     has_contacts = False
     has_salary = False
+    has_resume = False
+    has_letter = False
     if offerings_path:
         try:
             has_contacts = (Path(offerings_path) / CONTACTS_FILENAME).exists()
@@ -965,6 +984,8 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
             has_salary = (Path(offerings_path) / SALARY_FILENAME).exists()
         except OSError:
             has_salary = False
+        has_resume = _offering_has(offerings_path, "resume")
+        has_letter = _offering_has(offerings_path, "cover_letter")
 
     # Parse judgement_detail if it's structured JSON; surface a digest the UI
     # can render without re-parsing the whole blob.
@@ -995,6 +1016,8 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "petition_at": r.get("petition_at"),
         "has_contacts": has_contacts,
         "has_salary": has_salary,
+        "has_resume": has_resume,
+        "has_letter": has_letter,
         "salary_data": _parse_salary_data(r.get("salary_data")),
         # Detail-view fields (loaded eagerly so click-to-expand is instant)
         "full_description": r.get("full_description"),

@@ -2263,10 +2263,20 @@
           </svg>
         </button>`;
 
-      // Materials state — prep or open
-      const materialsBtn = hasOfferings
-        ? `<button class="open-btn" data-id="${d.id}" title="Opens cover letter + resume in new tabs — Ctrl+P to save as PDF">Open materials</button>`
-        : `<button class="prep-btn" data-id="${d.id}">Prep materials</button>`;
+      // Materials state — prep, or open (separate buttons so each opens its
+      // own tab; browsers block a second window.open from one click).
+      let materialsBtn;
+      if (hasOfferings) {
+        const resumeBtn = (d.has_resume !== false)
+          ? `<button class="open-btn open-resume-btn" data-id="${d.id}" title="Open resume in a new tab — Ctrl+P to save as PDF">Resume</button>`
+          : "";
+        const letterBtn = d.has_letter
+          ? `<button class="open-btn open-letter-btn" data-id="${d.id}" title="Open cover letter in a new tab — Ctrl+P to save as PDF">Cover letter</button>`
+          : "";
+        materialsBtn = resumeBtn + letterBtn;
+      } else {
+        materialsBtn = `<button class="prep-btn" data-id="${d.id}">Prep materials</button>`;
+      }
 
       // Contacts: only offered once materials exist (otherwise nowhere to save)
       const contactsBtn = hasOfferings
@@ -2760,9 +2770,16 @@
         ? `<a class="posting-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">View posting →</a>`
         : "";
 
-      const folderBtn = a.has_offerings && a.discovery_id != null
-        ? `<button class="open-btn" data-id="${a.discovery_id}" title="Opens cover letter + resume in new tabs — Ctrl+P to save as PDF">Open materials</button>`
-        : "";
+      let folderBtn = "";
+      if (a.has_offerings && a.discovery_id != null) {
+        const resumeBtn = (a.has_resume !== false)
+          ? `<button class="open-btn open-resume-btn" data-id="${a.discovery_id}" title="Open resume in a new tab — Ctrl+P to save as PDF">Resume</button>`
+          : "";
+        const letterBtn = a.has_letter
+          ? `<button class="open-btn open-letter-btn" data-id="${a.discovery_id}" title="Open cover letter in a new tab — Ctrl+P to save as PDF">Cover letter</button>`
+          : "";
+        folderBtn = resumeBtn + letterBtn;
+      }
 
       const contactsBtn = a.has_offerings && a.discovery_id != null
         ? `<button class="contacts-btn" data-id="${a.discovery_id}">${a.has_contacts ? "Refresh contacts" : "Find contacts"}</button>`
@@ -3566,18 +3583,12 @@
       }
     }
 
-    function openOfferings(id, cardEl) {
-      // Open the cover letter and resume HTMLs in new tabs. Browser
-      // "Save as PDF" will pick up the per-tab title and auto-fill a
-      // job-specific filename (e.g. "DeAnna Shanks - Thoropass -
-      // Senior Associate InfoSec - Cover Letter.pdf").
-      try {
-        window.open(`/api/offerings/${id}/cover_letter.html`, "_blank", "noopener");
-        window.open(`/api/offerings/${id}/resume.html`, "_blank", "noopener");
-        showToast(`Opened cover letter + resume for #${id} in new tabs.`);
-      } catch (e) {
-        showToast("Couldn't open tabs: " + e.message, true);
-      }
+    function openOfferingFile(id, filename) {
+      // One file, one tab — one window.open per click so the browser
+      // doesn't pop-up-block it. The tab title pre-fills the Ctrl+P
+      // "Save as PDF" filename (e.g. "DeAnna Shanks - Company - Role -
+      // Resume.pdf").
+      window.open(`/api/offerings/${id}/${filename}`, "_blank", "noopener");
     }
 
     async function fetchSalary(id, cardEl) {
@@ -3869,12 +3880,17 @@
         return;
       }
 
-      // Open offerings folder (server-side click.launch)
-      const openBtn = ev.target.closest(".open-btn");
-      if (openBtn) {
-        const card = openBtn.closest(".card");
-        const id = openBtn.getAttribute("data-id");
-        if (id && card) openOfferings(id, card);
+      // Open resume / cover letter in its own tab
+      const resumeBtn = ev.target.closest(".open-resume-btn");
+      if (resumeBtn) {
+        const id = resumeBtn.getAttribute("data-id");
+        if (id) openOfferingFile(id, "resume.html");
+        return;
+      }
+      const letterBtn = ev.target.closest(".open-letter-btn");
+      if (letterBtn) {
+        const id = letterBtn.getAttribute("data-id");
+        if (id) openOfferingFile(id, "cover_letter.html");
         return;
       }
 
