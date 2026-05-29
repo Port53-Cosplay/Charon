@@ -98,7 +98,67 @@ candidate's name as a level-1 header. No commentary outside the resume. No \
 Section structure should mirror the source resume's structure (e.g. if the \
 source has Experience, Skills, Certifications, Education — keep that \
 ordering and naming). Use markdown headings, bullet points, and emphasis \
-sparingly."""
+sparingly.
+
+MARKDOWN STRUCTURE — FOLLOW EXACTLY. A downstream renderer parses this \
+markdown by position; getting the shape wrong produces broken output. The \
+separators are load-bearing.
+
+Identity block (top of document):
+
+    # Full Name
+
+    Tagline Part | Tagline Part | Tagline Part
+    email · phone · location · availability
+    linkedin-url · github-url
+
+  - Name is a level-1 header (`# `).
+  - The next line is the role-descriptor TAGLINE, parts joined by ` | ` \
+(space-pipe-space). This line is REQUIRED — never drop it, never replace it \
+with contact info.
+  - Contact lines come AFTER the tagline. Fields are joined by ` · ` \
+(space-middot-space). EVERY field needs a separator — never run two fields \
+together like "555-1234Johnson City" or "Open to Remotelinkedin.com". Phone, \
+city, and availability are SEPARATE fields, each with a ` · ` between them.
+
+Experience entries (under `## EXPERIENCE`):
+
+    **Role Title** | Company Name | Start – End · Location
+
+    Optional one-line lead sentence describing the role.
+
+    - Bullet about an accomplishment.
+    - Another bullet.
+
+  - The entry-head is ONE line: bold role, then ` | `, then company, then \
+` | `, then the dates-and-location. THREE pipe-separated fields.
+  - The company name belongs in its OWN field between the first and second \
+pipe. Do NOT write "Citi GroupOct 2016" — that jams the company into the \
+date. It must be "**Senior Analyst** | Citi Group | Oct 2016 – Dec 2021 · \
+Remote".
+  - Dates and location share the last field, joined by ` · `.
+
+Project / competition entries (under `## PROJECTS`, `## COMPETITIONS & \
+ACTIVITIES`):
+
+    **Project Name** · Subtitle or descriptor · optional-url-or-tag
+
+    - Bullet about the project.
+
+  - These use ` · ` (middot) as the separator, NOT pipes.
+
+Compact sections (`## CERTIFICATIONS`, `## TECHNICAL SKILLS`): each line is \
+items joined by ` · `. An "In progress: X" line is allowed verbatim.
+
+Education (`## EDUCATION`):
+
+    Degree Name | Graduated Month Year
+    School Name · accreditation · accreditation
+
+    Honors: ...
+
+Use `## ` (h2) for every section header, in ALL CAPS \
+(e.g. `## PROFESSIONAL SUMMARY`)."""
 
 
 FORGE_USER_TEMPLATE = """\
@@ -421,14 +481,135 @@ def _description_for(discovery: dict[str, Any]) -> str:
     )
 
 
+DEFAULT_GRC_TARGETS = [
+    "compliance auditor",
+    "it auditor",
+    "grc analyst",
+    "security auditor",
+]
+
+
 def _forge_config(profile: dict[str, Any] | None) -> dict[str, Any]:
     cfg = (profile or {}).get("forge") or {}
+    grc_targets = cfg.get("grc_targets")
+    if not isinstance(grc_targets, list) or not grc_targets:
+        grc_targets = DEFAULT_GRC_TARGETS
     return {
         "model": cfg.get("model", DEFAULT_MODEL),
         "max_tokens": int(cfg.get("max_tokens", DEFAULT_MAX_TOKENS)),
         "offerings_dir": cfg.get("offerings_dir", DEFAULT_OFFERINGS_DIR),
         "resume_path": (profile or {}).get("resume_path") or "",
+        "grc_resume_md": cfg.get("grc_resume_md", ""),
+        "grc_targets": [str(t).strip().lower() for t in grc_targets],
     }
+
+
+# Section headers that mark the end of the identity block in a plain-text
+# resume. Everything before the first of these is name + tagline + contact.
+_IDENTITY_STOP_HEADERS = {
+    "professional summary", "summary", "experience", "work experience",
+    "projects", "security research & projects", "certifications",
+    "technical skills", "skills", "education", "competitions & activities",
+}
+
+
+def _closest_target(discovery: dict[str, Any]) -> str:
+    """Pull role_alignment.closest_target from stored judgement_detail."""
+    detail_raw = discovery.get("judgement_detail")
+    if not detail_raw:
+        return ""
+    try:
+        import json
+        detail = json.loads(detail_raw) if isinstance(detail_raw, str) else detail_raw
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(detail, dict):
+        return ""
+    ra = detail.get("role_alignment") or {}
+    if not isinstance(ra, dict):
+        return ""
+    return str(ra.get("closest_target") or "").strip()
+
+
+def _is_grc_role(discovery: dict[str, Any], grc_targets: list[str]) -> bool:
+    """True when the judge's closest_target marks this as a GRC-type role."""
+    ct = _closest_target(discovery).lower()
+    return bool(ct) and ct in grc_targets
+
+
+def _extract_identity_md(resume_text: str) -> str | None:
+    """Build a canonical markdown identity block from plain-text resume.
+
+    Returns markdown like:
+        # Name
+
+        Tagline | Tagline
+        email · phone · city · availability
+        linkedin · github
+
+    or None if the source doesn't look parseable. Normalizes the messy
+    separators that docx/pdf extraction leaves behind (tabs, double-spaces
+    around middots) into clean ` · ` / ` | ` so the renderer parses each
+    contact field separately.
+    """
+    raw_lines = resume_text.replace("\r\n", "\n").split("\n")
+    identity_lines: list[str] = []
+    for ln in raw_lines:
+        stripped = ln.strip()
+        if not stripped:
+            if identity_lines:
+                # blank line after the name/tagline/contact — keep scanning,
+                # the section header may follow
+                continue
+            continue
+        if stripped.lower() in _IDENTITY_STOP_HEADERS:
+            break
+        identity_lines.append(stripped)
+        # Safety cap — identity should never be more than ~5 lines
+        if len(identity_lines) >= 6:
+            break
+
+    if len(identity_lines) < 2:
+        return None
+
+    name = identity_lines[0]
+    tagline = identity_lines[1]
+    contact_lines = identity_lines[2:]
+
+    def _norm_sep(line: str, sep: str) -> str:
+        # Tabs become separators; collapse whitespace around middots/pipes;
+        # any remaining run of 2+ spaces becomes a separator (docx uses
+        # double-space as a field divider).
+        line = line.replace("\t", f" {sep} ")
+        line = re.sub(r"\s*·\s*", " · ", line)
+        line = re.sub(r"\s*\|\s*", " | ", line)
+        line = re.sub(r" {2,}", f" {sep} ", line)
+        return re.sub(r"\s+", " ", line).strip()
+
+    tagline = _norm_sep(tagline, "|")
+    contact_norm = [_norm_sep(c, "·") for c in contact_lines if c.strip()]
+
+    parts = [f"# {name}", "", tagline]
+    parts.extend(contact_norm)
+    return "\n".join(parts)
+
+
+def _pin_identity(generated: str, identity_md: str | None) -> str:
+    """Replace whatever the LLM produced for the identity block with the
+    canonical one. Keeps everything from the first `## ` section onward.
+
+    The LLM reliably drifts on the identity block (drops the tagline, runs
+    contact fields together). The body sections it handles fine. So we own
+    the identity and let it own the rest.
+    """
+    if not identity_md:
+        return generated
+    lines = generated.split("\n")
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("## "):
+            return identity_md.rstrip() + "\n\n" + "\n".join(lines[i:])
+    # No section header found — generated output is degenerate; prepend.
+    return identity_md.rstrip() + "\n\n" + generated
 
 
 def forge_discovery(
@@ -458,6 +639,53 @@ def forge_discovery(
                 "Forge only runs on ready discoveries."
             ),
         }
+
+    # GRC short-circuit: for audit/GRC-type roles, skip LLM tailoring and
+    # drop in the canonical GRC resume markdown verbatim. That resume is
+    # already the source of truth for these roles — re-tailoring it only
+    # risks drift. Detection is by the judge's closest_target.
+    grc_md_path = cfg["grc_resume_md"]
+    if grc_md_path and _is_grc_role(discovery, cfg["grc_targets"]):
+        grc_path = Path(os.path.expanduser(grc_md_path))
+        if grc_path.is_file():
+            folder = offerings_folder(discovery, base_dir=cfg["offerings_dir"])
+            resume_out = folder / "resume.md"
+            if resume_out.exists() and not force:
+                return {
+                    "discovery_id": discovery.get("id"),
+                    "offerings_path": str(folder),
+                    "resume_path": str(resume_out),
+                    "skipped_reason": "offerings folder already exists (use --force to overwrite)",
+                }
+            folder.mkdir(parents=True, exist_ok=True)
+            grc_md = grc_path.read_text(encoding="utf-8")
+            resume_out.write_text(grc_md, encoding="utf-8")
+            audit_out = folder / "forge_audit.md"
+            audit_out.write_text(
+                "# Forge Audit Trail\n\n"
+                f"- **Generated:** {datetime.now(timezone.utc).isoformat()}\n"
+                f"- **Discovery:** #{discovery.get('id')} — "
+                f"{discovery.get('company')} — {discovery.get('role')}\n"
+                f"- **Mode:** GRC canonical resume (no LLM tailoring)\n"
+                f"- **Source:** `{grc_path}`\n"
+                f"- **closest_target:** {_closest_target(discovery)!r}\n\n"
+                "This role was classified GRC-type, so Charon used the "
+                "canonical GRC resume as-is rather than tailoring. No AI "
+                "calls were made; no fabrication risk.\n",
+                encoding="utf-8",
+            )
+            return {
+                "discovery_id": discovery.get("id"),
+                "offerings_path": str(folder),
+                "resume_path": str(resume_out),
+                "audit_path": str(audit_out),
+                "unverified_claims": [],
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+                "model": "grc-canonical (no LLM)",
+                "grc_canonical": True,
+            }
+        # configured but missing — fall through to normal tailoring, the
+        # user will at least get something rather than an error
 
     if not resume_text:
         resume_path_str = cfg["resume_path"]
@@ -511,6 +739,11 @@ def forge_discovery(
         )
     except ForgeError as e:
         return {"discovery_id": discovery.get("id"), "error": str(e)}
+
+    # Pin the identity block from the source resume. The LLM reliably drifts
+    # here — drops the tagline, runs contact fields together — so we splice
+    # in a canonical identity built from the source and keep the LLM's body.
+    generated = _pin_identity(generated, _extract_identity_md(resume_text))
 
     unverified = verify_against_source(generated, resume_text)
 
