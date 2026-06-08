@@ -475,15 +475,34 @@ def reclassify_one(
     resume_match = discovery.get("resume_match_score")  # may be None on legacy rows
 
     # Monoculture: use cached score if present; otherwise compute (free,
-    # deterministic) and flag for caller to persist. This is how legacy rows
-    # pick up the 5th dimension on first reclassify.
+    # deterministic) and flag for caller to persist. Also compute the full
+    # detail dict whenever judgement_detail is missing the
+    # screening_monoculture block, so the dashboard's card-detail digest can
+    # render the breakdown for rows that were back-filled before the splice
+    # logic landed.
     cached_mono = discovery.get("monoculture_score")
     mono_detail: dict[str, Any] | None = None
     mono_was_fresh = False
-    if cached_mono is None:
+
+    detail_raw = discovery.get("judgement_detail")
+    detail_has_mono = False
+    if isinstance(detail_raw, str):
+        try:
+            import json as _json
+            parsed = _json.loads(detail_raw)
+            detail_has_mono = (
+                isinstance(parsed, dict)
+                and isinstance(parsed.get("screening_monoculture"), dict)
+            )
+        except (ValueError, TypeError):
+            detail_has_mono = False
+
+    if cached_mono is None or not detail_has_mono:
         mono_detail = score_monoculture(discovery, profile)
         mono_was_fresh = mono_detail is not None
-        monoculture = float(mono_detail["monoculture_score"]) if mono_detail else None
+        monoculture = float(mono_detail["monoculture_score"]) if mono_detail else (
+            float(cached_mono) if cached_mono is not None else None
+        )
     else:
         monoculture = float(cached_mono)
 
