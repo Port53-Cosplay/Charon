@@ -583,11 +583,31 @@ def reclassify_batch(
                 judgement_reason=new["judgement_reason"],
             )
 
-        # Back-fill monoculture_score onto the row the first time reclassify
-        # sees it. Free (deterministic), one tiny UPDATE.
+        # Back-fill monoculture onto the row the first time reclassify sees
+        # it. Two writes (free, deterministic): the score column for the UI's
+        # M pip, and the judgement_detail JSON so the card-detail digest can
+        # show the breakdown.
         if new.get("monoculture_was_fresh") and new.get("monoculture_score") is not None:
-            from charon.db import set_discovery_monoculture
+            from charon.db import (
+                set_discovery_monoculture,
+                update_discovery_judgement_detail,
+            )
             set_discovery_monoculture(discovery["id"], new["monoculture_score"])
+            mono_detail = new.get("monoculture_detail")
+            if mono_detail:
+                # Splice mono into the existing detail JSON; the other four
+                # analyzer blocks (ghost / redflag / role_alignment /
+                # resume_match) are preserved.
+                existing_raw = discovery.get("judgement_detail")
+                try:
+                    import json as _json
+                    existing = _json.loads(existing_raw) if isinstance(existing_raw, str) else (existing_raw or {})
+                    if not isinstance(existing, dict):
+                        existing = {}
+                except (ValueError, TypeError):
+                    existing = {}
+                existing["screening_monoculture"] = mono_detail
+                update_discovery_judgement_detail(discovery["id"], _json.dumps(existing))
 
         results.append(new)
         if on_progress:

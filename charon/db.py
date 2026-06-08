@@ -815,6 +815,22 @@ def set_discovery_monoculture(discovery_id: int, score: float | None) -> bool:
         conn.close()
 
 
+def update_discovery_judgement_detail(discovery_id: int, detail_json: str | None) -> bool:
+    """Overwrite a discovery's judgement_detail JSON. Used by reclassify when
+    a freshly-computed analyzer block (e.g. screening_monoculture) needs to
+    be spliced into the cached detail so the dashboard can render it."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET judgement_detail = ? WHERE id = ?",
+            (detail_json, discovery_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def mark_discovery_culled(discovery_id: int) -> bool:
     """Mark a discovery as culled-passed: cull looked at it and let it
     through to enrich. Sets culled_at = NOW. Does NOT touch screened_status
