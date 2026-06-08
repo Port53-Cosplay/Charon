@@ -254,7 +254,7 @@ def validate_profile(profile: dict[str, Any]) -> None:
         if weights is not None:
             if not isinstance(weights, dict):
                 raise ProfileError("judge.weights must be a mapping")
-            valid_keys = {"ghost", "redflag", "role_alignment", "resume_match"}
+            valid_keys = {"ghost", "redflag", "role_alignment", "resume_match", "monoculture"}
             unknown = set(weights.keys()) - valid_keys
             if unknown:
                 raise ProfileError(
