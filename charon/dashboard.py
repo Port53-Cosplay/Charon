@@ -1009,6 +1009,7 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "ghost_score": _round1(r.get("ghost_score")),
         "redflag_score": _round1(r.get("redflag_score")),
         "resume_match_score": _round1(r.get("resume_match_score")),
+        "monoculture_score": _round1(r.get("monoculture_score")),
         "tier": r.get("tier"),
         "ats": r.get("ats"),
         "offerings_path": offerings_path,
@@ -1095,6 +1096,27 @@ def _digest_judgement(parsed: dict[str, Any]) -> dict[str, Any] | None:
         }
         if any(rm_block.values()):
             out["resume_match"] = rm_block
+
+    mono = parsed.get("screening_monoculture")
+    if isinstance(mono, dict):
+        mono_signals: list[dict[str, Any]] = []
+        for s in (mono.get("signals") or []):
+            if isinstance(s, dict):
+                mono_signals.append({
+                    "category": s.get("category"),
+                    "evidence": s.get("evidence") or "",
+                    "risk":     s.get("risk"),
+                })
+        mono_block = {
+            "summary":         mono.get("summary"),
+            "score":           mono.get("monoculture_score"),
+            "ats_risk":        mono.get("ats_risk"),
+            "size_risk":       mono.get("size_risk"),
+            "jd_pattern_risk": mono.get("jd_pattern_risk"),
+            "signals":         mono_signals,
+        }
+        if mono_block["summary"] or mono_signals:
+            out["monoculture"] = mono_block
 
     return out or None
 

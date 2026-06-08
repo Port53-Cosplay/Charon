@@ -31,12 +31,23 @@ from charon.resume_match import (
     analyze_resume_match,
     load_resume_text,
 )
+from charon.monoculture import score_monoculture
 
 
 DEFAULT_READY_THRESHOLD = 60
 DEFAULT_ALIGNMENT_FLOOR = 50  # auto-reject if alignment_score < floor regardless of combined
 DEFAULT_BULK_WARN_AT = 50  # warn before judging more than this many at once
 
+# 5th component is screening-monoculture risk (deterministic; see
+# charon/monoculture.py). High risk subtracts from combined the same way
+# ghost / redflag do — components["monoculture"] = 100 - monoculture_score.
+DEFAULT_WEIGHTS_5 = {
+    "ghost": 0.12,
+    "redflag": 0.17,
+    "role_alignment": 0.22,
+    "resume_match": 0.34,
+    "monoculture": 0.15,
+}
 DEFAULT_WEIGHTS_4 = {
     "ghost": 0.15,
     "redflag": 0.20,
@@ -73,11 +84,14 @@ def compute_combined_weighted(
     alignment: float,
     resume_match: float | None,
     weights: dict[str, float] | None,
+    monoculture: float | None = None,
 ) -> float:
-    """Combined score with optional weights and optional resume_match.
+    """Combined score with optional weights, resume_match, and monoculture.
 
     Falls back to equal-component formula if weights is None.
-    Falls back to 3-component formula if resume_match is None.
+    Components absent from the inputs (resume_match, monoculture) drop out
+    of both the formula and the active-weights set, so old rows scored on
+    the 4-component formula still re-combine consistently.
     """
     components = {
         "ghost": 100.0 - ghost,
@@ -86,6 +100,9 @@ def compute_combined_weighted(
     }
     if resume_match is not None:
         components["resume_match"] = resume_match
+    if monoculture is not None:
+        # High monoculture risk = low contribution to combined.
+        components["monoculture"] = 100.0 - monoculture
 
     if weights is None:
         # Equal weighting across the components we have
@@ -114,6 +131,7 @@ def _decide_status(
     combined: float,
     resume_match: float | None = None,
     dealbreakers_count: int = 0,
+    monoculture: float | None = None,
 ) -> tuple[str, str]:
     """Pure gating logic. Returns (screened_status, judgement_reason)."""
     if alignment < floor:
@@ -134,6 +152,8 @@ def _decide_status(
     score_part = f"ghost={ghost:.0f} redflag={redflag:.0f} align={alignment:.0f}"
     if resume_match is not None:
         score_part += f" resume={resume_match:.0f}"
+    if monoculture is not None:
+        score_part += f" mono={monoculture:.0f}"
     parts.append(score_part)
 
     if dealbreakers_count:
@@ -233,12 +253,19 @@ def judge_discovery(
         float(resume_result.get("match_score", 0)) if resume_result else None
     )
 
+    # 5th dimension: deterministic, no API call. Returns None when disabled.
+    monoculture = score_monoculture(discovery, profile)
+    monoculture_score = (
+        float(monoculture["monoculture_score"]) if monoculture else None
+    )
+
     combined = compute_combined_weighted(
         ghost=ghost_score,
         redflag=redflag_score,
         alignment=alignment_score,
         resume_match=resume_match_score,
         weights=cfg["weights"],
+        monoculture=monoculture_score,
     )
     dealbreakers_count = len(redflag.get("dealbreakers_found", []))
 
@@ -251,6 +278,7 @@ def judge_discovery(
         resume_match=resume_match_score,
         combined=combined,
         dealbreakers_count=dealbreakers_count,
+        monoculture=monoculture_score,
     )
 
     detail: dict[str, Any] = {
@@ -260,6 +288,8 @@ def judge_discovery(
     }
     if resume_result is not None:
         detail["resume_match"] = resume_result
+    if monoculture is not None:
+        detail["screening_monoculture"] = monoculture
 
     return {
         "screened_status": status,
@@ -267,6 +297,7 @@ def judge_discovery(
         "redflag_score": redflag_score,
         "alignment_score": alignment_score,
         "resume_match_score": resume_match_score,
+        "monoculture_score": monoculture_score,
         "combined_score": combined,
         "judgement_reason": reason,
         "judgement_detail": detail,
@@ -344,6 +375,11 @@ def judge_one_id(
         judgement_reason=result["judgement_reason"],
         judgement_detail=result.get("judgement_detail"),
     )
+    # Persist the deterministic monoculture score on its own column so the UI
+    # can surface it without re-parsing judgement_detail.
+    if result.get("monoculture_score") is not None:
+        from charon.db import set_discovery_monoculture
+        set_discovery_monoculture(discovery_id, result["monoculture_score"])
     result["discovery_id"] = discovery_id
     result["company"] = discovery.get("company")
     result["role"] = discovery.get("role")
@@ -437,12 +473,27 @@ def reclassify_one(
         return None
 
     resume_match = discovery.get("resume_match_score")  # may be None on legacy rows
+
+    # Monoculture: use cached score if present; otherwise compute (free,
+    # deterministic) and flag for caller to persist. This is how legacy rows
+    # pick up the 5th dimension on first reclassify.
+    cached_mono = discovery.get("monoculture_score")
+    mono_detail: dict[str, Any] | None = None
+    mono_was_fresh = False
+    if cached_mono is None:
+        mono_detail = score_monoculture(discovery, profile)
+        mono_was_fresh = mono_detail is not None
+        monoculture = float(mono_detail["monoculture_score"]) if mono_detail else None
+    else:
+        monoculture = float(cached_mono)
+
     combined = compute_combined_weighted(
         ghost=ghost,
         redflag=redflag,
         alignment=alignment,
         resume_match=resume_match,
         weights=cfg["weights"],
+        monoculture=monoculture,
     )
 
     # Pull dealbreakers count from stored detail if available
@@ -465,6 +516,7 @@ def reclassify_one(
         resume_match=resume_match,
         combined=combined,
         dealbreakers_count=dealbreakers_count,
+        monoculture=monoculture,
     )
 
     return {
@@ -473,6 +525,9 @@ def reclassify_one(
         "redflag_score": redflag,
         "alignment_score": alignment,
         "resume_match_score": resume_match,
+        "monoculture_score": monoculture,
+        "monoculture_detail": mono_detail,  # caller persists if mono_was_fresh
+        "monoculture_was_fresh": mono_was_fresh,
         "combined_score": combined,
         "judgement_reason": reason,
     }
@@ -527,6 +582,12 @@ def reclassify_batch(
                 combined_score=new["combined_score"],
                 judgement_reason=new["judgement_reason"],
             )
+
+        # Back-fill monoculture_score onto the row the first time reclassify
+        # sees it. Free (deterministic), one tiny UPDATE.
+        if new.get("monoculture_was_fresh") and new.get("monoculture_score") is not None:
+            from charon.db import set_discovery_monoculture
+            set_discovery_monoculture(discovery["id"], new["monoculture_score"])
 
         results.append(new)
         if on_progress:

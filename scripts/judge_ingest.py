@@ -94,16 +94,29 @@ def main() -> int:
                 fail_count += 1
                 continue
 
+            # 5th dimension is deterministic; the paste-judge LLM doesn't
+            # produce it. Compute it here from the existing discovery row
+            # (ats, tier, full_description) so the combined score reflects
+            # the same 5-component formula as in-process judge.
+            from charon.monoculture import score_monoculture
+            mono_detail = score_monoculture(existing, profile)
+            mono_score = (
+                float(mono_detail["monoculture_score"]) if mono_detail else None
+            )
+
             combined = compute_combined_weighted(
                 ghost=ghost,
                 redflag=redflag,
                 alignment=alignment,
                 resume_match=rm,
                 weights=weights,
+                monoculture=mono_score,
             )
 
             # Dealbreakers count from the structured detail block
             detail_block = j.get("judgement_detail") or {}
+            if isinstance(detail_block, dict) and mono_detail is not None:
+                detail_block["screening_monoculture"] = mono_detail
             redflag_block = (
                 detail_block.get("redflags") if isinstance(detail_block, dict) else {}
             ) or {}
@@ -119,6 +132,7 @@ def main() -> int:
                 resume_match=rm,
                 combined=combined,
                 dealbreakers_count=dealbreakers_count,
+                monoculture=mono_score,
             )
 
             # Prefer the model's prose reason when status was set by
@@ -135,11 +149,13 @@ def main() -> int:
                     "UPDATE discoveries SET "
                     "  ghost_score = ?, redflag_score = ?, alignment_score = ?, "
                     "  resume_match_score = ?, combined_score = ?, "
+                    "  monoculture_score = ?, "
                     "  screened_status = ?, judgement_reason = ?, "
                     "  judgement_detail = ?, judged_at = ? "
                     "WHERE id = ?",
                     (
                         ghost, redflag, alignment, rm, combined,
+                        mono_score,
                         status, final_reason, detail_json, now_iso,
                         disc_id,
                     ),

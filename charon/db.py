@@ -124,6 +124,7 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN petition_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN salary_data TEXT",
     "ALTER TABLE discoveries ADD COLUMN culled_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN monoculture_score REAL",
 ]
 
 
@@ -789,6 +790,24 @@ def mark_discovery_rejected(discovery_id: int, reason: str | None = None) -> boo
             "  judged_at = COALESCE(judged_at, ?) "
             "WHERE id = ?",
             (final_reason, now_iso, discovery_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_discovery_monoculture(discovery_id: int, score: float | None) -> bool:
+    """Write the screening-monoculture risk score onto a discovery row.
+
+    Used by judge and reclassify to persist the 5th analyzer's score so the
+    UI can surface it without re-running the scorer. Pass None to clear.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET monoculture_score = ? WHERE id = ?",
+            (score, discovery_id),
         )
         conn.commit()
         return cursor.rowcount > 0

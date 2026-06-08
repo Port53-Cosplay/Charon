@@ -2173,6 +2173,7 @@
       const red = dg.redflags || {};
       const ghost = dg.ghost || {};
       const rm = dg.resume_match || {};
+      const mono = dg.monoculture || {};
 
       const sections = [];
 
@@ -2217,6 +2218,20 @@
         sections.push(`<h3>Ghost-job assessment</h3><div class="judgement-summary">${escapeHtml(ghost.summary)}</div>`);
       }
 
+      if (mono && (mono.summary || (mono.signals && mono.signals.length))) {
+        const score = (mono.score != null) ? mono.score.toFixed(1) : "—";
+        const summary = mono.summary ? `<div class="judgement-summary">${escapeHtml(mono.summary)}</div>` : "";
+        const breakdown = `<div class="judgement-summary" style="font-size:11.5px;color:var(--ink-soft)">ATS risk ${mono.ats_risk ?? "—"} · size risk ${mono.size_risk ?? "—"} · JD-pattern risk ${mono.jd_pattern_risk ?? "—"}</div>`;
+        const signalChips = (mono.signals || [])
+          .filter(s => s.category === "vendor_mention" || s.category === "screening_phrase")
+          .map(s => `<span class="chip">${escapeHtml(s.evidence)} (+${s.risk})</span>`)
+          .join("");
+        const sigBlock = signalChips
+          ? `<div style="margin-top:8px"><strong style="font-size:11.5px;color:var(--ink-soft)">JD patterns matched:</strong><div class="chip-row">${signalChips}</div></div>`
+          : "";
+        sections.push(`<h3>Screening monoculture risk: ${score}</h3>${summary}${breakdown}${sigBlock}`);
+      }
+
       if (sections.length === 0) {
         return `<div class="detail"><div class="judgement-summary">No detail data available for this discovery.</div></div>`;
       }
@@ -2230,6 +2245,7 @@
         pip("R", d.redflag_score),
         pip("A", d.alignment_score),
         pip("Rs", d.resume_match_score),
+        pip("M", d.monoculture_score),
       ].join("");
       const hasOfferings = d.forged_at || d.petition_at || d.offerings_path;
       const offeringsBadge = hasOfferings
@@ -2629,6 +2645,7 @@
         pip("R", d.redflag_score),
         pip("A", d.alignment_score),
         pip("Rs", d.resume_match_score),
+        pip("M", d.monoculture_score),
       ].join("");
       const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
       const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
