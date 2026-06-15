@@ -1932,6 +1932,12 @@ class _Handler(BaseHTTPRequestHandler):
 
 def _port_is_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Match the real server: ThreadingHTTPServer sets allow_reuse_address,
+        # so the preflight must too. Without SO_REUSEADDR this bind fails on a
+        # lingering TIME_WAIT socket from a just-stopped instance and reports a
+        # false "port in use" — which, under systemd Restart=always, turns into
+        # an endless restart loop after every deploy/restart.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind((LOOPBACK, port))
             return True
