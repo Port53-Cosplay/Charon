@@ -620,7 +620,9 @@ def get_discovery_counts() -> dict[str, int]:
         conn.close()
 
 
-VALID_ENRICHMENT_TIERS = {"skipped", "jsonld", "ats_css", "ai_fallback", "failed"}
+VALID_ENRICHMENT_TIERS = {
+    "skipped", "jsonld", "ats_css", "ai_fallback", "workday_cxs", "failed", "closed"
+}
 
 
 def update_discovery_enrichment(
