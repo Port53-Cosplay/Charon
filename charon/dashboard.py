@@ -191,6 +191,16 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
             "AND full_description IS NOT NULL AND length(full_description) > 0"
         )
         judgeable = cur.fetchone()[0]
+        # "Awaiting enrich" = rows that still need an enrichment pass: never
+        # enriched OR a prior attempt failed, excluding anything already
+        # rejected. Matches get_enrichable_discoveries — what the Flush button
+        # will process.
+        cur.execute(
+            "SELECT COUNT(*) FROM discoveries WHERE "
+            "(enrichment_tier IS NULL OR enrichment_tier = 'failed') "
+            "AND (screened_status IS NULL OR screened_status != 'rejected')"
+        )
+        awaiting_enrich = cur.fetchone()[0]
         cur.execute("SELECT MAX(discovered_at) FROM discoveries")
         last_gather = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'ready'")
@@ -235,6 +245,7 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         "judged": judged,
         "unjudged": max(gathered - judged, 0),
         "judgeable": judgeable,
+        "awaiting_enrich": awaiting_enrich,
         "last_gather": last_gather,
         "ready": ready,
         "refused": refused,
