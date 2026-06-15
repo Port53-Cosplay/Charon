@@ -180,6 +180,19 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         gathered = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE judged_at IS NOT NULL")
         judged = cur.fetchone()[0]
+        # "Judgeable" = the actionable backlog: unjudged rows that actually
+        # have a usable enriched description, i.e. exactly what the judge
+        # picker (get_unjudged_discoveries, require_enriched=True) will grab.
+        # The rest of the unjudged pool (no description / failed enrichment)
+        # can never be judged, so it's not "waiting" — it's stuck.
+        cur.execute(
+            "SELECT COUNT(*) FROM discoveries WHERE judged_at IS NULL "
+            "AND enrichment_tier IS NOT NULL AND enrichment_tier != 'failed' "
+            "AND full_description IS NOT NULL AND length(full_description) > 0"
+        )
+        judgeable = cur.fetchone()[0]
+        cur.execute("SELECT MAX(discovered_at) FROM discoveries")
+        last_gather = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'ready'")
         ready = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'rejected'")
@@ -220,6 +233,9 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
     out: dict[str, Any] = {
         "gathered": gathered,
         "judged": judged,
+        "unjudged": max(gathered - judged, 0),
+        "judgeable": judgeable,
+        "last_gather": last_gather,
         "ready": ready,
         "refused": refused,
         "applied_total": total_apps,

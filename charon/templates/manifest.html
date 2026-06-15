@@ -334,6 +334,16 @@
       margin-top: 2px;
     }
 
+    .stats-band .stat .sub {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--ink-soft);
+      margin-top: 3px;
+      font-variant-numeric: tabular-nums;
+      min-height: 14px;
+    }
+    .stats-band .stat .sub:empty { display: none; }
+
     .stats-band .stat.dim .num { color: var(--ink-soft); }
 
     .stats-band .stat .num.placeholder { color: var(--ink-faint); }
@@ -1890,8 +1900,8 @@
 
     <main class="main">
       <div id="stats-band" class="stats-band">
-        <div class="stat dim"><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div></div>
-        <div class="stat dim"><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div></div>
+        <div class="stat dim"><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div><div class="sub" id="stat-gathered-sub"></div></div>
+        <div class="stat dim"><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
         <div class="stat"><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
         <div class="stat"><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
         <div class="stat dim"><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
@@ -2376,6 +2386,18 @@
 
     // ── Stats band ─────────────────────────────────────────────
 
+    function setStatSub(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text || "";
+    }
+
+    // ISO timestamp -> "M/D" (local). Returns "" on anything unparseable.
+    function fmtShortDate(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return "";
+      return `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
     function setStat(id, value, isPercent = false) {
       const el = document.getElementById(id);
       if (!el) return;
@@ -2396,6 +2418,8 @@
         const s = data.stats || {};
         setStat("stat-gathered", s.gathered);
         setStat("stat-judged", s.judged);
+        setStatSub("stat-gathered-sub", s.last_gather ? `as of ${fmtShortDate(s.last_gather)}` : "");
+        setStatSub("stat-judged-sub", (s.judgeable != null) ? `${s.judgeable} waiting` : "");
         setStat("stat-ready", s.ready);
         setStat("stat-applied", s.applied_total);
         setStat("stat-stranded", s.stranded);
