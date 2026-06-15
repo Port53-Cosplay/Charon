@@ -23,6 +23,7 @@ from typing import Any, Callable
 from charon.db import (
     get_discoveries,
     get_discovery,
+    get_enrichable_discoveries,
     get_unenriched_discoveries,
     update_discovery_enrichment,
 )
@@ -146,6 +147,7 @@ def enrich_batch(
     ats: str | None = None,
     slug: str | None = None,
     force: bool = False,
+    include_failed: bool = False,
     limit: int | None = None,
     profile: dict[str, Any] | None = None,
     rate_limit_seconds: float | None = None,
@@ -154,6 +156,7 @@ def enrich_batch(
     """Enrich many discoveries in sequence. Returns per-discovery result dicts.
 
     Default: only enriches discoveries where enrichment_tier IS NULL.
+    With include_failed=True, also retries rows whose prior attempt failed.
     With force=True, re-enriches everything matching the filter.
     """
     cfg = _enrich_config(profile)
@@ -161,6 +164,8 @@ def enrich_batch(
 
     if force:
         targets = get_discoveries(ats=ats, slug=slug, limit=limit)
+    elif include_failed:
+        targets = get_enrichable_discoveries(ats=ats, slug=slug, limit=limit)
     else:
         targets = get_unenriched_discoveries(ats=ats, slug=slug, limit=limit)
 

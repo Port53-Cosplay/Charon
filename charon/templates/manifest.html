@@ -608,6 +608,22 @@
 
     .pane-toolbar button[disabled] { opacity: 0.7; cursor: wait; }
 
+    /* Maintenance action — quiet by default, for occasional buildup flushes. */
+    .pane-toolbar button.subtle {
+      color: var(--ink-faint);
+      border-color: transparent;
+      border-bottom: 1px dotted var(--card-border);
+      border-radius: 0;
+      padding: 7px 8px;
+      font-size: 12px;
+      margin-right: auto;  /* push to the far left, away from primary actions */
+    }
+    .pane-toolbar button.subtle:hover {
+      background: transparent;
+      color: var(--plum-soft);
+      border-bottom-color: var(--lilac);
+    }
+
     .awaiting-header {
       background: var(--paper);
       border: 1px solid var(--card-border);
@@ -1921,6 +1937,7 @@
           <span><strong id="awaiting-count">—</strong> of <strong id="awaiting-lifetime">—</strong> lifetime · waiting to be scored</span>
         </div>
         <div class="pane-toolbar">
+          <button id="enrich-btn" class="subtle" title="Fetch full descriptions for rows still awaiting enrich (and retry past failures). Occasional cleanup — not part of the normal flow.">Flush awaiting-enrich</button>
           <button id="gather-btn" title="Harvest fresh job postings from configured employers">Harvest from sources</button>
           <button id="cull-btn" title="Run a free Gemini pre-judge pass — kills obvious non-fits before Sonnet sees them">Cull the queue</button>
         </div>
@@ -1972,6 +1989,20 @@
           <span class="nums"><span id="cull-processed">0</span>/<span id="cull-total">0</span></span>
           <div class="progress-bar"><div class="progress-fill" id="cull-fill"></div></div>
           <span class="breakdown">passed +<span id="cull-passed">0</span> · refused +<span id="cull-refused">0</span> · errors <span id="cull-errors">0</span></span>
+        </div>
+        <div id="enrich-form" class="judge-form" hidden>
+          <label>Max rows:
+            <input type="number" id="enrich-limit-input" min="1" max="1000" value="500">
+          </label>
+          <span class="cost-est">Free tiers first (JSON-LD / ATS scrape) · only stragglers hit the paid LLM · ~1–2 sec/row</span>
+          <div class="spacer"></div>
+          <button class="cancel-btn" id="enrich-cancel">Cancel</button>
+          <button class="confirm-btn" id="enrich-confirm">Flush</button>
+        </div>
+        <div id="enrich-progress" class="judge-progress" hidden>
+          <span class="nums"><span id="enrich-processed">0</span>/<span id="enrich-total">0</span></span>
+          <div class="progress-bar"><div class="progress-fill" id="enrich-fill"></div></div>
+          <span class="breakdown">recovered +<span id="enrich-recovered">0</span> · paid <span id="enrich-paid">0</span> · failed <span id="enrich-failed">0</span></span>
         </div>
         <div id="gathered-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading the queue…</div>
@@ -3258,6 +3289,76 @@
       document.getElementById("cull-btn").disabled = false;
     }
 
+    function setEnrichProgress(state) {
+      const processed = state.processed || 0;
+      const total = state.limit || 0;
+      document.getElementById("enrich-processed").textContent = processed;
+      document.getElementById("enrich-total").textContent = total;
+      document.getElementById("enrich-recovered").textContent = state.recovered || 0;
+      document.getElementById("enrich-paid").textContent = state.paid || 0;
+      document.getElementById("enrich-failed").textContent = state.failed || 0;
+      const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 0;
+      document.getElementById("enrich-fill").style.width = pct + "%";
+    }
+
+    async function pollEnrichProgress() {
+      try {
+        const r = await fetch("/api/enrich/status");
+        const data = await r.json();
+        const state = data.status || {};
+        setEnrichProgress(state);
+        refreshFunnelState();
+        if (state.running) {
+          setTimeout(pollEnrichProgress, 3000);
+        } else {
+          document.getElementById("enrich-progress").hidden = true;
+          document.getElementById("enrich-btn").disabled = false;
+          if (state.error && (state.processed || 0) === 0) {
+            showToast("Enrich failed: " + state.error, true);
+          } else {
+            const rec = state.recovered || 0;
+            const f = state.failed || 0;
+            const paid = state.paid || 0;
+            const failPart = f > 0 ? `, ${f} still failed` : "";
+            const paidPart = paid > 0 ? ` (${paid} via paid LLM)` : "";
+            showToast(`Enrich complete: ${rec} recovered${failPart}${paidPart}.`);
+            loadStats();
+          }
+        }
+      } catch (err) {
+        setTimeout(pollEnrichProgress, 6000);
+      }
+    }
+
+    async function startEnrich(limit) {
+      try {
+        const r = await fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        hideEnrichForm();
+        document.getElementById("enrich-btn").disabled = true;
+        document.getElementById("enrich-progress").hidden = false;
+        setEnrichProgress(data.status || {});
+        showToast(`Flushing up to ${limit} rows — runs in the background.`);
+        pollEnrichProgress();
+      } catch (e) {
+        showToast("Couldn't start enrich: " + e.message, true);
+      }
+    }
+
+    function showEnrichForm() {
+      document.getElementById("enrich-form").hidden = false;
+      document.getElementById("enrich-btn").disabled = true;
+    }
+    function hideEnrichForm() {
+      document.getElementById("enrich-form").hidden = true;
+      document.getElementById("enrich-btn").disabled = false;
+    }
+
     async function refuseFromGathered(id, cardEl) {
       // One-click ✕ — no reason form. Optimistic fade-and-remove.
       const btn = cardEl.querySelector(".not-interested-btn");
@@ -3749,6 +3850,25 @@
         return;
       }
 
+      // Enrich flush — open form
+      if (ev.target.closest("#enrich-btn")) {
+        const btn = document.getElementById("enrich-btn");
+        if (btn && !btn.disabled) showEnrichForm();
+        return;
+      }
+      // Enrich flush — confirm
+      if (ev.target.closest("#enrich-confirm")) {
+        const limit = parseInt(document.getElementById("enrich-limit-input").value, 10);
+        if (!limit || limit < 1) { showToast("Max rows must be at least 1.", true); return; }
+        startEnrich(limit);
+        return;
+      }
+      // Enrich flush — cancel
+      if (ev.target.closest("#enrich-cancel")) {
+        hideEnrichForm();
+        return;
+      }
+
       // Harvest — open form
       if (ev.target.closest("#gather-btn")) {
         const btn = document.getElementById("gather-btn");
@@ -4078,6 +4198,15 @@
         document.getElementById("judge-progress").hidden = false;
         setJudgeProgress(d.status);
         pollJudgeProgress();
+      }
+    }).catch(() => {});
+    // Same for an enrich flush in progress
+    fetch("/api/enrich/status").then(r => r.json()).then(d => {
+      if (d?.status?.running) {
+        document.getElementById("enrich-btn").disabled = true;
+        document.getElementById("enrich-progress").hidden = false;
+        setEnrichProgress(d.status);
+        pollEnrichProgress();
       }
     }).catch(() => {});
   </script>

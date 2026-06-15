@@ -888,6 +888,44 @@ def get_unculled_discoveries(
         conn.close()
 
 
+def get_enrichable_discoveries(
+    ats: str | None = None,
+    slug: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Discoveries that need an enrichment pass: never enriched
+    (enrichment_tier IS NULL) OR a prior attempt failed (='failed').
+
+    Unlike get_unenriched_discoveries, this includes 'failed' rows so a
+    single flush retries transient failures (timeouts, rate limits) too.
+    Excludes rejected rows — no point spending tokens on something culled.
+    """
+    clauses = [
+        "(enrichment_tier IS NULL OR enrichment_tier = 'failed')",
+        "(screened_status IS NULL OR screened_status != 'rejected')",
+    ]
+    params: list[Any] = []
+    if ats:
+        clauses.append("ats = ?")
+        params.append(ats)
+    if slug:
+        clauses.append("slug = ?")
+        params.append(slug)
+
+    sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY discovered_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def update_discovery_classification(
     discovery_id: int,
     *,
