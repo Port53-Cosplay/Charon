@@ -27,7 +27,7 @@ from charon.db import (
     get_unenriched_discoveries,
     update_discovery_enrichment,
 )
-from charon.enrich import ats_css, jsonld, llm
+from charon.enrich import ats_css, jsonld, llm, workday_cxs
 from charon.enrich.llm import LLMError
 from charon.fetcher import FetchError, extract_text, fetch_html
 
@@ -74,6 +74,29 @@ def enrich_discovery(
     url = discovery.get("url")
     if not url:
         return {"tier": "failed", "full_description": None, "error": "discovery has no URL"}
+
+    # Workday job pages are JS shells — the description lives only in the CXS
+    # JSON API, so the generic HTML tiers below can never see it. Go straight
+    # to the API. A closed/filled posting (403) is a real terminal state, not
+    # a retryable failure, so it gets its own 'closed' tier.
+    if workday_cxs.is_workday_url(url):
+        try:
+            desc = workday_cxs.extract_description(url)
+        except workday_cxs.WorkdayClosed:
+            return {
+                "tier": "closed",
+                "full_description": None,
+                "error": "Workday posting closed or filled",
+                "source_url": url,
+            }
+        if desc:
+            return {"tier": "workday_cxs", "full_description": desc, "source_url": url}
+        return {
+            "tier": "failed",
+            "full_description": None,
+            "error": "Workday CXS returned no description",
+            "source_url": url,
+        }
 
     try:
         html_str = fetch_html(url)
@@ -198,4 +221,5 @@ __all__ = [
     "ats_css",
     "jsonld",
     "llm",
+    "workday_cxs",
 ]

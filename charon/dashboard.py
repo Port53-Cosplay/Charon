@@ -451,6 +451,7 @@ _enrich_state: dict[str, Any] = {
     "processed": 0,
     "recovered": 0,   # got a usable description (any non-failed tier)
     "paid": 0,        # fell through to the paid LLM tier (ai_fallback)
+    "closed": 0,      # posting gone (e.g. Workday 403) — terminal, not retried
     "failed": 0,      # no description recovered
     "error": None,
 }
@@ -474,7 +475,9 @@ def _enrich_worker(limit: int, ats: str | None, slug: str | None) -> None:
         tier = result.get("tier")
         with _enrich_lock:
             _enrich_state["processed"] += 1
-            if tier == "failed" or result.get("error"):
+            if tier == "closed":
+                _enrich_state["closed"] += 1
+            elif tier == "failed" or result.get("error"):
                 _enrich_state["failed"] += 1
             else:
                 _enrich_state["recovered"] += 1
@@ -519,6 +522,7 @@ def _start_enrich_batch(
             "processed": 0,
             "recovered": 0,
             "paid": 0,
+            "closed": 0,
             "failed": 0,
             "error": None,
         })

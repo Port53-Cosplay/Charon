@@ -2037,7 +2037,7 @@
         <div id="enrich-progress" class="judge-progress" hidden>
           <span class="nums"><span id="enrich-processed">0</span>/<span id="enrich-total">0</span></span>
           <div class="progress-bar"><div class="progress-fill" id="enrich-fill"></div></div>
-          <span class="breakdown">recovered +<span id="enrich-recovered">0</span> · paid <span id="enrich-paid">0</span> · failed <span id="enrich-failed">0</span></span>
+          <span class="breakdown">recovered +<span id="enrich-recovered">0</span> · paid <span id="enrich-paid">0</span> · closed <span id="enrich-closed">0</span> · failed <span id="enrich-failed">0</span></span>
         </div>
         <div id="gathered-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading the queue…</div>
@@ -3340,6 +3340,7 @@
       document.getElementById("enrich-total").textContent = total;
       document.getElementById("enrich-recovered").textContent = state.recovered || 0;
       document.getElementById("enrich-paid").textContent = state.paid || 0;
+      document.getElementById("enrich-closed").textContent = state.closed || 0;
       document.getElementById("enrich-failed").textContent = state.failed || 0;
       const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 0;
       document.getElementById("enrich-fill").style.width = pct + "%";
@@ -3363,9 +3364,11 @@
             const rec = state.recovered || 0;
             const f = state.failed || 0;
             const paid = state.paid || 0;
+            const closed = state.closed || 0;
             const failPart = f > 0 ? `, ${f} still failed` : "";
+            const closedPart = closed > 0 ? `, ${closed} closed` : "";
             const paidPart = paid > 0 ? ` (${paid} via paid LLM)` : "";
-            showToast(`Enrich complete: ${rec} recovered${failPart}${paidPart}.`);
+            showToast(`Enrich complete: ${rec} recovered${closedPart}${failPart}${paidPart}.`);
             loadStats();
           }
         }
