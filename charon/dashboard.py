@@ -180,6 +180,15 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         gathered = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE judged_at IS NOT NULL")
         judged = cur.fetchone()[0]
+        # Split the cheap cull-rejections out of "judged" — they got a verdict
+        # from the DeepSeek cull pass, not from Sonnet. cull stamps a reason
+        # prefixed '[cull]'. judged_sonnet is the real, paid judging work.
+        cur.execute(
+            "SELECT COUNT(*) FROM discoveries WHERE judged_at IS NOT NULL "
+            "AND judgement_reason LIKE '[cull]%'"
+        )
+        culled = cur.fetchone()[0]
+        judged_sonnet = max(judged - culled, 0)
         # "Judgeable" = the actionable backlog: unjudged rows that actually
         # have a usable enriched description, i.e. exactly what the judge
         # picker (get_unjudged_discoveries, require_enriched=True) will grab.
@@ -243,6 +252,8 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
     out: dict[str, Any] = {
         "gathered": gathered,
         "judged": judged,
+        "judged_sonnet": judged_sonnet,
+        "culled": culled,
         "unjudged": max(gathered - judged, 0),
         "judgeable": judgeable,
         "awaiting_enrich": awaiting_enrich,
@@ -270,9 +281,9 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         # Funnel waterfall — six stages, each a strict subset of the prior.
         offered = app_buckets.get("offered", 0)
         out["funnel"] = [
-            {"label": "Gathered",  "count": gathered,   "key": "gathered"},
-            {"label": "Judged",    "count": judged,     "key": "judged"},
-            {"label": "Ready",     "count": ready,      "key": "ready"},
+            {"label": "Gathered",  "count": gathered,      "key": "gathered"},
+            {"label": "Judged",    "count": judged_sonnet, "key": "judged"},
+            {"label": "Ready",     "count": ready,         "key": "ready"},
             {"label": "Applied",   "count": total_apps, "key": "applied"},
             {"label": "Engaged",   "count": engaged,    "key": "engaged"},
             {"label": "Offered",   "count": offered,    "key": "offered"},
