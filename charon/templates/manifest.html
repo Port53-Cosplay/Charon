@@ -1952,12 +1952,12 @@
 
     <main class="main">
       <div id="stats-band" class="stats-band">
-        <div class="stat dim"><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div><div class="sub" id="stat-gathered-sub"></div></div>
-        <div class="stat dim"><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
-        <div class="stat"><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
-        <div class="stat"><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
-        <div class="stat dim"><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
-        <div class="stat"><div class="num placeholder" id="stat-reply-rate">—</div><div class="label">Reply rate</div></div>
+        <div class="stat dim" title="Every posting Charon has ever pulled in. The smaller 'as of' date is your most recent harvest, so you can tell how fresh the pool is."><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div><div class="sub" id="stat-gathered-sub"></div></div>
+        <div class="stat dim" title="Postings the AI judge has scored — ready or refused. 'waiting' is the enriched postings not yet scored; that's exactly what 'Judge more' will pick up. (Closed/un-enrichable postings aren't counted as waiting.)"><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
+        <div class="stat" title="Postings that passed judging and are worth applying to. These show on the Ready tab."><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
+        <div class="stat" title="Applications you've submitted and are tracking."><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
+        <div class="stat dim" title="Applications that went silent — no response after applying (ghosted)."><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
+        <div class="stat" title="Share of your applications that got any reply back (interview, response, or offer) — not counting ghosted or still-pending ones."><div class="num placeholder" id="stat-reply-rate">—</div><div class="label">Reply rate</div></div>
         <button id="open-charts-btn" class="chart-link" title="Open visual breakdown" aria-label="Open visual breakdown">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="3" y1="20" x2="21" y2="20"></line>
@@ -1969,7 +1969,7 @@
       </div>
 
       <section class="tab-pane" data-pane="gathered" hidden>
-        <div class="awaiting-header" id="awaiting-header">
+        <div class="awaiting-header" id="awaiting-header" title="Left number: postings sitting in this queue waiting for a judge pass (enriched, not yet scored, not closed). Right number: every posting ever gathered, lifetime. Run 'Judge more' on the Ready tab to score the queue down.">
           <span><strong id="awaiting-count">—</strong> of <strong id="awaiting-lifetime">—</strong> lifetime · waiting to be scored</span>
         </div>
         <div class="pane-toolbar">

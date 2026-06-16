@@ -100,7 +100,7 @@ def _gathered_discoveries(limit: int = 200) -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT * FROM discoveries "
             "WHERE judged_at IS NULL "
-            "AND (enrichment_tier IS NULL OR enrichment_tier != 'failed') "
+            "AND (enrichment_tier IS NULL OR enrichment_tier NOT IN ('failed', 'closed')) "
             "ORDER BY discovered_at DESC "
             "LIMIT ?",
             (limit,),
@@ -1590,7 +1590,7 @@ class _Handler(BaseHTTPRequestHandler):
                 total = conn.execute(
                     "SELECT COUNT(*) FROM discoveries "
                     "WHERE judged_at IS NULL "
-                    "AND (enrichment_tier IS NULL OR enrichment_tier != 'failed')"
+                    "AND (enrichment_tier IS NULL OR enrichment_tier NOT IN ('failed', 'closed'))"
                 ).fetchone()[0]
             finally:
                 conn.close()
