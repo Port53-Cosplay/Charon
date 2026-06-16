@@ -2432,7 +2432,7 @@ def _print_judge_line(result: dict, threshold: float | None = None) -> None:
 @click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
 @click.option("--force", is_flag=True, help="Overwrite existing offerings folder.")
 @click.option("--model", "model_override", default=None,
-              help="Override forge.model for this run (e.g. claude-sonnet-4-20250514).")
+              help="Override forge.model for this run (e.g. claude-sonnet-4-6).")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
 def forge_cmd(
     discovery_id: int | None,

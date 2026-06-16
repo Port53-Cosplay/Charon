@@ -3,7 +3,7 @@
 Pluggable model routing:
 
   model: "claude-haiku-4-5"               -> native Anthropic SDK
-  model: "claude-sonnet-4-20250514"        -> native Anthropic SDK
+  model: "claude-sonnet-4-6"               -> native Anthropic SDK
   model: "openrouter:anthropic/claude-haiku-4-5"
   model: "openrouter:google/gemini-flash-2-0"
   model: "openrouter:deepseek/deepseek-chat"

@@ -12,7 +12,7 @@ import httpx
 from charon.output import print_error
 
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 DEFAULT_TEMPERATURE = 0.2
 MAX_TOKENS = 4096
 
