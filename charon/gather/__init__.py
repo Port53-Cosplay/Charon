@@ -39,6 +39,7 @@ ADAPTERS: dict[str, str] = {
     "lever": "charon.gather.lever",
     "ashby": "charon.gather.ashby",
     "workday": "charon.gather.workday",
+    "successfactors": "charon.gather.successfactors",
 }
 
 DEFAULT_RATE_LIMIT_SECONDS = 1.0

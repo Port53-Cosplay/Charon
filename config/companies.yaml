@@ -130,6 +130,20 @@ gather:
       notes: "Security ratings / TPRM. Sample role: Principal Vulnerability Researcher."
       workday: { tenant: bitsight, wd: wd1, site: Bitsight }
 
+  # ─── SAP SuccessFactors (per-host HTML scrape) ───────────────────────────
+  # No public JSON API — the adapter scrapes the Career Site Builder search
+  # page (jobs.<host>/search/) and paginates by startrow. End-user employers
+  # hiring internal security/IT, not security vendors, so tier/category are a
+  # rough fit at best. Full descriptions come from `enrich` (these pages carry
+  # schema.org JobPosting JSON-LD).
+  successfactors:
+    - slug: eastman
+      name: "Eastman Chemical"
+      tier: tier_1
+      category: enterprise_it
+      notes: "Local employer, HQ Kingsport TN. Commercial specialty-chemical co hiring an internal security/IT team (SOC, IAM, GRC, appsec), not a security vendor. Small board (~100 roles worldwide) — cull filters the non-security ones. Verified 2026-07-22: SuccessFactors CSB at jobs.eastman.com."
+      successfactors: { host: jobs.eastman.com }
+
   # ─── Rippling ATS (disabled — adapter not yet implemented) ──────────────
   # Rippling has its own ATS at {company}.rippling-ats.com and ats.rippling.com.
   # Public API surface unverified. These employers were detected on Rippling

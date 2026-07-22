@@ -38,6 +38,11 @@ SELECTORS: dict[str, list[str]] = {
         "div.PCPB",
         "div[data-automation-id='job-postingDescription']",
     ],
+    "successfactors": [
+        "div.jobdescription",
+        "span.jobdescription",
+        "div.job",
+    ],
 }
 
 
