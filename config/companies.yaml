@@ -106,8 +106,8 @@ gather:
       name: "Schellman"
       tier: tier_1
       category: audit
-      notes: "Audit firm — SOC 2 / ISO / PCI"
-      workday: { tenant: schellman, wd: wd1, site: Careers }
+      notes: "Audit firm — SOC 2 / ISO / PCI. wd504 data center (was wd1 — Workday migrated; wd1 now 422s)."
+      workday: { tenant: schellman, wd: wd504, site: Careers }
 
     - slug: crowdstrike
       name: "CrowdStrike"
