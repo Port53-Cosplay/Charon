@@ -549,7 +549,7 @@ def _cull_status_snapshot() -> dict[str, Any]:
 
 
 def _cull_worker(limit: int, ats: str | None, slug: str | None) -> None:
-    from charon.cull import CullError, apply_cull_decision, cull_one
+    from charon.cull import cull_batch
     from charon.db import get_unculled_discoveries
     from charon.profile import load_profile
 
@@ -574,33 +574,30 @@ def _cull_worker(limit: int, ats: str | None, slug: str | None) -> None:
     with _cull_lock:
         _cull_state["limit"] = len(rows)
 
-    for row in rows:
-        try:
-            decision = cull_one(row, profile)
-            outcome = apply_cull_decision(row["id"], decision)
-            with _cull_lock:
-                _cull_state["processed"] += 1
-                if outcome == "refused":
-                    _cull_state["refused"] += 1
-                else:
-                    _cull_state["passed"] += 1
-        except CullError as e:
-            # Rate limit / API failure / unparseable response — skip, continue
-            with _cull_lock:
-                _cull_state["processed"] += 1
+    def _on_result(row: dict, outcome: str | None, error: Exception | None) -> None:
+        # Runs in this worker thread (the cull_batch result loop), not the pool
+        # workers — so the DB write already happened and this is safe under lock.
+        with _cull_lock:
+            _cull_state["processed"] += 1
+            if error is not None:
                 _cull_state["errors"] += 1
                 if _cull_state["error"] is None:
-                    _cull_state["error"] = str(e)
-        except Exception as e:  # noqa: BLE001
-            with _cull_lock:
-                _cull_state["processed"] += 1
-                _cull_state["errors"] += 1
-                if _cull_state["error"] is None:
-                    _cull_state["error"] = f"{type(e).__name__}: {e}"
+                    _cull_state["error"] = str(error)
+            elif outcome == "refused":
+                _cull_state["refused"] += 1
+            else:
+                _cull_state["passed"] += 1
 
-    with _cull_lock:
-        _cull_state["running"] = False
-        _cull_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        cull_batch(rows, profile, on_result=_on_result)
+    except Exception as e:  # noqa: BLE001
+        with _cull_lock:
+            if _cull_state["error"] is None:
+                _cull_state["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        with _cull_lock:
+            _cull_state["running"] = False
+            _cull_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def _start_cull_batch(

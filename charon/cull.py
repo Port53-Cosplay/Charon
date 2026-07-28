@@ -24,7 +24,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Iterable, Optional
 
 
 class CullError(Exception):
@@ -33,6 +34,11 @@ class CullError(Exception):
 
 _DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 _DEEPSEEK_MODEL = "deepseek-chat"
+
+# Cull is I/O-bound (one DeepSeek HTTP call per row), so the network calls run
+# in a thread pool. 8 is a conservative default; override with the
+# CHARON_CULL_CONCURRENCY env var if DeepSeek's rate limits allow more.
+DEFAULT_CULL_CONCURRENCY = 8
 _SYSTEM_PROMPT = """You are a security-job filter for a candidate searching for defensive cybersecurity roles. Your only job is to drop the most-obviously-wrong postings before they get expensive analysis.
 
 You see only the role title, company, and location — no description. That is intentional.
@@ -191,4 +197,54 @@ def apply_cull_decision(
     return "passed"
 
 
-__all__ = ["CullError", "cull_one", "apply_cull_decision"]
+def _resolve_concurrency(concurrency: Optional[int]) -> int:
+    """Pick the worker count: explicit arg, else CHARON_CULL_CONCURRENCY, else default."""
+    if concurrency is not None:
+        return max(1, concurrency)
+    env = os.environ.get("CHARON_CULL_CONCURRENCY", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return DEFAULT_CULL_CONCURRENCY
+
+
+def cull_batch(
+    rows: Iterable[dict[str, Any]],
+    profile: dict[str, Any],
+    *,
+    concurrency: Optional[int] = None,
+    on_result: Optional[Callable[[dict[str, Any], Optional[str], Optional[Exception]], None]] = None,
+) -> None:
+    """Cull many rows, running the DeepSeek calls concurrently.
+
+    The network call (`cull_one`) runs in a thread pool; the DB write
+    (`apply_cull_decision`) runs in the CALLING thread as each result lands, so
+    SQLite access stays single-threaded (same thread that owns the connection).
+
+    `on_result(row, outcome, error)` is invoked once per row, in the calling
+    thread — `outcome` is 'passed'/'refused' on success (error None), or `error`
+    is the exception and outcome is None on failure. Use it for progress
+    counters. Exceptions never propagate out of the pool; each row is isolated.
+    """
+    rows = list(rows)
+    if not rows:
+        return
+    workers = min(_resolve_concurrency(concurrency), len(rows))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(cull_one, row, profile): row for row in rows}
+        for fut in as_completed(futures):
+            row = futures[fut]
+            try:
+                decision = fut.result()
+                outcome = apply_cull_decision(row["id"], decision)
+                if on_result:
+                    on_result(row, outcome, None)
+            except CullError as e:
+                if on_result:
+                    on_result(row, None, e)
+            except Exception as e:  # noqa: BLE001
+                if on_result:
+                    on_result(row, None, e)
+
+
+__all__ = ["CullError", "cull_one", "apply_cull_decision", "cull_batch"]
