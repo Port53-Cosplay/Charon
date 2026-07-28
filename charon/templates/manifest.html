@@ -1930,7 +1930,7 @@
           <span class="tab-label">Awaiting</span><span class="tab-count" id="count-gathered">—</span>
         </button>
         <button class="nav-action" id="ferry-btn" title="Run the whole crossing: harvest fresh postings, cull the obvious non-fits, enrich descriptions — then pause for one confirm before the paid judge.">
-          <span class="nav-action-label">⛵ Ferry them across</span><span class="nav-action-count" id="ferry-nav-state" hidden></span>
+          <span class="nav-action-label" id="ferry-label">⛵ Ferry them across</span><span class="nav-action-count" id="ferry-nav-state" hidden></span>
         </button>
         <button class="tab active" data-tab="ready">
           <img class="tab-icon" src="/static/charon_compass.png" alt="">
@@ -3147,14 +3147,24 @@
       const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
       document.getElementById("ferry-fill").style.width = pct + "%";
       document.getElementById("ferry-breakdown").textContent = breakdown;
-      // Nav pill mirrors the phase so progress is visible from any tab.
+      // The nav button changes identity with the state, so a click always
+      // does what the label says: start / watch / review. It NEVER starts
+      // a new crossing while one is underway or paused.
+      const btn = document.getElementById("ferry-btn");
+      const navLabel = document.getElementById("ferry-label");
       if (ferryState.running && info) {
+        navLabel.textContent = "⛵ Crossing — watch";
+        btn.title = "The ferry is underway. Click to watch its progress (this never starts another crossing).";
         navPill.textContent = `${info.nav} ${done}/${total}`;
         navPill.hidden = false;
       } else if (phase === "awaiting_judge") {
-        navPill.textContent = "⚖ waiting";
+        navLabel.textContent = "⚖ At the judge gate";
+        btn.title = "The crossing is done — souls await the judge. Click to review the count and cost, then decide.";
+        navPill.textContent = `${ferryState.judgeable_count || 0} waiting`;
         navPill.hidden = false;
       } else {
+        navLabel.textContent = "⛵ Ferry them across";
+        btn.title = "Run the whole crossing: harvest fresh postings, cull the obvious non-fits, enrich descriptions — then pause for one confirm before the paid judge.";
         navPill.hidden = true;
       }
     }
