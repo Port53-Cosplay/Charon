@@ -15,6 +15,7 @@ import importlib
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit, urlunsplit
@@ -43,6 +44,22 @@ ADAPTERS: dict[str, str] = {
 }
 
 DEFAULT_RATE_LIMIT_SECONDS = 1.0
+
+# Employers gather in a bounded thread pool — full-registry runs drop from
+# minutes to seconds. DB inserts are short WAL transactions (busy_timeout in
+# db.py absorbs writer contention); adapters keep their own per-page delays.
+DEFAULT_GATHER_WORKERS = 4
+MAX_GATHER_WORKERS = 8
+
+
+def _resolve_workers(workers: int | None) -> int:
+    """Pick the pool size: explicit arg, else CHARON_GATHER_WORKERS, else default."""
+    if workers is not None:
+        return max(1, min(workers, MAX_GATHER_WORKERS))
+    env = os.environ.get("CHARON_GATHER_WORKERS", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return min(int(env), MAX_GATHER_WORKERS)
+    return DEFAULT_GATHER_WORKERS
 
 
 # ── registry ─────────────────────────────────────────────────────────
@@ -299,6 +316,7 @@ def gather_registry(
     slug: str | None = None,
     dry_run: bool = False,
     rate_limit_seconds: float = DEFAULT_RATE_LIMIT_SECONDS,
+    workers: int | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Run gather across the registry.
@@ -307,10 +325,16 @@ def gather_registry(
         ats: limit to one ATS (e.g. 'greenhouse')
         slug: limit to one employer (must match registry slug)
         dry_run: don't write to DB, just count what would happen
-        rate_limit_seconds: sleep between employer fetches (politeness)
+        rate_limit_seconds: sleep between employer fetches (politeness;
+            sequential path only — the parallel path relies on adapters'
+            own per-page delays)
+        workers: employer fetches run in a thread pool of this size
+            (default CHARON_GATHER_WORKERS or 4, cap 8); 1 = sequential
         on_progress: callback invoked with each employer summary
+            (always on the calling thread)
 
-    Returns a list of per-employer summaries.
+    Returns a list of per-employer summaries. On the parallel path the
+    list is in completion order, not registry order.
     """
     registry = load_registry()
     pairs = list_employers(registry, ats=ats)
@@ -323,31 +347,76 @@ def gather_registry(
     skip_companies = get_applied_companies()
     summaries: list[dict[str, Any]] = []
 
-    for i, (ats_name, entry) in enumerate(pairs):
-        # Skip ATSs whose adapter isn't implemented yet — surface clearly,
-        # don't fail the whole run.
+    # Skip ATSs whose adapter isn't implemented yet — surface clearly,
+    # don't fail the whole run (and never send them to the pool).
+    def _unimplemented_summary(ats_name: str, entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ats": ats_name,
+            "slug": entry.get("slug", "?"),
+            "name": entry.get("name", entry.get("slug", "?")),
+            "fetched": 0,
+            "new": 0,
+            "dupes": 0,
+            "skipped": 0,
+            "error": f"adapter for '{ats_name}' not yet implemented",
+        }
+
+    pool_size = min(_resolve_workers(workers), len(pairs))
+
+    if pool_size <= 1 or len(pairs) <= 1:
+        for i, (ats_name, entry) in enumerate(pairs):
+            if ats_name not in ADAPTERS:
+                summary = _unimplemented_summary(ats_name, entry)
+            else:
+                summary = gather_employer(
+                    ats_name,
+                    entry,
+                    dry_run=dry_run,
+                    skip_companies=skip_companies,
+                )
+            summaries.append(summary)
+            if on_progress:
+                on_progress(summary)
+            if i < len(pairs) - 1 and rate_limit_seconds > 0:
+                time.sleep(rate_limit_seconds)
+        return summaries
+
+    known = []
+    for ats_name, entry in pairs:
         if ats_name not in ADAPTERS:
-            summary = {
-                "ats": ats_name,
-                "slug": entry.get("slug", "?"),
-                "name": entry.get("name", entry.get("slug", "?")),
-                "fetched": 0,
-                "new": 0,
-                "dupes": 0,
-                "skipped": 0,
-                "error": f"adapter for '{ats_name}' not yet implemented",
-            }
+            summary = _unimplemented_summary(ats_name, entry)
+            summaries.append(summary)
+            if on_progress:
+                on_progress(summary)
         else:
-            summary = gather_employer(
+            known.append((ats_name, entry))
+
+    with ThreadPoolExecutor(max_workers=min(pool_size, max(1, len(known)))) as pool:
+        futures = {
+            pool.submit(
+                gather_employer,
                 ats_name,
                 entry,
                 dry_run=dry_run,
                 skip_companies=skip_companies,
-            )
-        summaries.append(summary)
-        if on_progress:
-            on_progress(summary)
-        if i < len(pairs) - 1 and rate_limit_seconds > 0:
-            time.sleep(rate_limit_seconds)
+            ): (ats_name, entry)
+            for ats_name, entry in known
+        }
+        try:
+            for fut in as_completed(futures):
+                ats_name, entry = futures[fut]
+                try:
+                    summary = fut.result()
+                except Exception as e:  # noqa: BLE001 — isolate; don't kill the run
+                    summary = _unimplemented_summary(ats_name, entry)
+                    summary["error"] = f"{type(e).__name__}: {e}"
+                summaries.append(summary)
+                if on_progress:
+                    on_progress(summary)
+        except BaseException:
+            # Ctrl-C: drop queued employers, let in-flight ones finish, propagate.
+            for f in futures:
+                f.cancel()
+            raise
 
     return summaries

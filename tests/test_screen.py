@@ -694,11 +694,37 @@ class TestKeyboardInterruptPropagates:
         monkeypatch.setattr(screen, "analyze_role_alignment", lambda t, r: {"alignment_score": 80})
 
         with pytest.raises(KeyboardInterrupt):
-            judge_batch(profile=PROFILE)
+            judge_batch(profile=PROFILE, workers=1)
 
-        # Only the first analyzer call should have happened — the loop
-        # must NOT have advanced to the second row
+        # Only the first analyzer call should have happened — the
+        # sequential loop must NOT have advanced to the second row
         assert call_count["n"] == 1
+
+    def test_keyboard_interrupt_cancels_queued_parallel_rows(self, monkeypatch):
+        # Parallel path: KeyboardInterrupt propagates and queued (unstarted)
+        # rows are cancelled — in-flight rows may finish, but the batch
+        # never works through the whole queue.
+        import time as time_mod
+
+        targets = [{"id": i, "company": f"c{i}", "role": "r"} for i in range(6)]
+        monkeypatch.setattr(screen, "get_unjudged_discoveries", lambda **kw: targets)
+        monkeypatch.setattr(screen, "_maybe_load_resume", lambda p: None)
+
+        call_count = {"n": 0}
+
+        def fake_judge_one_id(did, **kw):
+            call_count["n"] += 1
+            if did == 0:
+                raise KeyboardInterrupt
+            time_mod.sleep(0.2)
+            return {"discovery_id": did, "screened_status": "ready"}
+
+        monkeypatch.setattr(screen, "judge_one_id", fake_judge_one_id)
+
+        with pytest.raises(KeyboardInterrupt):
+            judge_batch(profile=PROFILE, workers=2)
+
+        assert call_count["n"] < 6
 
 
 class TestStats:

@@ -1929,8 +1929,8 @@
           <img class="tab-icon" src="/static/charon_rune.png" alt="">
           <span class="tab-label">Awaiting</span><span class="tab-count" id="count-gathered">—</span>
         </button>
-        <button class="nav-action" id="enrich-btn" hidden title="Fetch full descriptions for rows still awaiting enrich (free sources first, paid LLM only for stragglers; also retries past failures).">
-          <span class="nav-action-label">↳ Enrich waiting</span><span class="nav-action-count" id="enrich-nav-count">0</span>
+        <button class="nav-action" id="ferry-btn" title="Run the whole crossing: harvest fresh postings, cull the obvious non-fits, enrich descriptions — then pause for one confirm before the paid judge.">
+          <span class="nav-action-label">⛵ Ferry them across</span><span class="nav-action-count" id="ferry-nav-state" hidden></span>
         </button>
         <button class="tab active" data-tab="ready">
           <img class="tab-icon" src="/static/charon_compass.png" alt="">
@@ -1955,7 +1955,7 @@
       <div id="stats-band" class="stats-band">
         <div class="stat dim" title="Every posting Charon has ever pulled in. The smaller 'as of' date is your most recent harvest, so you can tell how fresh the pool is."><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div><div class="sub" id="stat-gathered-sub"></div></div>
         <div class="stat dim" title="Postings dropped by the cheap cull pass (DeepSeek) before any Sonnet spend — obvious non-fits filtered on title/company/location alone. Every one here is a posting the expensive judge never had to touch."><div class="num placeholder" id="stat-culled">—</div><div class="label">Culled</div></div>
-        <div class="stat dim" title="Postings actually scored by Sonnet — the deep judge — ending up ready or refused. Cheap cull-rejections are counted separately under Culled, not here. 'waiting' is the enriched postings not yet scored; that's what 'Judge more' picks up next."><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
+        <div class="stat dim" title="Postings actually scored by Sonnet — the deep judge — ending up ready or refused. Cheap cull-rejections are counted separately under Culled, not here. 'waiting' is the enriched postings not yet scored; the ferry pauses to ask before judging them."><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
         <div class="stat" title="Postings that passed judging and are worth applying to. These show on the Ready tab."><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
         <div class="stat" title="Applications you've submitted and are tracking."><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
         <div class="stat dim" title="Applications that went silent — no response after applying (ghosted)."><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
@@ -1971,75 +1971,21 @@
       </div>
 
       <section class="tab-pane" data-pane="gathered" hidden>
-        <div class="awaiting-header" id="awaiting-header" title="Left number: postings sitting in this queue waiting for a judge pass (enriched, not yet scored, not closed). Right number: every posting ever gathered, lifetime. Run 'Judge more' on the Ready tab to score the queue down.">
-          <span><strong id="awaiting-count">—</strong> of <strong id="awaiting-lifetime">—</strong> lifetime · waiting to be scored</span>
+        <div class="awaiting-header" id="awaiting-header" title="Stage backlogs for the queue. Stages overlap — a fresh posting needs cull AND enrich before it can be judged. The ferry works all three in order.">
+          <span><strong id="awaiting-count">—</strong> in queue · <span id="awaiting-cull">—</span> to cull · <span id="awaiting-enrich-n">—</span> to enrich · <span id="awaiting-judge-n">—</span> to judge · <strong id="awaiting-lifetime">—</strong> lifetime</span>
         </div>
-        <div class="pane-toolbar">
-          <button id="gather-btn" title="Harvest fresh job postings from configured employers">Harvest from sources</button>
-          <button id="cull-btn" title="Run a free Gemini pre-judge pass — kills obvious non-fits before Sonnet sees them">Cull the queue</button>
+        <div id="ferry-progress" class="judge-progress" hidden>
+          <span class="nums" id="ferry-phase-label">Harvest</span>
+          <span class="nums"><span id="ferry-done">0</span>/<span id="ferry-total">0</span></span>
+          <div class="progress-bar"><div class="progress-fill" id="ferry-fill"></div></div>
+          <span class="breakdown" id="ferry-breakdown"></span>
         </div>
-        <div id="gather-form" class="judge-form" hidden>
-          <label>ATS:
-            <select id="gather-ats-input">
-              <option value="">all</option>
-              <option value="greenhouse">greenhouse</option>
-              <option value="lever">lever</option>
-              <option value="ashby">ashby</option>
-              <option value="workday">workday</option>
-            </select>
-          </label>
-          <label>Slug:
-            <input type="text" id="gather-slug-input" placeholder="(optional, one employer)" style="width:160px">
-          </label>
-          <label style="display:flex;align-items:center;gap:5px">
-            <input type="checkbox" id="gather-dryrun-input"> dry-run
-          </label>
-          <span class="cost-est">No API spend · ~1 min for all employers</span>
+        <div id="ferry-banner" class="judge-form" hidden>
+          <span class="cost-est"><strong id="ferry-souls">0</strong> souls at the bank · judging ≈ <span id="ferry-cost">$0–$0</span> · ~<span id="ferry-time">—</span> min</span>
           <div class="spacer"></div>
-          <button class="cancel-btn" id="gather-cancel">Cancel</button>
-          <button class="confirm-btn" id="gather-confirm">Harvest</button>
-        </div>
-        <div id="gather-progress" class="judge-progress" hidden>
-          <span class="nums"><span id="gather-completed">0</span>/<span id="gather-total">0</span></span>
-          <div class="progress-bar"><div class="progress-fill" id="gather-fill"></div></div>
-          <span class="breakdown">new +<span id="gather-new">0</span> · dupes <span id="gather-dupes">0</span> · errors <span id="gather-errors">0</span></span>
-        </div>
-        <div id="cull-form" class="judge-form" hidden>
-          <label>Batch size:
-            <input type="number" id="cull-limit-input" min="1" max="500" value="100">
-          </label>
-          <label>ATS:
-            <select id="cull-ats-input">
-              <option value="">all</option>
-              <option value="greenhouse">greenhouse</option>
-              <option value="lever">lever</option>
-              <option value="ashby">ashby</option>
-              <option value="workday">workday</option>
-            </select>
-          </label>
-          <span class="cost-est">DeepSeek V3 · ~$0.0001/row · ~2 sec/row</span>
-          <div class="spacer"></div>
-          <button class="cancel-btn" id="cull-cancel">Cancel</button>
-          <button class="confirm-btn" id="cull-confirm">Cull</button>
-        </div>
-        <div id="cull-progress" class="judge-progress" hidden>
-          <span class="nums"><span id="cull-processed">0</span>/<span id="cull-total">0</span></span>
-          <div class="progress-bar"><div class="progress-fill" id="cull-fill"></div></div>
-          <span class="breakdown">passed +<span id="cull-passed">0</span> · refused +<span id="cull-refused">0</span> · errors <span id="cull-errors">0</span></span>
-        </div>
-        <div id="enrich-form" class="judge-form" hidden>
-          <label>Max rows:
-            <input type="number" id="enrich-limit-input" min="1" max="1000" value="500">
-          </label>
-          <span class="cost-est">Free tiers first (JSON-LD / ATS scrape) · only stragglers hit the paid LLM · ~1–2 sec/row</span>
-          <div class="spacer"></div>
-          <button class="cancel-btn" id="enrich-cancel">Cancel</button>
-          <button class="confirm-btn" id="enrich-confirm">Flush</button>
-        </div>
-        <div id="enrich-progress" class="judge-progress" hidden>
-          <span class="nums"><span id="enrich-processed">0</span>/<span id="enrich-total">0</span></span>
-          <div class="progress-bar"><div class="progress-fill" id="enrich-fill"></div></div>
-          <span class="breakdown">recovered +<span id="enrich-recovered">0</span> · paid <span id="enrich-paid">0</span> · closed <span id="enrich-closed">0</span> · failed <span id="enrich-failed">0</span></span>
+          <button class="cancel-btn" id="ferry-not-now">Not now</button>
+          <button class="confirm-btn" id="ferry-paste-prompt" title="Free — judge via a Claude Code paste, no API spend">Paste prompt</button>
+          <button class="confirm-btn" id="ferry-judge-confirm">Judge them</button>
         </div>
         <div id="gathered-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading the queue…</div>
@@ -2048,31 +1994,7 @@
 
       <section class="tab-pane" data-pane="ready">
         <div class="pane-toolbar">
-          <button id="judge-more-btn" title="Score more unjudged discoveries">Judge more</button>
-        </div>
-        <div id="judge-form" class="judge-form" hidden>
-          <label>Batch size:
-            <input type="number" id="judge-limit-input" min="1" max="500" value="100">
-          </label>
-          <label>Tier:
-            <select id="judge-tier-input">
-              <option value="">any</option>
-              <option value="tier_1">tier_1 only</option>
-              <option value="tier_2">tier_2 only</option>
-              <option value="tier_3">tier_3 only</option>
-              <option value="tier_1,tier_2">tier_1 + 2 (high-signal first)</option>
-            </select>
-          </label>
-          <span class="cost-est">≈ <span id="judge-cost">$2–$5</span> in API spend · <span id="judge-time">5–10 min</span></span>
-          <div class="spacer"></div>
-          <button class="cancel-btn" id="judge-cancel">Cancel</button>
-          <button class="confirm-btn" id="judge-paste-prompt" title="Generate a prompt to paste into Claude Code — no API spend">Generate paste prompt</button>
-          <button class="confirm-btn" id="judge-confirm">Confirm (use API)</button>
-        </div>
-        <div id="judge-progress" class="judge-progress" hidden>
-          <span class="nums"><span id="judge-processed">0</span>/<span id="judge-total">0</span></span>
-          <div class="progress-bar"><div class="progress-fill" id="judge-fill"></div></div>
-          <span class="breakdown">ready +<span id="judge-ready-added">0</span> · refused +<span id="judge-refused-added">0</span> · skipped <span id="judge-skipped">0</span></span>
+          <button id="paste-judge-btn" title="Generate a free paste-judge prompt (up to 25 rows) for Claude Code — no API spend">Paste-judge (free)</button>
         </div>
         <div id="list-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading…</div>
@@ -2489,15 +2411,11 @@
         setStat("stat-judged", (s.judged_sonnet != null) ? s.judged_sonnet : s.judged);
         setStatSub("stat-gathered-sub", s.last_gather ? `as of ${fmtShortDate(s.last_gather)}` : "");
         setStatSub("stat-judged-sub", (s.judgeable != null) ? `${s.judgeable} waiting` : "");
-        // Enrich sub-action under Awaiting: show only when something needs it.
-        const enrichBtn = document.getElementById("enrich-btn");
-        if (enrichBtn) {
-          const n = s.awaiting_enrich || 0;
-          document.getElementById("enrich-nav-count").textContent = n;
-          // Don't yank it out from under an in-progress flush.
-          const flushing = !document.getElementById("enrich-progress").hidden;
-          enrichBtn.hidden = (n === 0 && !flushing);
-        }
+        // Awaiting header: per-stage backlogs (they overlap — a fresh row
+        // needs cull AND enrich before it can be judged).
+        document.getElementById("awaiting-cull").textContent = s.cullable ?? "—";
+        document.getElementById("awaiting-enrich-n").textContent = s.awaiting_enrich ?? "—";
+        document.getElementById("awaiting-judge-n").textContent = s.judgeable ?? "—";
         setStat("stat-ready", s.ready);
         setStat("stat-applied", s.applied_total);
         setStat("stat-stranded", s.stranded);
@@ -2710,14 +2628,14 @@
         container.innerHTML = `
           <div class="state">
             <div class="glyph">·</div>
-            Nothing waiting in the queue. Run <code>charon gather</code> to pull new postings.
+            Nothing waiting in the queue. The ferry will bring more souls to the bank.
           </div>`;
         return;
       }
       const cards = gathered.map(renderGatheredCard).join("");
       const capped = (total != null && total > gathered.length)
         ? `<div class="state" style="padding:14px 20px;text-align:left;font-size:12px;border-style:solid;border-color:var(--card-border);margin-top:14px">
-             Showing the <strong>${gathered.length}</strong> newest of <strong>${total}</strong> queued. Use <strong>Judge more</strong> on the Ready tab to score them.
+             Showing the <strong>${gathered.length}</strong> newest of <strong>${total}</strong> queued. Run the <strong>ferry</strong> to work the queue down.
            </div>`
         : "";
       container.innerHTML = cards + capped;
@@ -3185,44 +3103,148 @@
       }
     }
 
-    // ── Judge more (Ready pane) ────────────────────────────────
+    // ── The ferry (one-button pipeline) ────────────────────────
+    // One chained crossing: harvest → cull → enrich, then a pause at the
+    // judge gate (the server holds phase='awaiting_judge' until confirmed,
+    // so the banner survives reloads). The legacy per-stage endpoints
+    // still exist for the CLI; the UI only drives the ferry.
 
-    function updateJudgeCostEstimate() {
-      const n = parseInt(document.getElementById("judge-limit-input").value, 10) || 0;
-      const lo = (n * 0.02).toFixed(2);
-      const hi = (n * 0.05).toFixed(2);
-      document.getElementById("judge-cost").textContent = `$${lo}–$${hi}`;
-      // Roughly 3-6s per row on Sonnet
-      const minS = Math.round(n * 3 / 60);
-      const maxS = Math.round(n * 6 / 60);
-      const t = (minS < 1 && maxS < 1)
-        ? "under a minute"
-        : `${Math.max(minS, 1)}–${maxS} min`;
-      document.getElementById("judge-time").textContent = t;
+    let ferryState = {};
+
+    const FERRY_PHASES = {
+      gather: { label: "Harvest", nav: "harvest" },
+      cull: { label: "Cull", nav: "cull" },
+      enrich: { label: "Enrich", nav: "enrich" },
+      judge: { label: "Judge", nav: "judging" },
+    };
+
+    function setFerryProgress(state) {
+      ferryState = state || {};
+      const phase = ferryState.phase;
+      const info = FERRY_PHASES[phase];
+      const navPill = document.getElementById("ferry-nav-state");
+      let done = 0, total = 0, breakdown = "";
+      if (phase === "gather") {
+        const g = ferryState.gather || {};
+        done = g.completed_employers || 0; total = g.total_employers || 0;
+        breakdown = `new +${g.total_new || 0} · dupes ${g.total_dupes || 0} · errors ${g.total_errors || 0}`;
+      } else if (phase === "cull") {
+        const c = ferryState.cull || {};
+        done = c.processed || 0; total = c.limit || 0;
+        breakdown = `passed +${c.passed || 0} · refused +${c.refused || 0} · errors ${c.errors || 0}`;
+      } else if (phase === "enrich") {
+        const en = ferryState.enrich || {};
+        done = en.processed || 0; total = en.limit || 0;
+        breakdown = `recovered +${en.recovered || 0} · paid ${en.paid || 0} · closed ${en.closed || 0} · failed ${en.failed || 0}`;
+      } else if (phase === "judge") {
+        const j = ferryState.judge || {};
+        done = j.processed || 0; total = j.limit || 0;
+        breakdown = `ready +${j.ready_added || 0} · refused +${j.refused_added || 0} · skipped ${j.skipped || 0}`;
+      }
+      document.getElementById("ferry-phase-label").textContent = info ? info.label : "";
+      document.getElementById("ferry-done").textContent = done;
+      document.getElementById("ferry-total").textContent = total;
+      const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+      document.getElementById("ferry-fill").style.width = pct + "%";
+      document.getElementById("ferry-breakdown").textContent = breakdown;
+      // Nav pill mirrors the phase so progress is visible from any tab.
+      if (ferryState.running && info) {
+        navPill.textContent = `${info.nav} ${done}/${total}`;
+        navPill.hidden = false;
+      } else if (phase === "awaiting_judge") {
+        navPill.textContent = "⚖ waiting";
+        navPill.hidden = false;
+      } else {
+        navPill.hidden = true;
+      }
     }
 
-    function showJudgeForm() {
-      document.getElementById("judge-form").hidden = false;
-      document.getElementById("judge-more-btn").disabled = true;
-      updateJudgeCostEstimate();
-      document.getElementById("judge-limit-input").focus();
+    function showFerryBanner(state) {
+      document.getElementById("ferry-souls").textContent = state.judgeable_count || 0;
+      document.getElementById("ferry-cost").textContent =
+        `$${(state.cost_low || 0).toFixed(2)}–$${(state.cost_high || 0).toFixed(2)}`;
+      const lo = state.est_minutes_low || 0, hi = state.est_minutes_high || 0;
+      document.getElementById("ferry-time").textContent = lo === hi ? String(hi) : `${lo}–${hi}`;
+      document.getElementById("ferry-banner").hidden = false;
     }
 
-    function hideJudgeForm() {
-      document.getElementById("judge-form").hidden = true;
-      document.getElementById("judge-more-btn").disabled = false;
+    function hideFerryBanner() {
+      document.getElementById("ferry-banner").hidden = true;
     }
 
-    function setJudgeProgress(state) {
-      const processed = state.processed || 0;
-      const total = state.limit || 0;
-      const pct = total > 0 ? (processed / total) * 100 : 0;
-      document.getElementById("judge-processed").textContent = processed;
-      document.getElementById("judge-total").textContent = total;
-      document.getElementById("judge-fill").style.width = `${pct}%`;
-      document.getElementById("judge-ready-added").textContent = state.ready_added || 0;
-      document.getElementById("judge-refused-added").textContent = state.refused_added || 0;
-      document.getElementById("judge-skipped").textContent = state.skipped || 0;
+    async function pollFerryProgress() {
+      try {
+        const r = await fetch("/api/ferry/status");
+        const data = await r.json();
+        const state = data.status || {};
+        setFerryProgress(state);
+        refreshFunnelState();
+        if (state.running) {
+          setTimeout(pollFerryProgress, 3000);
+          return;
+        }
+        document.getElementById("ferry-progress").hidden = true;
+        document.getElementById("ferry-btn").disabled = false;
+        if (state.phase === "awaiting_judge") {
+          showFerryBanner(state);
+          showToast(`Cull + enrich done — ${state.judgeable_count || 0} souls await the judge.`);
+        } else if (state.phase === "done") {
+          hideFerryBanner();
+          const j = state.judge || {};
+          if ((j.processed || 0) > 0) {
+            const sk = (j.skipped || 0) > 0 ? `, ${j.skipped} skipped` : "";
+            showToast(`Crossing complete: ${j.ready_added || 0} ready, ${j.refused_added || 0} refused${sk}.`);
+          } else {
+            const g = state.gather || {}, c = state.cull || {};
+            showToast(`Crossing complete: ${g.total_new || 0} new postings, ${c.refused || 0} culled, nothing left to judge.`);
+          }
+        } else if (state.phase === "error") {
+          showToast("Ferry ran aground: " + (state.error || "unknown error"), true);
+        }
+      } catch (err) {
+        setTimeout(pollFerryProgress, 6000);
+      }
+    }
+
+    async function startFerry() {
+      try {
+        const r = await fetch("/api/ferry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        document.getElementById("ferry-btn").disabled = true;
+        hideFerryBanner();
+        activateTab("gathered");
+        document.getElementById("ferry-progress").hidden = false;
+        setFerryProgress(data.status || {});
+        showToast("The ferry departs — harvest, cull, enrich, then one stop before the judge.");
+        pollFerryProgress();
+      } catch (e) {
+        showToast("Couldn't start the ferry: " + e.message, true);
+      }
+    }
+
+    async function startFerryJudge() {
+      try {
+        const r = await fetch("/api/ferry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stage: "judge" }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        hideFerryBanner();
+        document.getElementById("ferry-btn").disabled = true;
+        document.getElementById("ferry-progress").hidden = false;
+        setFerryProgress(data.status || {});
+        showToast("The judge takes their seat — runs in the background.");
+        pollFerryProgress();
+      } catch (e) {
+        showToast("Couldn't start judging: " + e.message, true);
+      }
     }
 
     // Refresh every tab count + lifetime stat strip during long-running
@@ -3233,180 +3255,6 @@
       loadGathered();
       loadRefused();
       loadStats();
-    }
-
-    async function pollJudgeProgress() {
-      try {
-        const r = await fetch("/api/judge/status");
-        const data = await r.json();
-        const state = data.status || {};
-        setJudgeProgress(state);
-        refreshFunnelState();
-        if (state.running) {
-          setTimeout(pollJudgeProgress, 4000);
-        } else {
-          // Done
-          document.getElementById("judge-progress").hidden = true;
-          document.getElementById("judge-more-btn").disabled = false;
-          if (state.error) {
-            showToast("Judge failed: " + state.error, true);
-          } else {
-            const r = state.ready_added || 0;
-            const x = state.refused_added || 0;
-            const s = state.skipped || 0;
-            const sk = s > 0 ? `, ${s} skipped` : "";
-            showToast(`Judge complete: ${r} ready, ${x} refused${sk}.`);
-          }
-        }
-      } catch (e) {
-        // Network blip — retry once
-        setTimeout(pollJudgeProgress, 6000);
-      }
-    }
-
-    function setCullProgress(state) {
-      const processed = state.processed || 0;
-      const total = state.limit || 0;
-      document.getElementById("cull-processed").textContent = processed;
-      document.getElementById("cull-total").textContent = total;
-      document.getElementById("cull-passed").textContent = state.passed || 0;
-      document.getElementById("cull-refused").textContent = state.refused || 0;
-      document.getElementById("cull-errors").textContent = state.errors || 0;
-      const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 0;
-      document.getElementById("cull-fill").style.width = pct + "%";
-    }
-
-    async function pollCullProgress() {
-      try {
-        const r = await fetch("/api/cull/status");
-        const data = await r.json();
-        const state = data.status || {};
-        setCullProgress(state);
-        refreshFunnelState();
-        if (state.running) {
-          setTimeout(pollCullProgress, 3000);
-        } else {
-          document.getElementById("cull-progress").hidden = true;
-          document.getElementById("cull-btn").disabled = false;
-          if (state.error && (state.processed || 0) === 0) {
-            showToast("Cull failed: " + state.error, true);
-          } else {
-            const p = state.passed || 0;
-            const x = state.refused || 0;
-            const e = state.errors || 0;
-            const errPart = e > 0 ? `, ${e} errors` : "";
-            const errSuffix = state.error ? ` (${state.error})` : "";
-            showToast(`Cull complete: ${p} passed, ${x} refused${errPart}${errSuffix}.`);
-            loadStats();
-          }
-        }
-      } catch (err) {
-        setTimeout(pollCullProgress, 6000);
-      }
-    }
-
-    async function startCull(limit, ats) {
-      const body = { limit };
-      if (ats) body.ats = ats;
-      try {
-        const r = await fetch("/api/cull", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-        hideCullForm();
-        document.getElementById("cull-btn").disabled = true;
-        document.getElementById("cull-progress").hidden = false;
-        setCullProgress(data.status || {});
-        showToast(`Culling up to ${limit} rows — runs in the background.`);
-        pollCullProgress();
-      } catch (e) {
-        showToast("Couldn't start cull: " + e.message, true);
-      }
-    }
-
-    function showCullForm() {
-      document.getElementById("cull-form").hidden = false;
-      document.getElementById("cull-btn").disabled = true;
-    }
-    function hideCullForm() {
-      document.getElementById("cull-form").hidden = true;
-      document.getElementById("cull-btn").disabled = false;
-    }
-
-    function setEnrichProgress(state) {
-      const processed = state.processed || 0;
-      const total = state.limit || 0;
-      document.getElementById("enrich-processed").textContent = processed;
-      document.getElementById("enrich-total").textContent = total;
-      document.getElementById("enrich-recovered").textContent = state.recovered || 0;
-      document.getElementById("enrich-paid").textContent = state.paid || 0;
-      document.getElementById("enrich-closed").textContent = state.closed || 0;
-      document.getElementById("enrich-failed").textContent = state.failed || 0;
-      const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 0;
-      document.getElementById("enrich-fill").style.width = pct + "%";
-    }
-
-    async function pollEnrichProgress() {
-      try {
-        const r = await fetch("/api/enrich/status");
-        const data = await r.json();
-        const state = data.status || {};
-        setEnrichProgress(state);
-        refreshFunnelState();
-        if (state.running) {
-          setTimeout(pollEnrichProgress, 3000);
-        } else {
-          document.getElementById("enrich-progress").hidden = true;
-          document.getElementById("enrich-btn").disabled = false;
-          if (state.error && (state.processed || 0) === 0) {
-            showToast("Enrich failed: " + state.error, true);
-          } else {
-            const rec = state.recovered || 0;
-            const f = state.failed || 0;
-            const paid = state.paid || 0;
-            const closed = state.closed || 0;
-            const failPart = f > 0 ? `, ${f} still failed` : "";
-            const closedPart = closed > 0 ? `, ${closed} closed` : "";
-            const paidPart = paid > 0 ? ` (${paid} via paid LLM)` : "";
-            showToast(`Enrich complete: ${rec} recovered${closedPart}${failPart}${paidPart}.`);
-            loadStats();
-          }
-        }
-      } catch (err) {
-        setTimeout(pollEnrichProgress, 6000);
-      }
-    }
-
-    async function startEnrich(limit) {
-      try {
-        const r = await fetch("/api/enrich", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ limit }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-        hideEnrichForm();
-        document.getElementById("enrich-btn").disabled = true;
-        document.getElementById("enrich-progress").hidden = false;
-        setEnrichProgress(data.status || {});
-        showToast(`Flushing up to ${limit} rows — runs in the background.`);
-        pollEnrichProgress();
-      } catch (e) {
-        showToast("Couldn't start enrich: " + e.message, true);
-      }
-    }
-
-    function showEnrichForm() {
-      document.getElementById("enrich-form").hidden = false;
-      document.getElementById("enrich-btn").disabled = true;
-    }
-    function hideEnrichForm() {
-      document.getElementById("enrich-form").hidden = true;
-      document.getElementById("enrich-btn").disabled = false;
     }
 
     async function refuseFromGathered(id, cardEl) {
@@ -3435,105 +3283,6 @@
       }
     }
 
-    function setGatherProgress(state) {
-      const completed = state.completed_employers || 0;
-      const total = state.total_employers || 0;
-      document.getElementById("gather-completed").textContent = completed;
-      document.getElementById("gather-total").textContent = total;
-      document.getElementById("gather-new").textContent = state.total_new || 0;
-      document.getElementById("gather-dupes").textContent = state.total_dupes || 0;
-      document.getElementById("gather-errors").textContent = state.total_errors || 0;
-      const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
-      document.getElementById("gather-fill").style.width = pct + "%";
-    }
-
-    async function pollGatherProgress() {
-      try {
-        const r = await fetch("/api/gather/status");
-        const data = await r.json();
-        const state = data.status || {};
-        setGatherProgress(state);
-        refreshFunnelState();
-        if (state.running) {
-          setTimeout(pollGatherProgress, 3000);
-        } else {
-          document.getElementById("gather-progress").hidden = true;
-          document.getElementById("gather-btn").disabled = false;
-          if (state.error) {
-            showToast("Gather failed: " + state.error, true);
-          } else {
-            const n = state.total_new || 0;
-            const d = state.total_dupes || 0;
-            const e = state.total_errors || 0;
-            const errPart = e > 0 ? `, ${e} errors` : "";
-            const dryPart = state.dry_run ? " (dry-run — nothing written)" : "";
-            showToast(`Harvest complete: ${n} new, ${d} dupes${errPart}${dryPart}.`);
-            loadStats();
-          }
-        }
-      } catch (err) {
-        setTimeout(pollGatherProgress, 6000);
-      }
-    }
-
-    async function startGather(ats, slug, dryRun) {
-      const body = {};
-      if (ats) body.ats = ats;
-      if (slug) body.slug = slug;
-      if (dryRun) body.dry_run = true;
-      try {
-        const r = await fetch("/api/gather", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-
-        hideGatherForm();
-        document.getElementById("gather-btn").disabled = true;
-        document.getElementById("gather-progress").hidden = false;
-        setGatherProgress(data.status || {});
-        const what = slug ? slug : (ats || "all sources");
-        showToast(`Harvesting from ${what} — runs in the background.`);
-        pollGatherProgress();
-      } catch (e) {
-        showToast("Couldn't start gather: " + e.message, true);
-      }
-    }
-
-    function showGatherForm() {
-      document.getElementById("gather-form").hidden = false;
-      document.getElementById("gather-btn").disabled = true;
-    }
-    function hideGatherForm() {
-      document.getElementById("gather-form").hidden = true;
-      document.getElementById("gather-btn").disabled = false;
-    }
-
-    async function startJudgeBatch(limit, tier) {
-      const body = { limit };
-      if (tier && tier.length) body.tier = tier;
-      try {
-        const r = await fetch("/api/judge", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-
-        hideJudgeForm();
-        document.getElementById("judge-more-btn").disabled = true;
-        document.getElementById("judge-progress").hidden = false;
-        setJudgeProgress(data.status || { limit });
-        showToast(`Judging ${limit} discoveries — this runs in the background.`);
-        pollJudgeProgress();
-      } catch (e) {
-        showToast("Couldn't start judge: " + e.message, true);
-      }
-    }
-
     async function generatePastePrompt(limit, tier) {
       const body = { limit };
       if (tier && tier.length) body.tier = tier;
@@ -3550,7 +3299,6 @@
         const ta = document.getElementById("paste-judge-prompt");
         meta.textContent = `Batch ${data.batch_id} — ${data.batch_size} discoveries: ${data.discovery_ids.join(", ")}`;
         ta.value = data.prompt;
-        hideJudgeForm();
         const modal = document.getElementById("paste-judge-modal");
         modal.classList.add("show");
         modal.setAttribute("aria-hidden", "false");
@@ -3864,10 +3612,9 @@
         return;
       }
 
-      // Judge more — open form
-      if (ev.target.closest("#judge-more-btn")) {
-        const btn = document.getElementById("judge-more-btn");
-        if (btn && !btn.disabled) showJudgeForm();
+      // Paste-judge (Ready toolbar) — free judging via Claude Code paste
+      if (ev.target.closest("#paste-judge-btn")) {
+        generatePastePrompt(25, null);
         return;
       }
 
@@ -3880,101 +3627,35 @@
         return;
       }
 
-      // Cull — open form
-      if (ev.target.closest("#cull-btn")) {
-        const btn = document.getElementById("cull-btn");
-        if (btn && !btn.disabled) showCullForm();
-        return;
-      }
-      // Cull — confirm
-      if (ev.target.closest("#cull-confirm")) {
-        const limit = parseInt(document.getElementById("cull-limit-input").value, 10);
-        if (!limit || limit < 1) { showToast("Batch size must be at least 1.", true); return; }
-        const ats = document.getElementById("cull-ats-input").value || null;
-        startCull(limit, ats);
-        return;
-      }
-      // Cull — cancel
-      if (ev.target.closest("#cull-cancel")) {
-        hideCullForm();
-        return;
-      }
-
-      // Enrich flush — jump to the Awaiting pane, then open the form there
-      if (ev.target.closest("#enrich-btn")) {
-        const btn = document.getElementById("enrich-btn");
-        if (btn && !btn.disabled) {
+      // The ferry — start a crossing, or jump to its progress if underway
+      if (ev.target.closest("#ferry-btn")) {
+        const btn = document.getElementById("ferry-btn");
+        if (ferryState.running) {
           activateTab("gathered");
-          showEnrichForm();
+        } else if (ferryState.phase === "awaiting_judge") {
+          activateTab("gathered");
+          showFerryBanner(ferryState);
+        } else if (btn && !btn.disabled) {
+          startFerry();
         }
         return;
       }
-      // Enrich flush — confirm
-      if (ev.target.closest("#enrich-confirm")) {
-        const limit = parseInt(document.getElementById("enrich-limit-input").value, 10);
-        if (!limit || limit < 1) { showToast("Max rows must be at least 1.", true); return; }
-        startEnrich(limit);
+      // Ferry — confirm the paid judge leg
+      if (ev.target.closest("#ferry-judge-confirm")) {
+        startFerryJudge();
         return;
       }
-      // Enrich flush — cancel
-      if (ev.target.closest("#enrich-cancel")) {
-        hideEnrichForm();
+      // Ferry — free paste-judge instead (up to 25 rows per paste)
+      if (ev.target.closest("#ferry-paste-prompt")) {
+        const n = Math.min(ferryState.judgeable_count || 25, 25);
+        hideFerryBanner();
+        generatePastePrompt(n, null);
         return;
       }
-
-      // Harvest — open form
-      if (ev.target.closest("#gather-btn")) {
-        const btn = document.getElementById("gather-btn");
-        if (btn && !btn.disabled) showGatherForm();
-        return;
-      }
-      // Harvest — confirm
-      if (ev.target.closest("#gather-confirm")) {
-        const ats = document.getElementById("gather-ats-input").value || null;
-        const slug = (document.getElementById("gather-slug-input").value || "").trim() || null;
-        const dryRun = document.getElementById("gather-dryrun-input").checked;
-        startGather(ats, slug, dryRun);
-        return;
-      }
-      // Harvest — cancel form
-      if (ev.target.closest("#gather-cancel")) {
-        hideGatherForm();
-        return;
-      }
-
-      // Judge more — confirm
-      if (ev.target.closest("#judge-confirm")) {
-        const limit = parseInt(document.getElementById("judge-limit-input").value, 10);
-        if (!limit || limit < 1) {
-          showToast("Batch size must be at least 1.", true);
-          return;
-        }
-        const tierRaw = document.getElementById("judge-tier-input").value;
-        const tier = tierRaw ? tierRaw.split(",") : null;
-        startJudgeBatch(limit, tier);
-        return;
-      }
-
-      // Judge more — cancel
-      if (ev.target.closest("#judge-cancel")) {
-        hideJudgeForm();
-        return;
-      }
-
-      // Judge more — generate paste prompt (uses Claude Code, not the API)
-      if (ev.target.closest("#judge-paste-prompt")) {
-        const limit = parseInt(document.getElementById("judge-limit-input").value, 10);
-        if (!limit || limit < 1) {
-          showToast("Batch size must be at least 1.", true);
-          return;
-        }
-        if (limit > 25) {
-          showToast("Paste size capped at 25 per batch.", true);
-          return;
-        }
-        const tierRaw = document.getElementById("judge-tier-input").value;
-        const tier = tierRaw ? tierRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
-        generatePastePrompt(limit, tier);
+      // Ferry — dismiss the judge gate for now (server keeps the pause;
+      // the banner comes back on reload until judged or a new crossing)
+      if (ev.target.closest("#ferry-not-now")) {
+        hideFerryBanner();
         return;
       }
 
@@ -4178,9 +3859,6 @@
       }
     });
     document.addEventListener("input", (ev) => {
-      if (ev.target && ev.target.id === "judge-limit-input") {
-        updateJudgeCostEstimate();
-      }
       if (ev.target && ev.target.id === "sirens-textarea") {
         updateSirensCharCount();
       }
@@ -4244,22 +3922,17 @@
         }
       }
     });
-    // If a judge run is in progress on the server, pick up the indicator
-    fetch("/api/judge/status").then(r => r.json()).then(d => {
-      if (d?.status?.running) {
-        document.getElementById("judge-more-btn").disabled = true;
-        document.getElementById("judge-progress").hidden = false;
-        setJudgeProgress(d.status);
-        pollJudgeProgress();
-      }
-    }).catch(() => {});
-    // Same for an enrich flush in progress
-    fetch("/api/enrich/status").then(r => r.json()).then(d => {
-      if (d?.status?.running) {
-        document.getElementById("enrich-btn").disabled = true;
-        document.getElementById("enrich-progress").hidden = false;
-        setEnrichProgress(d.status);
-        pollEnrichProgress();
+    // If a ferry is mid-crossing (or paused at the judge gate) on the
+    // server, re-attach after a reload.
+    fetch("/api/ferry/status").then(r => r.json()).then(d => {
+      const s = d?.status || {};
+      setFerryProgress(s);
+      if (s.running) {
+        document.getElementById("ferry-btn").disabled = true;
+        document.getElementById("ferry-progress").hidden = false;
+        pollFerryProgress();
+      } else if (s.phase === "awaiting_judge") {
+        showFerryBanner(s);
       }
     }).catch(() => {});
   </script>

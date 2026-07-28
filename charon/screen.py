@@ -12,6 +12,8 @@ trigger a confirmation prompt in the CLI layer.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from charon.ai import AIError
@@ -386,6 +388,23 @@ def judge_one_id(
     return result
 
 
+# Judging is I/O-bound (3-4 Sonnet calls per row), so rows run in a bounded
+# thread pool. judge_one_id's DB writes each open a fresh connection, and
+# db.py's busy_timeout absorbs writer contention — whole calls are pool-safe.
+DEFAULT_JUDGE_WORKERS = 4
+MAX_JUDGE_WORKERS = 8
+
+
+def _resolve_judge_workers(workers: int | None) -> int:
+    """Pick the pool size: explicit arg, else CHARON_JUDGE_WORKERS, else default."""
+    if workers is not None:
+        return max(1, min(workers, MAX_JUDGE_WORKERS))
+    env = os.environ.get("CHARON_JUDGE_WORKERS", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return min(int(env), MAX_JUDGE_WORKERS)
+    return DEFAULT_JUDGE_WORKERS
+
+
 def judge_batch(
     *,
     ats: str | None = None,
@@ -396,6 +415,7 @@ def judge_batch(
     limit: int | None = None,
     threshold: float | None = None,
     profile: dict[str, Any],
+    workers: int | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Judge many discoveries. Default: only unjudged + already-enriched.
@@ -407,6 +427,11 @@ def judge_batch(
 
     `status` filter only applies when rejudge=True (unjudged rows have
     status='new' by default).
+
+    Rows run in a thread pool of `workers` (default CHARON_JUDGE_WORKERS
+    or 4, cap 8); workers=1 keeps the sequential path and result order.
+    `on_progress` always fires on the calling thread; on the parallel
+    path results are in completion order.
     """
     if rejudge:
         targets = get_discoveries(ats=ats, slug=slug, status=status, limit=limit)
@@ -421,28 +446,66 @@ def judge_batch(
     # Load resume once for the whole batch
     resume_text = _maybe_load_resume(profile)
 
+    def _error_result(discovery: dict[str, Any], e: Exception) -> dict[str, Any]:
+        return {
+            "discovery_id": discovery["id"],
+            "company": discovery.get("company"),
+            "role": discovery.get("role"),
+            "screened_status": "rejected",
+            "judgement_reason": str(e),
+            "error": str(e),
+        }
+
     results: list[dict[str, Any]] = []
-    for discovery in targets:
-        try:
-            result = judge_one_id(
+    pool_size = min(_resolve_judge_workers(workers), max(1, len(targets)))
+
+    if pool_size <= 1 or len(targets) <= 1:
+        for discovery in targets:
+            try:
+                result = judge_one_id(
+                    discovery["id"],
+                    profile=profile,
+                    threshold=threshold,
+                    rejudge=rejudge,
+                    resume_text=resume_text,
+                )
+            except JudgeError as e:
+                result = _error_result(discovery, e)
+            results.append(result)
+            if on_progress:
+                on_progress(result)
+        return results
+
+    with ThreadPoolExecutor(max_workers=pool_size) as pool:
+        futures = {
+            pool.submit(
+                judge_one_id,
                 discovery["id"],
                 profile=profile,
                 threshold=threshold,
                 rejudge=rejudge,
                 resume_text=resume_text,
-            )
-        except JudgeError as e:
-            result = {
-                "discovery_id": discovery["id"],
-                "company": discovery.get("company"),
-                "role": discovery.get("role"),
-                "screened_status": "rejected",
-                "judgement_reason": str(e),
-                "error": str(e),
-            }
-        results.append(result)
-        if on_progress:
-            on_progress(result)
+            ): discovery
+            for discovery in targets
+        }
+        try:
+            for fut in as_completed(futures):
+                discovery = futures[fut]
+                try:
+                    result = fut.result()
+                except JudgeError as e:
+                    result = _error_result(discovery, e)
+                except Exception as e:  # noqa: BLE001 — isolate; don't kill the batch
+                    result = _error_result(discovery, e)
+                results.append(result)
+                if on_progress:
+                    on_progress(result)
+        except BaseException:
+            # Ctrl-C (or another fatal signal): drop the queued rows so the
+            # batch stops as soon as in-flight calls finish, then propagate.
+            for f in futures:
+                f.cancel()
+            raise
 
     return results
 

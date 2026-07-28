@@ -142,6 +142,9 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # Concurrent batch jobs (gather / cull / enrich / judge) all write. Wait for
+    # the write lock instead of crashing with "database is locked".
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 

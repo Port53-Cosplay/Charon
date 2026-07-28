@@ -210,6 +210,14 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
             "AND (screened_status IS NULL OR screened_status != 'rejected')"
         )
         awaiting_enrich = cur.fetchone()[0]
+        # "Cullable" = rows the cull picker (get_unculled_discoveries) will
+        # grab: never culled, never judged, not already rejected.
+        cur.execute(
+            "SELECT COUNT(*) FROM discoveries WHERE culled_at IS NULL "
+            "AND judged_at IS NULL "
+            "AND (screened_status IS NULL OR screened_status != 'rejected')"
+        )
+        cullable = cur.fetchone()[0]
         cur.execute("SELECT MAX(discovered_at) FROM discoveries")
         last_gather = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'ready'")
@@ -257,6 +265,7 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         "unjudged": max(gathered - judged, 0),
         "judgeable": judgeable,
         "awaiting_enrich": awaiting_enrich,
+        "cullable": cullable,
         "last_gather": last_gather,
         "ready": ready,
         "refused": refused,
@@ -522,6 +531,9 @@ def _start_enrich_batch(
     """Kick off an enrich flush in a worker thread."""
     if limit < 1 or limit > 1000:
         raise DashboardError("limit must be between 1 and 1000.")
+    with _ferry_lock:
+        if _ferry_state["running"]:
+            raise DashboardError("The ferry is crossing — wait for it to finish.")
     with _enrich_lock:
         if _enrich_state["running"]:
             raise DashboardError("An enrich flush is already running.")
@@ -608,6 +620,9 @@ def _start_cull_batch(
     """Kick off a cull batch in a worker thread."""
     if limit < 1 or limit > 500:
         raise DashboardError("limit must be between 1 and 500.")
+    with _ferry_lock:
+        if _ferry_state["running"]:
+            raise DashboardError("The ferry is crossing — wait for it to finish.")
     with _cull_lock:
         if _cull_state["running"]:
             raise DashboardError("A cull batch is already running.")
@@ -700,6 +715,9 @@ def _start_gather(
     Returns the initial state snapshot. Frontend polls /api/gather/status
     until `running` is False.
     """
+    with _ferry_lock:
+        if _ferry_state["running"]:
+            raise DashboardError("The ferry is crossing — wait for it to finish.")
     with _gather_lock:
         if _gather_state["running"]:
             raise DashboardError("A gather run is already in progress.")
@@ -784,6 +802,9 @@ def _start_judge_batch(
 
     if limit < 1 or limit > 500:
         raise DashboardError("limit must be between 1 and 500.")
+    with _ferry_lock:
+        if _ferry_state["running"]:
+            raise DashboardError("The ferry is crossing — wait for it to finish.")
     with _judge_lock:
         if _judge_state["running"]:
             raise DashboardError("A judge batch is already running.")
@@ -802,6 +823,302 @@ def _start_judge_batch(
         target=_judge_worker, args=(limit, ats, slug, tier), daemon=True
     ).start()
     return _judge_status_snapshot()
+
+
+# ── the ferry ────────────────────────────────────────────────────────
+# One chained crossing: gather → cull → enrich in a single worker thread,
+# then PAUSE (thread ends, phase='awaiting_judge') until the user confirms
+# the paid Sonnet judge leg. The judge leg runs in its own thread.
+#
+# The legacy per-stage jobs above stay for the CLI and Don's fork; the
+# dashboard UI only drives the ferry.
+
+# Mirror the frontend's judge cost math (was updateJudgeCostEstimate):
+# $0.02–$0.05 and 3–6s of wall time per row (before worker parallelism).
+_JUDGE_COST_LOW = 0.02
+_JUDGE_COST_HIGH = 0.05
+_JUDGE_SECS_LOW = 3
+_JUDGE_SECS_HIGH = 6
+
+_ferry_lock = threading.Lock()
+
+
+def _fresh_ferry_state() -> dict[str, Any]:
+    return {
+        "running": False,
+        "phase": "idle",  # idle|gather|cull|enrich|awaiting_judge|judge|done|error
+        "started_at": None,
+        "finished_at": None,
+        "error": None,
+        # Sub-dicts mirror the legacy per-job status shapes.
+        "gather": {
+            "completed_employers": 0,
+            "total_employers": 0,
+            "total_new": 0,
+            "total_dupes": 0,
+            "total_errors": 0,
+        },
+        "cull": {"limit": 0, "processed": 0, "passed": 0, "refused": 0, "errors": 0},
+        "enrich": {
+            "limit": 0,
+            "processed": 0,
+            "recovered": 0,
+            "paid": 0,
+            "closed": 0,
+            "failed": 0,
+        },
+        "judge": {
+            "limit": 0,
+            "processed": 0,
+            "ready_added": 0,
+            "refused_added": 0,
+            "skipped": 0,
+        },
+        # Filled when the chain pauses at the judge gate.
+        "judgeable_count": 0,
+        "cost_low": 0.0,
+        "cost_high": 0.0,
+        "est_minutes_low": 0,
+        "est_minutes_high": 0,
+    }
+
+
+_ferry_state: dict[str, Any] = _fresh_ferry_state()
+
+
+def _ferry_status_snapshot() -> dict[str, Any]:
+    with _ferry_lock:
+        snap = dict(_ferry_state)
+        for k in ("gather", "cull", "enrich", "judge"):
+            snap[k] = dict(snap[k])
+        return snap
+
+
+def _pipeline_busy() -> str | None:
+    """Name of whichever pipeline job is currently running, or None.
+
+    Checked before starting a ferry (either leg). Single-user dashboard:
+    the check-then-start gap is a benign race, not worth a global lock.
+    """
+    for name, lock, state in (
+        ("ferry", _ferry_lock, _ferry_state),
+        ("gather", _gather_lock, _gather_state),
+        ("cull", _cull_lock, _cull_state),
+        ("enrich", _enrich_lock, _enrich_state),
+        ("judge", _judge_lock, _judge_state),
+    ):
+        with lock:
+            if state["running"]:
+                return name
+    return None
+
+
+def _count_judgeable() -> int:
+    """COUNT of what the judge picker (get_unjudged_discoveries,
+    require_enriched=True) will grab — same predicate as the stats
+    'judgeable' figure."""
+    from charon.db import get_connection
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM discoveries WHERE judged_at IS NULL "
+            "AND enrichment_tier IS NOT NULL AND enrichment_tier != 'failed' "
+            "AND full_description IS NOT NULL AND length(full_description) > 0"
+        )
+        return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _ferry_judge_estimates(n: int) -> dict[str, Any]:
+    """Cost + wall-time estimate for judging n rows (with pool parallelism)."""
+    from charon.screen import _resolve_judge_workers
+
+    workers = _resolve_judge_workers(None)
+    return {
+        "judgeable_count": n,
+        "cost_low": round(n * _JUDGE_COST_LOW, 2),
+        "cost_high": round(n * _JUDGE_COST_HIGH, 2),
+        "est_minutes_low": max(1, round(n * _JUDGE_SECS_LOW / workers / 60)) if n else 0,
+        "est_minutes_high": max(1, round(n * _JUDGE_SECS_HIGH / workers / 60)) if n else 0,
+    }
+
+
+def _ferry_fail(msg: str) -> None:
+    with _ferry_lock:
+        _ferry_state["phase"] = "error"
+        _ferry_state["error"] = msg
+        _ferry_state["running"] = False
+        _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _ferry_worker() -> None:
+    """The crossing: gather → cull → enrich, then pause at the judge gate.
+
+    Per-row errors inside a stage only bump counters (each batch function
+    isolates them); a stage-level exception runs the ferry aground.
+    The thread ENDS at the pause — nothing sits parked while the user
+    decides whether to pay for judging.
+    """
+    from charon.cull import cull_batch
+    from charon.db import get_enrichable_discoveries, get_unculled_discoveries
+    from charon.enrich import enrich_batch
+    from charon.gather import gather_registry, list_employers, load_registry
+    from charon.profile import load_profile
+
+    try:
+        profile = load_profile()
+    except Exception as e:  # noqa: BLE001
+        _ferry_fail(f"profile load failed: {e}")
+        return
+
+    # ── gather ──
+    def on_gather(summary: dict[str, Any]) -> None:
+        with _ferry_lock:
+            g = _ferry_state["gather"]
+            g["completed_employers"] += 1
+            g["total_new"] += int(summary.get("new", 0) or 0)
+            g["total_dupes"] += int(summary.get("dupes", 0) or 0)
+            if summary.get("error"):
+                g["total_errors"] += 1
+
+    try:
+        registry = load_registry()
+        pairs = list_employers(registry)
+        with _ferry_lock:
+            _ferry_state["gather"]["total_employers"] = len(pairs)
+        gather_registry(on_progress=on_gather)
+    except Exception as e:  # noqa: BLE001
+        _ferry_fail(f"gather: {type(e).__name__}: {e}")
+        return
+
+    # ── cull ──
+    def on_cull(row: dict, outcome: str | None, error: Exception | None) -> None:
+        with _ferry_lock:
+            c = _ferry_state["cull"]
+            c["processed"] += 1
+            if error is not None:
+                c["errors"] += 1
+            elif outcome == "refused":
+                c["refused"] += 1
+            else:
+                c["passed"] += 1
+
+    try:
+        rows = get_unculled_discoveries()
+        with _ferry_lock:
+            _ferry_state["phase"] = "cull"
+            _ferry_state["cull"]["limit"] = len(rows)
+        cull_batch(rows, profile, on_result=on_cull)
+    except Exception as e:  # noqa: BLE001
+        _ferry_fail(f"cull: {type(e).__name__}: {e}")
+        return
+
+    # ── enrich ──
+    def on_enrich(result: dict[str, Any]) -> None:
+        tier = result.get("tier")
+        with _ferry_lock:
+            en = _ferry_state["enrich"]
+            en["processed"] += 1
+            if tier == "closed":
+                en["closed"] += 1
+            elif tier == "failed" or result.get("error"):
+                en["failed"] += 1
+            else:
+                en["recovered"] += 1
+                if tier == "ai_fallback":
+                    en["paid"] += 1
+
+    try:
+        targets = get_enrichable_discoveries()
+        with _ferry_lock:
+            _ferry_state["phase"] = "enrich"
+            _ferry_state["enrich"]["limit"] = len(targets)
+        enrich_batch(include_failed=True, profile=profile, on_progress=on_enrich)
+    except Exception as e:  # noqa: BLE001
+        _ferry_fail(f"enrich: {type(e).__name__}: {e}")
+        return
+
+    # ── pause at the judge gate ──
+    try:
+        n = _count_judgeable()
+        estimates = _ferry_judge_estimates(n)
+    except Exception as e:  # noqa: BLE001
+        _ferry_fail(f"judge count failed: {type(e).__name__}: {e}")
+        return
+
+    with _ferry_lock:
+        _ferry_state.update(estimates)
+        _ferry_state["phase"] = "awaiting_judge" if n > 0 else "done"
+        _ferry_state["running"] = False
+        _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _ferry_judge_worker() -> None:
+    """The paid leg: judge everything judgeable, then the crossing is done."""
+    from charon.profile import load_profile
+    from charon.screen import judge_batch
+
+    def on_progress(result: dict[str, Any]) -> None:
+        status = result.get("screened_status")
+        with _ferry_lock:
+            j = _ferry_state["judge"]
+            j["processed"] += 1
+            if result.get("error"):
+                j["skipped"] += 1
+            elif status == "ready":
+                j["ready_added"] += 1
+            elif status == "rejected":
+                j["refused_added"] += 1
+
+    try:
+        profile = load_profile()
+        judge_batch(profile=profile, on_progress=on_progress)
+    except Exception as e:  # noqa: BLE001
+        with _ferry_lock:
+            _ferry_state["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        with _ferry_lock:
+            _ferry_state["phase"] = "error" if _ferry_state["error"] else "done"
+            _ferry_state["running"] = False
+            _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _start_ferry() -> dict[str, Any]:
+    """Launch the crossing. A new ferry supersedes any pending judge gate."""
+    busy = _pipeline_busy()
+    if busy == "ferry":
+        raise DashboardError("The ferry is already crossing.")
+    if busy:
+        raise DashboardError(f"A {busy} job is already running — wait for it.")
+    with _ferry_lock:
+        _ferry_state.clear()
+        _ferry_state.update(_fresh_ferry_state())
+        _ferry_state["running"] = True
+        _ferry_state["phase"] = "gather"
+        _ferry_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    threading.Thread(target=_ferry_worker, daemon=True).start()
+    return _ferry_status_snapshot()
+
+
+def _start_ferry_judge() -> dict[str, Any]:
+    """Launch the paid judge leg — only valid while paused at the gate."""
+    busy = _pipeline_busy()
+    if busy:
+        raise DashboardError(f"A {busy} job is already running — wait for it.")
+    n = _count_judgeable()  # fresh count; no DB I/O under the lock
+    with _ferry_lock:
+        if _ferry_state["phase"] != "awaiting_judge":
+            raise DashboardError("The ferry isn't waiting at the judge gate.")
+        _ferry_state["judge"]["limit"] = n
+        _ferry_state["running"] = True
+        _ferry_state["phase"] = "judge"
+        _ferry_state["error"] = None
+        _ferry_state["finished_at"] = None
+    threading.Thread(target=_ferry_judge_worker, daemon=True).start()
+    return _ferry_status_snapshot()
 
 
 def _generate_judge_prompt(limit: int, tier: list[str] | None = None) -> dict[str, Any]:
@@ -1627,6 +1944,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/enrich/status":
             self._serve_json({"status": _enrich_status_snapshot()})
             return
+        if path == "/api/ferry/status":
+            self._serve_json({"status": _ferry_status_snapshot()})
+            return
         if path == "/api/env":
             self._serve_json({"env": _env_info()})
             return
@@ -1778,6 +2098,20 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, **result})
+            return
+        if path == "/api/ferry":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            try:
+                if body.get("stage") == "judge":
+                    snap = _start_ferry_judge()
+                else:
+                    snap = _start_ferry()
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "status": snap})
             return
         if path == "/api/cull":
             body = self._read_json_body() or {}

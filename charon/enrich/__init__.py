@@ -17,7 +17,9 @@ those adapters populate description at gather time).
 
 from __future__ import annotations
 
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from charon.db import (
@@ -34,6 +36,22 @@ from charon.fetcher import FetchError, extract_text, fetch_html
 
 SKIP_THRESHOLD_DEFAULT = 500  # chars of source description that qualify as "good enough"
 DEFAULT_RATE_LIMIT_SECONDS = 1.0
+
+# Rows enrich in a bounded thread pool; DB writes are short WAL transactions
+# (busy_timeout in db.py absorbs contention). The per-row politeness delay
+# only applies on the sequential path (workers=1).
+DEFAULT_ENRICH_WORKERS = 4
+MAX_ENRICH_WORKERS = 8
+
+
+def _resolve_workers(workers: int | None) -> int:
+    """Pick the pool size: explicit arg, else CHARON_ENRICH_WORKERS, else default."""
+    if workers is not None:
+        return max(1, min(workers, MAX_ENRICH_WORKERS))
+    env = os.environ.get("CHARON_ENRICH_WORKERS", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return min(int(env), MAX_ENRICH_WORKERS)
+    return DEFAULT_ENRICH_WORKERS
 
 
 class EnrichError(Exception):
@@ -174,13 +192,20 @@ def enrich_batch(
     limit: int | None = None,
     profile: dict[str, Any] | None = None,
     rate_limit_seconds: float | None = None,
+    workers: int | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Enrich many discoveries in sequence. Returns per-discovery result dicts.
+    """Enrich many discoveries. Returns per-discovery result dicts.
 
     Default: only enriches discoveries where enrichment_tier IS NULL.
     With include_failed=True, also retries rows whose prior attempt failed.
     With force=True, re-enriches everything matching the filter.
+
+    Rows run in a thread pool of `workers` (default CHARON_ENRICH_WORKERS
+    or 4, cap 8); workers=1 keeps the sequential path with its per-row
+    politeness delay. `on_progress` always fires on the calling thread.
+    On the parallel path a row that raises is downgraded to tier='failed'
+    instead of killing the batch, and results are in completion order.
     """
     cfg = _enrich_config(profile)
     delay = rate_limit_seconds if rate_limit_seconds is not None else cfg["rate_limit_seconds"]
@@ -192,9 +217,8 @@ def enrich_batch(
     else:
         targets = get_unenriched_discoveries(ats=ats, slug=slug, limit=limit)
 
-    results: list[dict[str, Any]] = []
-    for i, discovery in enumerate(targets):
-        result = enrich_discovery(discovery, profile=profile, force=force)
+    def _finish_row(discovery: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        """DB write + result annotation, shared by both paths."""
         try:
             update_discovery_enrichment(
                 discovery["id"], result["tier"], result.get("full_description")
@@ -204,11 +228,46 @@ def enrich_batch(
         result["discovery_id"] = discovery["id"]
         result["company"] = discovery.get("company")
         result["role"] = discovery.get("role")
-        results.append(result)
-        if on_progress:
-            on_progress(result)
-        if i < len(targets) - 1 and delay > 0 and result["tier"] != "skipped":
-            time.sleep(delay)
+        return result
+
+    pool_size = min(_resolve_workers(workers), max(1, len(targets)))
+    results: list[dict[str, Any]] = []
+
+    if pool_size <= 1 or len(targets) <= 1:
+        for i, discovery in enumerate(targets):
+            result = enrich_discovery(discovery, profile=profile, force=force)
+            results.append(_finish_row(discovery, result))
+            if on_progress:
+                on_progress(result)
+            if i < len(targets) - 1 and delay > 0 and result["tier"] != "skipped":
+                time.sleep(delay)
+        return results
+
+    def _enrich_row(discovery: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = enrich_discovery(discovery, profile=profile, force=force)
+        except Exception as e:  # noqa: BLE001 — downgrade, don't kill the batch
+            result = {
+                "tier": "failed",
+                "full_description": None,
+                "source_url": discovery.get("url"),
+                "error": f"{type(e).__name__}: {e}",
+            }
+        return _finish_row(discovery, result)
+
+    with ThreadPoolExecutor(max_workers=pool_size) as pool:
+        futures = [pool.submit(_enrich_row, d) for d in targets]
+        try:
+            for fut in as_completed(futures):
+                result = fut.result()  # _enrich_row never raises
+                results.append(result)
+                if on_progress:
+                    on_progress(result)
+        except BaseException:
+            # Ctrl-C: drop queued rows, let in-flight ones finish, propagate.
+            for f in futures:
+                f.cancel()
+            raise
 
     return results
 
