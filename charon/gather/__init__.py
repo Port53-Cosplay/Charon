@@ -41,6 +41,9 @@ ADAPTERS: dict[str, str] = {
     "ashby": "charon.gather.ashby",
     "workday": "charon.gather.workday",
     "successfactors": "charon.gather.successfactors",
+    "smartrecruiters": "charon.gather.smartrecruiters",
+    "recruitee": "charon.gather.recruitee",
+    "workable": "charon.gather.workable",
 }
 
 DEFAULT_RATE_LIMIT_SECONDS = 1.0
@@ -96,12 +99,47 @@ def load_registry() -> dict[str, list[dict[str, Any]]]:
                 raise GatherError(
                     f"Registry at {path} missing top-level 'gather:' key."
                 )
-            return registry
+            return _merge_auto_registry(registry)
 
     raise GatherError(
         "No companies.yaml found. Looked in: "
         + ", ".join(str(p) for p in _registry_paths())
     )
+
+
+def _merge_auto_registry(
+    registry: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Merge machine-managed ~/.charon/companies-auto.yaml into the registry.
+
+    Machine-discovered boards live in a separate file so the curated
+    companies.yaml stays hand-edited. Curated entries win on (ats, slug)
+    collisions. (Ported from Don's fork — d3athstr/Charon FORK_NOTES.md.)
+    """
+    auto_path = Path.home() / ".charon" / "companies-auto.yaml"
+    if not auto_path.exists():
+        return registry
+    try:
+        doc = yaml.safe_load(auto_path.read_text(encoding="utf-8")) or {}
+        auto = doc.get("gather") or {}
+    except Exception:
+        return registry
+    if not isinstance(auto, dict):
+        return registry
+    seen = {
+        (ats, e.get("slug"))
+        for ats, entries in registry.items()
+        if isinstance(entries, list)
+        for e in entries
+    }
+    for ats, entries in auto.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if (ats, entry.get("slug")) not in seen:
+                registry.setdefault(ats, []).append(entry)
+                seen.add((ats, entry.get("slug")))
+    return registry
 
 
 def list_employers(
