@@ -39,21 +39,23 @@ _DEEPSEEK_MODEL = "deepseek-chat"
 # in a thread pool. 8 is a conservative default; override with the
 # CHARON_CULL_CONCURRENCY env var if DeepSeek's rate limits allow more.
 DEFAULT_CULL_CONCURRENCY = 8
-_SYSTEM_PROMPT = """You are a security-job filter for a candidate searching for defensive cybersecurity roles. Your only job is to drop the most-obviously-wrong postings before they get expensive analysis.
+_SYSTEM_PROMPT = """You are a security-job filter for a candidate searching for hands-on defensive cybersecurity roles. Your only job is to drop wrong postings before they get expensive analysis.
 
 You see only the role title, company, and location — no description. That is intentional.
 
-The candidate's target roles are defensive: incident response, DFIR, SOC analyst, detection engineering, threat analysis, application security, IT/security/compliance auditing, GRC analyst.
+The candidate's target roles are hands-on defensive practitioner roles: incident response, DFIR, SOC analyst, detection engineering, threat analysis, application security, IT/security/compliance auditing, GRC analyst.
 
 Output strict JSON: {"decision": "pass" | "refuse", "reason": "<10 words or fewer>", "confidence": "high" | "medium" | "low"}.
 
-Decision rule (CONSERVATIVE):
-- refuse ONLY if you are confident the role is not security at all (Sales Engineer, Marketing, Customer Success, Recruiter, generic Software Engineer, HR, Finance, etc.) OR clearly contradicts the candidate's geographic constraint (US-only, remote).
-- Anything plausibly security-adjacent: pass. Even if it's offensive-leaning or senior — the deeper pipeline will judge it.
-- When in doubt, pass. The downstream judge will do the careful work.
+Decision rule:
+- refuse if the role is not security at all: Sales Engineer, Marketing, Customer Success, Recruiter, generic Software Engineer, HR, Finance, trading/quant, data science, design, etc.
+- refuse if the role is not a hands-on practitioner role, EVEN IF the title contains security words: product/program/project managers, UX/UI designers, Directors, VPs, C-suite, "Head of", account executives, solutions/sales engineers, generic consultants, instructors. "Senior Product Manager - Data Protection" is a refuse; the function is product management, not security work. (Seniority alone is fine — "Senior Security Engineer" and "Staff Security Analyst" are practitioners, not executives.)
+- refuse if the role clearly contradicts the candidate's geographic constraint (US-only, remote).
+- Otherwise pass. A plausibly hands-on security title — analyst, engineer, responder, auditor, specialist — passes even if offensive-leaning; the deeper pipeline will judge it.
+- If you genuinely cannot tell what the role is, pass.
 
 confidence reflects YOUR certainty:
-- high: you are sure (e.g. "Director of Sales", "Marketing Manager") → only this triggers an actual refuse
+- high: you are sure (e.g. "Director of Sales", "Marketing Manager", "Senior Product Manager - Security") → only this triggers an actual refuse
 - medium / low: you are guessing → caller will pass these through anyway
 """
 
