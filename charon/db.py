@@ -864,7 +864,12 @@ def get_unculled_discoveries(
     """Discoveries that haven't been culled yet.
 
     Filter: culled_at IS NULL AND judged_at IS NULL AND not-rejected.
-    These are the candidates Gemini cull would look at next.
+    These are the candidates the cull pass would look at next.
+
+    Selects only the light columns cull actually reads (title/company/
+    location/tier/ats) — descriptions stay in the DB. A full backlog can
+    be tens of thousands of rows; dragging inlined descriptions along
+    once OOM-killed the manifest process on the 2 GB portal VM.
     """
     clauses = [
         "culled_at IS NULL",
@@ -879,7 +884,10 @@ def get_unculled_discoveries(
         clauses.append("slug = ?")
         params.append(slug)
 
-    sql = "SELECT * FROM discoveries WHERE " + " AND ".join(clauses)
+    sql = (
+        "SELECT id, ats, slug, company, role, location, tier, category, "
+        "discovered_at FROM discoveries WHERE " + " AND ".join(clauses)
+    )
     sql += " ORDER BY discovered_at DESC"
     if limit is not None:
         sql += " LIMIT ?"

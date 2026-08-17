@@ -69,12 +69,12 @@ def _mock_chain_stages(monkeypatch, *, judgeable=5):
     monkeypatch.setattr(dashboard, "_count_judgeable", lambda: judgeable)
 
 
-def _run_chain_synchronously():
+def _run_chain_synchronously(start_stage="gather"):
     """Seed the state _start_ferry would and run the chain worker inline."""
     with dashboard._ferry_lock:
         dashboard._ferry_state["running"] = True
-        dashboard._ferry_state["phase"] = "gather"
-    dashboard._ferry_worker()
+        dashboard._ferry_state["phase"] = start_stage
+    dashboard._ferry_worker(start_stage)
     return dashboard._ferry_status_snapshot()
 
 
@@ -114,6 +114,42 @@ def test_ferry_stage_error_runs_aground(monkeypatch):
     assert snap["phase"] == "error"
     assert "deepseek down" in snap["error"]
     assert snap["running"] is False
+
+
+def test_ferry_from_cull_skips_harvest(monkeypatch):
+    _mock_chain_stages(monkeypatch, judgeable=3)
+
+    def no_gather(**kw):
+        raise AssertionError("gather must not run when starting from cull")
+
+    monkeypatch.setattr(charon.gather, "gather_registry", no_gather)
+    snap = _run_chain_synchronously("cull")
+
+    assert snap["phase"] == "awaiting_judge"
+    assert snap["gather"]["completed_employers"] == 0    # untouched
+    assert snap["cull"]["processed"] == 2                # cull + enrich still ran
+    assert snap["enrich"]["recovered"] == 1
+
+
+def test_ferry_from_judge_goes_straight_to_gate(monkeypatch):
+    _mock_chain_stages(monkeypatch, judgeable=7)
+
+    def boom(**kw):
+        raise AssertionError("no earlier stage may run when starting from judge")
+
+    monkeypatch.setattr(charon.gather, "gather_registry", boom)
+    monkeypatch.setattr(charon.cull, "cull_batch", lambda *a, **kw: boom())
+    monkeypatch.setattr(charon.enrich, "enrich_batch", lambda **kw: boom())
+    snap = _run_chain_synchronously("judge")
+
+    assert snap["phase"] == "awaiting_judge"
+    assert snap["judgeable_count"] == 7
+    assert snap["cull"]["processed"] == 0
+
+
+def test_start_ferry_rejects_unknown_stage():
+    with pytest.raises(dashboard.DashboardError, match="Unknown ferry stage"):
+        dashboard._start_ferry("teleport")
 
 
 def test_ferry_refuses_while_legacy_job_runs():

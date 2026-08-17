@@ -954,8 +954,15 @@ def _ferry_fail(msg: str) -> None:
         _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _ferry_worker() -> None:
+_FERRY_STAGES = ("gather", "cull", "enrich", "judge")
+
+
+def _ferry_worker(start_stage: str = "gather") -> None:
     """The crossing: gather → cull → enrich, then pause at the judge gate.
+
+    `start_stage` lets a crossing skip the earlier stages — the Awaiting
+    header's stage chips use it ("just cull", "just enrich", "straight to
+    the gate") so working the queue never forces a full harvest.
 
     Per-row errors inside a stage only bump counters (each batch function
     isolates them); a stage-level exception runs the ferry aground.
@@ -967,6 +974,8 @@ def _ferry_worker() -> None:
     from charon.enrich import enrich_batch
     from charon.gather import gather_registry, list_employers, load_registry
     from charon.profile import load_profile
+
+    start_idx = _FERRY_STAGES.index(start_stage)
 
     try:
         profile = load_profile()
@@ -984,15 +993,16 @@ def _ferry_worker() -> None:
             if summary.get("error"):
                 g["total_errors"] += 1
 
-    try:
-        registry = load_registry()
-        pairs = list_employers(registry)
-        with _ferry_lock:
-            _ferry_state["gather"]["total_employers"] = len(pairs)
-        gather_registry(on_progress=on_gather)
-    except Exception as e:  # noqa: BLE001
-        _ferry_fail(f"gather: {type(e).__name__}: {e}")
-        return
+    if start_idx <= 0:
+        try:
+            registry = load_registry()
+            pairs = list_employers(registry)
+            with _ferry_lock:
+                _ferry_state["gather"]["total_employers"] = len(pairs)
+            gather_registry(on_progress=on_gather)
+        except Exception as e:  # noqa: BLE001
+            _ferry_fail(f"gather: {type(e).__name__}: {e}")
+            return
 
     # ── cull ──
     def on_cull(row: dict, outcome: str | None, error: Exception | None) -> None:
@@ -1006,15 +1016,16 @@ def _ferry_worker() -> None:
             else:
                 c["passed"] += 1
 
-    try:
-        rows = get_unculled_discoveries()
-        with _ferry_lock:
-            _ferry_state["phase"] = "cull"
-            _ferry_state["cull"]["limit"] = len(rows)
-        cull_batch(rows, profile, on_result=on_cull)
-    except Exception as e:  # noqa: BLE001
-        _ferry_fail(f"cull: {type(e).__name__}: {e}")
-        return
+    if start_idx <= 1:
+        try:
+            rows = get_unculled_discoveries()
+            with _ferry_lock:
+                _ferry_state["phase"] = "cull"
+                _ferry_state["cull"]["limit"] = len(rows)
+            cull_batch(rows, profile, on_result=on_cull)
+        except Exception as e:  # noqa: BLE001
+            _ferry_fail(f"cull: {type(e).__name__}: {e}")
+            return
 
     # ── enrich ──
     def on_enrich(result: dict[str, Any]) -> None:
@@ -1031,15 +1042,16 @@ def _ferry_worker() -> None:
                 if tier == "ai_fallback":
                     en["paid"] += 1
 
-    try:
-        targets = get_enrichable_discoveries()
-        with _ferry_lock:
-            _ferry_state["phase"] = "enrich"
-            _ferry_state["enrich"]["limit"] = len(targets)
-        enrich_batch(include_failed=True, profile=profile, on_progress=on_enrich)
-    except Exception as e:  # noqa: BLE001
-        _ferry_fail(f"enrich: {type(e).__name__}: {e}")
-        return
+    if start_idx <= 2:
+        try:
+            targets = get_enrichable_discoveries()
+            with _ferry_lock:
+                _ferry_state["phase"] = "enrich"
+                _ferry_state["enrich"]["limit"] = len(targets)
+            enrich_batch(include_failed=True, profile=profile, on_progress=on_enrich)
+        except Exception as e:  # noqa: BLE001
+            _ferry_fail(f"enrich: {type(e).__name__}: {e}")
+            return
 
     # ── pause at the judge gate ──
     try:
@@ -1086,8 +1098,13 @@ def _ferry_judge_worker() -> None:
             _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _start_ferry() -> dict[str, Any]:
-    """Launch the crossing. A new ferry supersedes any pending judge gate."""
+def _start_ferry(start_stage: str = "gather") -> dict[str, Any]:
+    """Launch the crossing, optionally skipping straight to a later stage.
+
+    A new ferry supersedes any pending judge gate.
+    """
+    if start_stage not in _FERRY_STAGES:
+        raise DashboardError(f"Unknown ferry stage: {start_stage!r}")
     busy = _pipeline_busy()
     if busy == "ferry":
         raise DashboardError("The ferry is already crossing.")
@@ -1097,9 +1114,9 @@ def _start_ferry() -> dict[str, Any]:
         _ferry_state.clear()
         _ferry_state.update(_fresh_ferry_state())
         _ferry_state["running"] = True
-        _ferry_state["phase"] = "gather"
+        _ferry_state["phase"] = start_stage
         _ferry_state["started_at"] = datetime.now(timezone.utc).isoformat()
-    threading.Thread(target=_ferry_worker, daemon=True).start()
+    threading.Thread(target=_ferry_worker, args=(start_stage,), daemon=True).start()
     return _ferry_status_snapshot()
 
 
@@ -2105,9 +2122,14 @@ class _Handler(BaseHTTPRequestHandler):
                 body = {}
             try:
                 if body.get("stage") == "judge":
+                    # Confirm the pending judge gate (requires awaiting_judge)
                     snap = _start_ferry_judge()
                 else:
-                    snap = _start_ferry()
+                    # New crossing; "from" skips straight to a later stage
+                    from_stage = body.get("from") or "gather"
+                    if not isinstance(from_stage, str):
+                        from_stage = "gather"
+                    snap = _start_ferry(from_stage)
             except DashboardError as e:
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return

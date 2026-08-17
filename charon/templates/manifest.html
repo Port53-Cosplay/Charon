@@ -675,6 +675,25 @@
       font-weight: 700;
     }
 
+    /* Stage chips: run just that stage of the crossing (no harvest) */
+    .awaiting-header .stage-chip {
+      font: inherit;
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      padding: 0 2px;
+      cursor: pointer;
+      text-decoration: underline dotted;
+      text-underline-offset: 3px;
+    }
+    .awaiting-header .stage-chip span {
+      color: var(--plum);
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+    .awaiting-header .stage-chip:hover { color: var(--plum); }
+    .awaiting-header .stage-chip:disabled { cursor: default; opacity: 0.6; text-decoration: none; }
+
     .judge-form {
       display: flex;
       align-items: center;
@@ -1971,8 +1990,12 @@
       </div>
 
       <section class="tab-pane" data-pane="gathered" hidden>
-        <div class="awaiting-header" id="awaiting-header" title="Stage backlogs for the queue. Stages overlap — a fresh posting needs cull AND enrich before it can be judged. The ferry works all three in order.">
-          <span><strong id="awaiting-count">—</strong> in queue · <span id="awaiting-cull">—</span> to cull · <span id="awaiting-enrich-n">—</span> to enrich · <span id="awaiting-judge-n">—</span> to judge · <strong id="awaiting-lifetime">—</strong> lifetime</span>
+        <div class="awaiting-header" id="awaiting-header" title="Stage backlogs for the queue. Stages overlap — a fresh posting needs cull AND enrich before it can be judged. Click a stage to run just that part of the crossing, no harvest.">
+          <span><strong id="awaiting-count">—</strong> in queue ·
+            <button class="stage-chip" data-from="cull" title="Cull just this backlog (DeepSeek, pennies) — then enrich the survivors and stop at the judge gate. No harvest."><span id="awaiting-cull">—</span> to cull</button> ·
+            <button class="stage-chip" data-from="enrich" title="Fetch descriptions for this backlog, then stop at the judge gate. No harvest, no cull."><span id="awaiting-enrich-n">—</span> to enrich</button> ·
+            <button class="stage-chip" data-from="judge" title="Skip straight to the judge gate — shows the count and cost, spends nothing until you confirm."><span id="awaiting-judge-n">—</span> to judge</button> ·
+            <strong id="awaiting-lifetime">—</strong> lifetime</span>
         </div>
         <div id="ferry-progress" class="judge-progress" hidden>
           <span class="nums" id="ferry-phase-label">Harvest</span>
@@ -3216,12 +3239,20 @@
       }
     }
 
-    async function startFerry() {
+    const FERRY_START_TOASTS = {
+      gather: "The ferry departs — harvest, cull, enrich, then one stop before the judge.",
+      cull: "Culling the queue — no harvest. Enrich follows, then the judge gate.",
+      enrich: "Enriching the queue — no harvest, no cull. The judge gate follows.",
+      judge: "Heading straight to the judge gate…",
+    };
+
+    async function startFerry(fromStage) {
+      const body = fromStage && fromStage !== "gather" ? { from: fromStage } : {};
       try {
         const r = await fetch("/api/ferry", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(body),
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
@@ -3230,7 +3261,7 @@
         activateTab("gathered");
         document.getElementById("ferry-progress").hidden = false;
         setFerryProgress(data.status || {});
-        showToast("The ferry departs — harvest, cull, enrich, then one stop before the judge.");
+        showToast(FERRY_START_TOASTS[fromStage] || FERRY_START_TOASTS.gather);
         pollFerryProgress();
       } catch (e) {
         showToast("Couldn't start the ferry: " + e.message, true);
@@ -3647,6 +3678,17 @@
           showFerryBanner(ferryState);
         } else if (btn && !btn.disabled) {
           startFerry();
+        }
+        return;
+      }
+      // Stage chips (Awaiting header) — run the crossing from that stage
+      // onward, skipping the harvest entirely.
+      const chip = ev.target.closest(".stage-chip");
+      if (chip) {
+        if (ferryState.running) {
+          showToast("The ferry is already crossing — watch the bar above.");
+        } else {
+          startFerry(chip.dataset.from);
         }
         return;
       }
