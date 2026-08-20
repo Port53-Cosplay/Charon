@@ -50,6 +50,7 @@ Output strict JSON: {"decision": "pass" | "refuse", "reason": "<10 words or fewe
 Decision rule:
 - refuse if the role is not security at all: Sales Engineer, Marketing, Customer Success, Recruiter, generic Software Engineer, HR, Finance, trading/quant, data science, design, etc.
 - refuse if the role is not a hands-on practitioner role, EVEN IF the title contains security words: product/program/project managers, UX/UI designers, Directors, VPs, C-suite, "Head of", account executives, solutions/sales engineers, generic consultants, instructors. "Senior Product Manager - Data Protection" is a refuse; the function is product management, not security work. (Seniority alone is fine — "Senior Security Engineer" and "Staff Security Analyst" are practitioners, not executives.)
+- refuse if the posting is obviously a recruiter test/placeholder requisition, not a real job: titles like "Test job 123", "Easy Apply Test", "EA Test", "TEST <anything>", "Demo Requisition". Real companies leave these on their boards; they enrich to nothing and waste the pipeline.
 - refuse if the role clearly contradicts the candidate's geographic constraint (US-only, remote).
 - Otherwise pass. A plausibly hands-on security title — analyst, engineer, responder, auditor, specialist — passes even if offensive-leaning; the deeper pipeline will judge it.
 - If you genuinely cannot tell what the role is, pass.
