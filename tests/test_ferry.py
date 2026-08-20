@@ -176,11 +176,24 @@ def test_ferry_judge_requires_the_gate(monkeypatch):
         dashboard._start_ferry_judge()      # phase is 'idle'
 
 
+def _wait_for_ferry_idle(timeout=5):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        snap = dashboard._ferry_status_snapshot()
+        if not snap["running"]:
+            return snap
+        time.sleep(0.02)
+    return dashboard._ferry_status_snapshot()
+
+
 def test_ferry_judge_leg_runs_to_done(monkeypatch):
-    monkeypatch.setattr(dashboard, "_count_judgeable", lambda: 2)
+    # _count_judgeable: 2 at start, 0 after the batch drains the gate
+    counts = iter([2, 0])
+    monkeypatch.setattr(dashboard, "_count_judgeable", lambda: next(counts, 0))
     monkeypatch.setattr(charon.profile, "load_profile", lambda: {})
 
-    def fake_judge_batch(*, profile, on_progress=None, **kw):
+    def fake_judge_batch(*, profile, limit=None, on_progress=None, **kw):
+        assert limit is None                    # full-gate batch passes no limit
         for i in (1, 2):
             if on_progress:
                 on_progress({"screened_status": "ready" if i == 1 else "rejected"})
@@ -191,19 +204,51 @@ def test_ferry_judge_leg_runs_to_done(monkeypatch):
     with dashboard._ferry_lock:
         dashboard._ferry_state["phase"] = "awaiting_judge"
     dashboard._start_ferry_judge()
-
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        snap = dashboard._ferry_status_snapshot()
-        if not snap["running"]:
-            break
-        time.sleep(0.02)
+    snap = _wait_for_ferry_idle()
 
     assert snap["phase"] == "done"
     assert snap["judge"]["limit"] == 2
     assert snap["judge"]["processed"] == 2
     assert snap["judge"]["ready_added"] == 1
     assert snap["judge"]["refused_added"] == 1
+
+
+def test_ferry_judge_partial_batch_reparks_the_gate(monkeypatch):
+    # Gate holds 10; judge 3; 7 remain → back to awaiting_judge with fresh
+    # estimates, and the batch limit reflects the partial size.
+    counts = iter([10, 7])
+    monkeypatch.setattr(dashboard, "_count_judgeable", lambda: next(counts, 7))
+    monkeypatch.setattr(charon.profile, "load_profile", lambda: {})
+
+    seen_limits = []
+
+    def fake_judge_batch(*, profile, limit=None, on_progress=None, **kw):
+        seen_limits.append(limit)
+        for _ in range(limit):
+            if on_progress:
+                on_progress({"screened_status": "ready"})
+        return []
+
+    monkeypatch.setattr(charon.screen, "judge_batch", fake_judge_batch)
+
+    with dashboard._ferry_lock:
+        dashboard._ferry_state["phase"] = "awaiting_judge"
+    dashboard._start_ferry_judge(3)
+    snap = _wait_for_ferry_idle()
+
+    assert seen_limits == [3]
+    assert snap["phase"] == "awaiting_judge"     # re-parked, not done
+    assert snap["judge"]["limit"] == 3
+    assert snap["judge"]["processed"] == 3
+    assert snap["judgeable_count"] == 7
+    assert snap["cost_low"] == pytest.approx(0.14)
+
+
+def test_ferry_judge_rejects_bad_limit():
+    with dashboard._ferry_lock:
+        dashboard._ferry_state["phase"] = "awaiting_judge"
+    with pytest.raises(dashboard.DashboardError, match="at least 1"):
+        dashboard._start_ferry_judge(0)
 
 
 def test_stats_cullable_counts_only_fresh_rows():

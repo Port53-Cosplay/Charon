@@ -2004,7 +2004,11 @@
           <span class="breakdown" id="ferry-breakdown"></span>
         </div>
         <div id="ferry-banner" class="judge-form" hidden>
-          <span class="cost-est"><strong id="ferry-souls">0</strong> souls at the bank · judging ≈ <span id="ferry-cost">$0–$0</span> · ~<span id="ferry-time">—</span> min</span>
+          <span class="cost-est"><strong id="ferry-souls">0</strong> souls at the bank</span>
+          <label title="How many to judge this batch — the rest stay at the gate for next time.">Judge
+            <input type="number" id="ferry-judge-count" min="1" style="width:70px">
+          </label>
+          <span class="cost-est">≈ <span id="ferry-cost">$0–$0</span> · ~<span id="ferry-time">—</span> min</span>
           <div class="spacer"></div>
           <button class="cancel-btn" id="ferry-not-now">Not now</button>
           <button class="confirm-btn" id="ferry-paste-prompt" title="Free — judge via a Claude Code paste, no API spend">Paste prompt</button>
@@ -3192,12 +3196,29 @@
       }
     }
 
-    function showFerryBanner(state) {
-      document.getElementById("ferry-souls").textContent = state.judgeable_count || 0;
+    function updateFerryCostEstimate() {
+      const total = ferryState.judgeable_count || 0;
+      const input = document.getElementById("ferry-judge-count");
+      let n = parseInt(input.value, 10);
+      if (!n || n < 1) n = total;
+      n = Math.min(n, total);
       document.getElementById("ferry-cost").textContent =
-        `$${(state.cost_low || 0).toFixed(2)}–$${(state.cost_high || 0).toFixed(2)}`;
-      const lo = state.est_minutes_low || 0, hi = state.est_minutes_high || 0;
+        `$${(n * 0.02).toFixed(2)}–$${(n * 0.05).toFixed(2)}`;
+      // 3–6s per row across 4 judge workers
+      const lo = Math.max(1, Math.round(n * 3 / 4 / 60));
+      const hi = Math.max(1, Math.round(n * 6 / 4 / 60));
       document.getElementById("ferry-time").textContent = lo === hi ? String(hi) : `${lo}–${hi}`;
+    }
+
+    function showFerryBanner(state) {
+      const total = state.judgeable_count || 0;
+      document.getElementById("ferry-souls").textContent = total;
+      const input = document.getElementById("ferry-judge-count");
+      // Keep the user's chosen batch size across re-parks; clamp to the gate.
+      const prev = parseInt(input.value, 10);
+      input.value = prev && prev >= 1 ? Math.min(prev, total) : total;
+      input.max = total;
+      updateFerryCostEstimate();
       document.getElementById("ferry-banner").hidden = false;
     }
 
@@ -3220,7 +3241,12 @@
         document.getElementById("ferry-btn").disabled = false;
         if (state.phase === "awaiting_judge") {
           showFerryBanner(state);
-          showToast(`Cull + enrich done — ${state.judgeable_count || 0} souls await the judge.`);
+          const j = state.judge || {};
+          if ((j.processed || 0) > 0) {
+            showToast(`Judged ${j.processed}: ${j.ready_added || 0} ready, ${j.refused_added || 0} refused — ${state.judgeable_count || 0} still at the gate.`);
+          } else {
+            showToast(`Cull + enrich done — ${state.judgeable_count || 0} souls await the judge.`);
+          }
         } else if (state.phase === "done") {
           hideFerryBanner();
           const j = state.judge || {};
@@ -3269,11 +3295,15 @@
     }
 
     async function startFerryJudge() {
+      const total = ferryState.judgeable_count || 0;
+      const n = parseInt(document.getElementById("ferry-judge-count").value, 10);
+      const body = { stage: "judge" };
+      if (n && n >= 1 && n < total) body.limit = n;
       try {
         const r = await fetch("/api/ferry", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ stage: "judge" }),
+          body: JSON.stringify(body),
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
@@ -3913,6 +3943,9 @@
     document.addEventListener("input", (ev) => {
       if (ev.target && ev.target.id === "sirens-textarea") {
         updateSirensCharCount();
+      }
+      if (ev.target && ev.target.id === "ferry-judge-count") {
+        updateFerryCostEstimate();
       }
     });
 

@@ -1068,8 +1068,12 @@ def _ferry_worker(start_stage: str = "gather") -> None:
         _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _ferry_judge_worker() -> None:
-    """The paid leg: judge everything judgeable, then the crossing is done."""
+def _ferry_judge_worker(limit: int | None = None) -> None:
+    """The paid leg: judge up to `limit` rows (None = everything judgeable).
+
+    After a partial batch the gate re-parks with whoever's left, so
+    judging in affordable chunks never loses the pending-confirm state.
+    """
     from charon.profile import load_profile
     from charon.screen import judge_batch
 
@@ -1087,13 +1091,29 @@ def _ferry_judge_worker() -> None:
 
     try:
         profile = load_profile()
-        judge_batch(profile=profile, on_progress=on_progress)
+        judge_batch(limit=limit, profile=profile, on_progress=on_progress)
     except Exception as e:  # noqa: BLE001
         with _ferry_lock:
             _ferry_state["error"] = f"{type(e).__name__}: {e}"
     finally:
+        remaining = 0
+        estimates: dict[str, Any] = {}
         with _ferry_lock:
-            _ferry_state["phase"] = "error" if _ferry_state["error"] else "done"
+            errored = _ferry_state["error"] is not None
+        if not errored:
+            try:
+                remaining = _count_judgeable()
+                estimates = _ferry_judge_estimates(remaining)
+            except Exception:  # noqa: BLE001 — fall through to 'done'
+                remaining = 0
+        with _ferry_lock:
+            if _ferry_state["error"]:
+                _ferry_state["phase"] = "error"
+            elif remaining > 0:
+                _ferry_state.update(estimates)
+                _ferry_state["phase"] = "awaiting_judge"
+            else:
+                _ferry_state["phase"] = "done"
             _ferry_state["running"] = False
             _ferry_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -1120,21 +1140,39 @@ def _start_ferry(start_stage: str = "gather") -> dict[str, Any]:
     return _ferry_status_snapshot()
 
 
-def _start_ferry_judge() -> dict[str, Any]:
-    """Launch the paid judge leg — only valid while paused at the gate."""
+def _start_ferry_judge(limit: int | None = None) -> dict[str, Any]:
+    """Launch the paid judge leg — only valid while paused at the gate.
+
+    `limit` judges just that many (highest-priority first per the judge
+    picker's ordering); None judges the whole gate. A partial batch
+    returns to the gate with the remainder when it finishes.
+    """
+    if limit is not None and limit < 1:
+        raise DashboardError("Judge batch size must be at least 1.")
     busy = _pipeline_busy()
     if busy:
         raise DashboardError(f"A {busy} job is already running — wait for it.")
     n = _count_judgeable()  # fresh count; no DB I/O under the lock
+    batch = min(limit, n) if limit is not None else n
     with _ferry_lock:
         if _ferry_state["phase"] != "awaiting_judge":
             raise DashboardError("The ferry isn't waiting at the judge gate.")
-        _ferry_state["judge"]["limit"] = n
+        _ferry_state["judge"] = {
+            "limit": batch,
+            "processed": 0,
+            "ready_added": 0,
+            "refused_added": 0,
+            "skipped": 0,
+        }
         _ferry_state["running"] = True
         _ferry_state["phase"] = "judge"
         _ferry_state["error"] = None
         _ferry_state["finished_at"] = None
-    threading.Thread(target=_ferry_judge_worker, daemon=True).start()
+    threading.Thread(
+        target=_ferry_judge_worker,
+        args=(limit if limit is not None and limit < n else None,),
+        daemon=True,
+    ).start()
     return _ferry_status_snapshot()
 
 
@@ -2122,8 +2160,20 @@ class _Handler(BaseHTTPRequestHandler):
                 body = {}
             try:
                 if body.get("stage") == "judge":
-                    # Confirm the pending judge gate (requires awaiting_judge)
-                    snap = _start_ferry_judge()
+                    # Confirm the pending judge gate (requires awaiting_judge).
+                    # Optional "limit" judges just a batch; the gate re-parks
+                    # with the remainder.
+                    raw_limit = body.get("limit")
+                    limit: int | None = None
+                    if raw_limit is not None:
+                        try:
+                            limit = int(raw_limit)
+                        except (TypeError, ValueError):
+                            self._serve_status(
+                                HTTPStatus.BAD_REQUEST, "limit must be an integer"
+                            )
+                            return
+                    snap = _start_ferry_judge(limit)
                 else:
                     # New crossing; "from" skips straight to a later stage
                     from_stage = body.get("from") or "gather"
