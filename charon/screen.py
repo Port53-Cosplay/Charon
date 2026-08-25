@@ -366,6 +366,15 @@ def judge_one_id(
         result["role"] = discovery.get("role")
         return result
 
+    if result.get("error") and result["judgement_reason"].startswith("AI error"):
+        # An API failure (billing, rate limit, retired model) is not a verdict.
+        # Leave the row unjudged so it returns to the gate once the API is
+        # healthy — a 2026-08 credit outage once "rejected" 391 rows this way.
+        result["discovery_id"] = discovery_id
+        result["company"] = discovery.get("company")
+        result["role"] = discovery.get("role")
+        return result
+
     update_discovery_judgement(
         discovery_id,
         ghost_score=result["ghost_score"],

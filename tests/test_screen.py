@@ -654,6 +654,28 @@ class TestResumeMatchIntegration:
         assert len(results) >= 1
 
 
+class TestAIErrorLeavesRowUnjudged:
+    def test_api_failure_is_not_a_verdict(self, monkeypatch):
+        # Billing/rate-limit/retired-model errors must NOT write a rejection —
+        # the row stays unjudged and returns to the gate when the API heals.
+        from charon.ai import AIError
+        from charon.db import get_discovery
+
+        did = _seed_enriched(dedupe_hash="aierr-a")
+
+        def broke(*a, **kw):
+            raise AIError("Your credit balance is too low")
+        monkeypatch.setattr(screen, "analyze_ghostbust", broke)
+
+        result = judge_one_id(did, profile=PROFILE)
+
+        assert result.get("error")
+        assert result["judgement_reason"].startswith("AI error")
+        row = get_discovery(did)
+        assert row["judged_at"] is None                 # nothing written
+        assert row["screened_status"] != "rejected"
+
+
 class TestKeyboardInterruptPropagates:
     """Ctrl+C must abort the batch loop — not get swallowed as an AIError
     that marks one row rejected and moves on. Regression test for the bug
