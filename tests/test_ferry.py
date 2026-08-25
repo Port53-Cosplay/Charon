@@ -85,8 +85,8 @@ def test_ferry_chain_pauses_at_judge_gate(monkeypatch):
     assert snap["phase"] == "awaiting_judge"
     assert snap["running"] is False
     assert snap["judgeable_count"] == 5
-    assert snap["cost_low"] == pytest.approx(0.10)
-    assert snap["cost_high"] == pytest.approx(0.25)
+    assert snap["cost_low"] == pytest.approx(5 * dashboard._JUDGE_COST_LOW)
+    assert snap["cost_high"] == pytest.approx(5 * dashboard._JUDGE_COST_HIGH)
     assert snap["est_minutes_low"] >= 1
     # Stage counters flowed through
     assert snap["gather"]["total_new"] == 3
@@ -172,8 +172,27 @@ def test_legacy_jobs_refuse_while_ferry_runs():
 
 def test_ferry_judge_requires_the_gate(monkeypatch):
     monkeypatch.setattr(dashboard, "_count_judgeable", lambda: 3)
+    canaries = []
+    monkeypatch.setattr(dashboard, "_api_canary", lambda: canaries.append(1))
     with pytest.raises(dashboard.DashboardError, match="judge gate"):
         dashboard._start_ferry_judge()      # phase is 'idle'
+    assert not canaries                     # no canary spend when not at the gate
+
+
+def test_ferry_judge_canary_blocks_on_empty_balance(monkeypatch):
+    monkeypatch.setattr(dashboard, "_count_judgeable", lambda: 3)
+
+    def broke_canary():
+        raise dashboard.DashboardError("Anthropic balance is empty — top up.")
+    monkeypatch.setattr(dashboard, "_api_canary", broke_canary)
+
+    with dashboard._ferry_lock:
+        dashboard._ferry_state["phase"] = "awaiting_judge"
+    with pytest.raises(dashboard.DashboardError, match="balance is empty"):
+        dashboard._start_ferry_judge()
+    snap = dashboard._ferry_status_snapshot()
+    assert snap["running"] is False          # nothing launched
+    assert snap["phase"] == "awaiting_judge"  # gate intact
 
 
 def _wait_for_ferry_idle(timeout=5):
@@ -187,6 +206,7 @@ def _wait_for_ferry_idle(timeout=5):
 
 
 def test_ferry_judge_leg_runs_to_done(monkeypatch):
+    monkeypatch.setattr(dashboard, "_api_canary", lambda: None)
     # _count_judgeable: 2 at start, 0 after the batch drains the gate
     counts = iter([2, 0])
     monkeypatch.setattr(dashboard, "_count_judgeable", lambda: next(counts, 0))
@@ -214,6 +234,7 @@ def test_ferry_judge_leg_runs_to_done(monkeypatch):
 
 
 def test_ferry_judge_partial_batch_reparks_the_gate(monkeypatch):
+    monkeypatch.setattr(dashboard, "_api_canary", lambda: None)
     # Gate holds 10; judge 3; 7 remain → back to awaiting_judge with fresh
     # estimates, and the batch limit reflects the partial size.
     counts = iter([10, 7])
@@ -241,7 +262,7 @@ def test_ferry_judge_partial_batch_reparks_the_gate(monkeypatch):
     assert snap["judge"]["limit"] == 3
     assert snap["judge"]["processed"] == 3
     assert snap["judgeable_count"] == 7
-    assert snap["cost_low"] == pytest.approx(0.14)
+    assert snap["cost_low"] == pytest.approx(7 * dashboard._JUDGE_COST_LOW)
 
 
 def test_ferry_judge_rejects_bad_limit():

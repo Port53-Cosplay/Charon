@@ -110,3 +110,63 @@ def test_judge_batch_workers1_is_sequential(monkeypatch):
     assert max_active == 1
     assert order == [0, 1, 2, 3]            # sequential path preserves order
     assert [r["discovery_id"] for r in results] == [0, 1, 2, 3]
+
+
+def _ai_error_result(did):
+    return {"discovery_id": did, "screened_status": "rejected",
+            "judgement_reason": "AI error: credit balance too low", "error": "boom"}
+
+
+def test_breaker_stops_sequential_batch_on_consecutive_ai_errors(monkeypatch):
+    calls = []
+
+    def fake_judge_one_id(did, **kw):
+        calls.append(did)
+        return _ai_error_result(did)
+
+    monkeypatch.setattr(screen_mod, "judge_one_id", fake_judge_one_id)
+    monkeypatch.setattr(screen_mod, "_maybe_load_resume", lambda p: None)
+    monkeypatch.setattr(
+        screen_mod, "get_unjudged_discoveries", lambda **kw: _fake_targets(50)
+    )
+
+    results = screen_mod.judge_batch(profile={}, workers=1)
+
+    assert len(calls) == screen_mod.JUDGE_BREAKER_THRESHOLD   # stopped at 5, not 50
+    assert len(results) == screen_mod.JUDGE_BREAKER_THRESHOLD
+
+
+def test_breaker_stops_parallel_batch_early(monkeypatch):
+    import time as time_mod
+
+    def fake_judge_one_id(did, **kw):
+        time_mod.sleep(0.01)
+        return _ai_error_result(did)
+
+    monkeypatch.setattr(screen_mod, "judge_one_id", fake_judge_one_id)
+    monkeypatch.setattr(screen_mod, "_maybe_load_resume", lambda p: None)
+    monkeypatch.setattr(
+        screen_mod, "get_unjudged_discoveries", lambda **kw: _fake_targets(60)
+    )
+
+    results = screen_mod.judge_batch(profile={}, workers=4)
+
+    # In-flight rows may land after the trip, but the queue must not drain.
+    assert len(results) < 60
+
+
+def test_breaker_resets_on_success(monkeypatch):
+    # Alternating error/success never trips the CONSECUTIVE breaker.
+    def fake_judge_one_id(did, **kw):
+        if did % 2 == 0:
+            return _ai_error_result(did)
+        return {"discovery_id": did, "screened_status": "ready"}
+
+    monkeypatch.setattr(screen_mod, "judge_one_id", fake_judge_one_id)
+    monkeypatch.setattr(screen_mod, "_maybe_load_resume", lambda p: None)
+    monkeypatch.setattr(
+        screen_mod, "get_unjudged_discoveries", lambda **kw: _fake_targets(20)
+    )
+
+    results = screen_mod.judge_batch(profile={}, workers=1)
+    assert len(results) == 20

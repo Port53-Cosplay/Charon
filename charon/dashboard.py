@@ -833,10 +833,13 @@ def _start_judge_batch(
 # The legacy per-stage jobs above stay for the CLI and Don's fork; the
 # dashboard UI only drives the ferry.
 
-# Mirror the frontend's judge cost math (was updateJudgeCostEstimate):
-# $0.02–$0.05 and 3–6s of wall time per row (before worker parallelism).
-_JUDGE_COST_LOW = 0.02
-_JUDGE_COST_HIGH = 0.05
+# Real-world judge cost per row, measured 2026-08-25 against the imported
+# board pool (avg ~5.4k-char descriptions): each row is FOUR Sonnet calls,
+# each re-sending the posting, plus the resume on the match call. The old
+# $0.02–$0.05 figure was calibrated on shorter curated-board postings and
+# under-billed a $20 refill by half.
+_JUDGE_COST_LOW = 0.08
+_JUDGE_COST_HIGH = 0.11
 _JUDGE_SECS_LOW = 3
 _JUDGE_SECS_HIGH = 6
 
@@ -1140,6 +1143,32 @@ def _start_ferry(start_stage: str = "gather") -> dict[str, Any]:
     return _ferry_status_snapshot()
 
 
+def _api_canary() -> None:
+    """One-token Anthropic call (~$0.0001) to fail fast before a batch.
+
+    Raises DashboardError with a plain-language message when the account
+    can't pay — a $20 refill once drained mid-batch and the next click
+    silently skipped 300 rows; this turns that into an immediate answer.
+    """
+    from charon.ai import MODEL, get_client
+
+    try:
+        client = get_client()
+        client.messages.create(
+            model=MODEL,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        if "credit balance" in msg.lower():
+            raise DashboardError(
+                "Anthropic balance is empty — the ferryman's purse is bare. "
+                "Top up at console.anthropic.com, then judge."
+            ) from e
+        raise DashboardError(f"Anthropic API check failed: {msg[:160]}") from e
+
+
 def _start_ferry_judge(limit: int | None = None) -> dict[str, Any]:
     """Launch the paid judge leg — only valid while paused at the gate.
 
@@ -1152,6 +1181,10 @@ def _start_ferry_judge(limit: int | None = None) -> dict[str, Any]:
     busy = _pipeline_busy()
     if busy:
         raise DashboardError(f"A {busy} job is already running — wait for it.")
+    with _ferry_lock:
+        if _ferry_state["phase"] != "awaiting_judge":
+            raise DashboardError("The ferry isn't waiting at the judge gate.")
+    _api_canary()
     n = _count_judgeable()  # fresh count; no DB I/O under the lock
     batch = min(limit, n) if limit is not None else n
     with _ferry_lock:

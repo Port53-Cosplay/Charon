@@ -3202,8 +3202,9 @@
       let n = parseInt(input.value, 10);
       if (!n || n < 1) n = total;
       n = Math.min(n, total);
+      // Measured real-world cost: 4 Sonnet calls/row over long postings.
       document.getElementById("ferry-cost").textContent =
-        `$${(n * 0.02).toFixed(2)}–$${(n * 0.05).toFixed(2)}`;
+        `$${(n * 0.08).toFixed(2)}–$${(n * 0.11).toFixed(2)}`;
       // 3–6s per row across 4 judge workers
       const lo = Math.max(1, Math.round(n * 3 / 4 / 60));
       const hi = Math.max(1, Math.round(n * 6 / 4 / 60));

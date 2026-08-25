@@ -403,6 +403,9 @@ def judge_one_id(
 DEFAULT_JUDGE_WORKERS = 4
 MAX_JUDGE_WORKERS = 8
 
+# Consecutive AI-error results that abort a batch (API down / balance empty).
+JUDGE_BREAKER_THRESHOLD = 5
+
 
 def _resolve_judge_workers(workers: int | None) -> int:
     """Pick the pool size: explicit arg, else CHARON_JUDGE_WORKERS, else default."""
@@ -468,6 +471,19 @@ def judge_batch(
     results: list[dict[str, Any]] = []
     pool_size = min(_resolve_judge_workers(workers), max(1, len(targets)))
 
+    # Circuit breaker: this many consecutive AI errors means the API itself
+    # is down (empty balance, outage) — stop burning the queue on failures
+    # rather than "skipping" every remaining row.
+    consecutive_errors = 0
+
+    def _tripped(result: dict[str, Any]) -> bool:
+        nonlocal consecutive_errors
+        if result.get("error") and str(result.get("judgement_reason", "")).startswith("AI error"):
+            consecutive_errors += 1
+        else:
+            consecutive_errors = 0
+        return consecutive_errors >= JUDGE_BREAKER_THRESHOLD
+
     if pool_size <= 1 or len(targets) <= 1:
         for discovery in targets:
             try:
@@ -483,6 +499,8 @@ def judge_batch(
             results.append(result)
             if on_progress:
                 on_progress(result)
+            if _tripped(result):
+                break
         return results
 
     with ThreadPoolExecutor(max_workers=pool_size) as pool:
@@ -509,6 +527,10 @@ def judge_batch(
                 results.append(result)
                 if on_progress:
                     on_progress(result)
+                if _tripped(result):
+                    for f in futures:
+                        f.cancel()
+                    break
         except BaseException:
             # Ctrl-C (or another fatal signal): drop the queued rows so the
             # batch stops as soon as in-flight calls finish, then propagate.
