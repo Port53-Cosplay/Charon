@@ -2430,6 +2430,21 @@
       }
     }
 
+    // The judge gate rides on the real DB count of enriched-but-unjudged rows,
+    // so it survives a service restart (which forgets the in-memory parked
+    // gate but not the rows). Shown whenever souls actually wait.
+    function updateGateButton(judgeable) {
+      const gateBtn = document.getElementById("gate-btn");
+      if (!gateBtn) return;
+      const n = judgeable || 0;
+      if (n > 0) {
+        document.getElementById("gate-nav-count").textContent = `${n} waiting`;
+        gateBtn.hidden = false;
+      } else {
+        gateBtn.hidden = true;
+      }
+    }
+
     async function loadStats() {
       try {
         const r = await fetch("/api/stats");
@@ -2450,6 +2465,7 @@
         setStat("stat-applied", s.applied_total);
         setStat("stat-stranded", s.stranded);
         setStat("stat-reply-rate", s.reply_rate, true);
+        updateGateButton(s.judgeable);
       } catch (e) { /* silent — stats are decorative */ }
     }
 
@@ -3193,19 +3209,9 @@
         btn.title = "Begin the crossing: harvest fresh postings, then cull, enrich, and stop for one confirm before the paid judge. Always starts with a fresh harvest.";
         navPill.hidden = true;
       }
-      // The gate rides separately: lit whenever souls are enriched-but-unjudged,
-      // so the review (and the paid judge) can be opened at any time without
-      // taking over the harvest button.
-      const gateBtn = document.getElementById("gate-btn");
-      if (gateBtn) {
-        const waiting = ferryState.judgeable_count || 0;
-        if (ferryState.phase === "awaiting_judge" && waiting > 0) {
-          document.getElementById("gate-nav-count").textContent = `${waiting} waiting`;
-          gateBtn.hidden = false;
-        } else {
-          gateBtn.hidden = true;
-        }
-      }
+      // The gate button is driven separately, off the DB-backed judgeable
+      // count in loadStats() -> updateGateButton() — not the in-memory ferry
+      // phase, which a service restart wipes while the rows remain.
     }
 
     function updateFerryCostEstimate() {
@@ -3723,11 +3729,17 @@
         }
         return;
       }
-      // The gate — open the judge review (count + cost). Spends nothing until
-      // you confirm inside the banner.
+      // The gate — open the judge review (count + cost). If the crossing
+      // already parked here in memory, show the banner straight away; otherwise
+      // (e.g. after a service restart) re-park first, which only counts and
+      // prices the backlog — no harvest, no spend — then the banner opens.
       if (ev.target.closest("#gate-btn")) {
-        activateTab("gathered");
-        showFerryBanner(ferryState);
+        if (ferryState.phase === "awaiting_judge" && (ferryState.judgeable_count || 0) > 0) {
+          activateTab("gathered");
+          showFerryBanner(ferryState);
+        } else if (!ferryState.running) {
+          startFerry("judge");
+        }
         return;
       }
       // Stage chips (Awaiting header) — run the crossing from that stage
