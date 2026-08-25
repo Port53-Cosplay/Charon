@@ -1948,8 +1948,11 @@
           <img class="tab-icon" src="/static/charon_rune.png" alt="">
           <span class="tab-label">Awaiting</span><span class="tab-count" id="count-gathered">—</span>
         </button>
-        <button class="nav-action" id="ferry-btn" title="Run the whole crossing: harvest fresh postings, cull the obvious non-fits, enrich descriptions — then pause for one confirm before the paid judge.">
-          <span class="nav-action-label" id="ferry-label">⛵ Ferry them across</span><span class="nav-action-count" id="ferry-nav-state" hidden></span>
+        <button class="nav-action" id="ferry-btn" title="Begin the crossing: harvest fresh postings, then cull, enrich, and stop for one confirm before the paid judge. Always starts with a fresh harvest.">
+          <span class="nav-action-label" id="ferry-label">⛵ Begin the crossing</span><span class="nav-action-count" id="ferry-nav-state" hidden></span>
+        </button>
+        <button class="nav-action" id="gate-btn" title="Souls are waiting at the judge gate. Click to review the count and cost, then decide — spends nothing until you confirm." hidden>
+          <span class="nav-action-label">⚖ The gate</span><span class="nav-action-count" id="gate-nav-count"></span>
         </button>
         <button class="tab active" data-tab="ready">
           <img class="tab-icon" src="/static/charon_compass.png" alt="">
@@ -1972,7 +1975,7 @@
 
     <main class="main">
       <div id="stats-band" class="stats-band">
-        <div class="stat dim" title="Every posting Charon has ever pulled in. The smaller 'as of' date is your most recent harvest, so you can tell how fresh the pool is."><div class="num placeholder" id="stat-gathered">—</div><div class="label">Gathered</div><div class="sub" id="stat-gathered-sub"></div></div>
+        <div class="stat dim" title="Every posting Charon has ever pulled in. The smaller 'as of' date is your most recent harvest, so you can tell how fresh the pool is."><div class="num placeholder" id="stat-gathered">—</div><div class="label">Harvested</div><div class="sub" id="stat-gathered-sub"></div></div>
         <div class="stat dim" title="Postings dropped by the cheap cull pass (DeepSeek) before any Sonnet spend — obvious non-fits filtered on title/company/location alone. Every one here is a posting the expensive judge never had to touch."><div class="num placeholder" id="stat-culled">—</div><div class="label">Culled</div></div>
         <div class="stat dim" title="Postings actually scored by Sonnet — the deep judge — ending up ready or refused. Cheap cull-rejections are counted separately under Culled, not here. 'waiting' is the enriched postings not yet scored; the ferry pauses to ask before judging them."><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
         <div class="stat" title="Postings that passed judging and are worth applying to. These show on the Ready tab."><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
@@ -2004,7 +2007,7 @@
           <span class="breakdown" id="ferry-breakdown"></span>
         </div>
         <div id="ferry-banner" class="judge-form" hidden>
-          <span class="cost-est"><strong id="ferry-souls">0</strong> souls at the bank</span>
+          <span class="cost-est"><strong id="ferry-souls">0</strong> souls waiting at the gate</span>
           <label title="How many to judge this batch — the rest stay at the gate for next time.">Judge
             <input type="number" id="ferry-judge-count" min="1" style="width:70px">
           </label>
@@ -3174,9 +3177,10 @@
       const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
       document.getElementById("ferry-fill").style.width = pct + "%";
       document.getElementById("ferry-breakdown").textContent = breakdown;
-      // The nav button changes identity with the state, so a click always
-      // does what the label says: start / watch / review. It NEVER starts
-      // a new crossing while one is underway or paused.
+      // The primary button always begins a fresh crossing (harvest first);
+      // the judge gate is a separate, always-reachable control (#gate-btn) so
+      // harvest is never hidden behind a pending-judge pause. While a crossing
+      // is underway the button switches to a watch affordance.
       const btn = document.getElementById("ferry-btn");
       const navLabel = document.getElementById("ferry-label");
       if (ferryState.running && info) {
@@ -3184,15 +3188,23 @@
         btn.title = "The ferry is underway. Click to watch its progress (this never starts another crossing).";
         navPill.textContent = `${info.nav} ${done}/${total}`;
         navPill.hidden = false;
-      } else if (phase === "awaiting_judge") {
-        navLabel.textContent = "⚖ At the judge gate";
-        btn.title = "The crossing is done — souls await the judge. Click to review the count and cost, then decide.";
-        navPill.textContent = `${ferryState.judgeable_count || 0} waiting`;
-        navPill.hidden = false;
       } else {
-        navLabel.textContent = "⛵ Ferry them across";
-        btn.title = "Run the whole crossing: harvest fresh postings, cull the obvious non-fits, enrich descriptions — then pause for one confirm before the paid judge.";
+        navLabel.textContent = "⛵ Begin the crossing";
+        btn.title = "Begin the crossing: harvest fresh postings, then cull, enrich, and stop for one confirm before the paid judge. Always starts with a fresh harvest.";
         navPill.hidden = true;
+      }
+      // The gate rides separately: lit whenever souls are enriched-but-unjudged,
+      // so the review (and the paid judge) can be opened at any time without
+      // taking over the harvest button.
+      const gateBtn = document.getElementById("gate-btn");
+      if (gateBtn) {
+        const waiting = ferryState.judgeable_count || 0;
+        if (ferryState.phase === "awaiting_judge" && waiting > 0) {
+          document.getElementById("gate-nav-count").textContent = `${waiting} waiting`;
+          gateBtn.hidden = false;
+        } else {
+          gateBtn.hidden = true;
+        }
       }
     }
 
@@ -3699,17 +3711,23 @@
         return;
       }
 
-      // The ferry — start a crossing, or jump to its progress if underway
+      // The ferry — always begins a fresh crossing (harvest first). If one is
+      // already underway, jump to its progress instead. A parked judge gate is
+      // opened from #gate-btn, not here, so harvest is always one click.
       if (ev.target.closest("#ferry-btn")) {
         const btn = document.getElementById("ferry-btn");
         if (ferryState.running) {
           activateTab("gathered");
-        } else if (ferryState.phase === "awaiting_judge") {
-          activateTab("gathered");
-          showFerryBanner(ferryState);
         } else if (btn && !btn.disabled) {
           startFerry();
         }
+        return;
+      }
+      // The gate — open the judge review (count + cost). Spends nothing until
+      // you confirm inside the banner.
+      if (ev.target.closest("#gate-btn")) {
+        activateTab("gathered");
+        showFerryBanner(ferryState);
         return;
       }
       // Stage chips (Awaiting header) — run the crossing from that stage
@@ -4017,9 +4035,10 @@
         document.getElementById("ferry-btn").disabled = true;
         document.getElementById("ferry-progress").hidden = false;
         pollFerryProgress();
-      } else if (s.phase === "awaiting_judge") {
-        showFerryBanner(s);
       }
+      // A parked gate shows as the lit #gate-btn (set by setFerryProgress
+      // above); we don't auto-open the banner on load — the page stays calm
+      // and you open the gate when you're ready to decide.
     }).catch(() => {});
   </script>
 </body>
