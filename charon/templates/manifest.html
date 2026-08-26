@@ -449,6 +449,35 @@
     }
     .strip-btn.primary:hover { background: var(--blush-hover); }
 
+    /* On-screen crossing legend — the funnel vocabulary, visible not hover-only */
+    .crossing-legend {
+      background: var(--bg-soft);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 10px 16px;
+      margin-bottom: 14px;
+    }
+    .legend-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .legend-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+      color: var(--ink-faint); font-weight: 700; flex: 0 0 auto;
+    }
+    .legend-flow { font-size: 13px; color: var(--ink-soft); flex: 1 1 auto; letter-spacing: 0.01em; }
+    .legend-flow .legend-out { color: var(--plum); font-weight: 600; }
+    .legend-toggle {
+      font: inherit; font-size: 12px; background: transparent; border: none;
+      color: var(--plum-soft); cursor: pointer; text-decoration: underline;
+      flex: 0 0 auto; padding: 0;
+    }
+    .legend-toggle:hover { color: var(--plum); }
+    .legend-detail {
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border);
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px;
+      font-size: 12.5px; color: var(--ink-muted); line-height: 1.5;
+    }
+    .legend-detail strong { color: var(--ink-soft); }
+    @media (max-width: 720px) { .legend-detail { grid-template-columns: 1fr; } }
+
     /* ── chart modal ─────────────────────────────────────────── */
 
     .modal-backdrop {
@@ -2036,15 +2065,26 @@
           </div>
         </div>
       </section>
+      <div id="crossing-legend" class="crossing-legend">
+        <div class="legend-line">
+          <span class="legend-label">The crossing</span>
+          <span class="legend-flow">Harvest → Cull → Enrich → Judge → <span class="legend-out">Ready</span> → <span class="legend-out">Applied</span></span>
+          <button class="legend-toggle" id="legend-toggle" aria-expanded="false">what these mean</button>
+        </div>
+        <div class="legend-detail" id="legend-detail" hidden>
+          <div><strong>Harvest</strong> — pull fresh postings from your job boards.</div>
+          <div><strong>Cull</strong> — a cheap first pass drops the obvious non-fits before any spend.</div>
+          <div><strong>Enrich</strong> — fetch each surviving posting's full description.</div>
+          <div><strong>Judge</strong> — the paid deep scoring; sorts each into Ready or Refused.</div>
+          <div><strong>Ready</strong> — passed judging, worth applying to.</div>
+          <div><strong>Applied</strong> — you've applied; tracked for a response.</div>
+        </div>
+      </div>
       <div id="stats-band" class="stats-band">
-        <div class="stat dim" title="Every posting Charon has ever pulled in. The smaller 'as of' date is your most recent harvest, so you can tell how fresh the pool is."><div class="num placeholder" id="stat-gathered">—</div><div class="label">Harvested</div><div class="sub" id="stat-gathered-sub"></div></div>
-        <div class="stat dim" title="Postings dropped by the cheap cull pass (DeepSeek) before any Sonnet spend — obvious non-fits filtered on title/company/location alone. Every one here is a posting the expensive judge never had to touch."><div class="num placeholder" id="stat-culled">—</div><div class="label">Culled</div></div>
-        <div class="stat dim" title="Postings actually scored by Sonnet — the deep judge — ending up ready or refused. Cheap cull-rejections are counted separately under Culled, not here. 'waiting' is the enriched postings not yet scored; the ferry pauses to ask before judging them."><div class="num placeholder" id="stat-judged">—</div><div class="label">Judged</div><div class="sub" id="stat-judged-sub"></div></div>
-        <div class="stat" title="Postings that passed judging and are worth applying to. These show on the Ready tab."><div class="num placeholder" id="stat-ready">—</div><div class="label">Ready</div></div>
         <div class="stat" title="Applications you've submitted and are tracking."><div class="num placeholder" id="stat-applied">—</div><div class="label">Applied</div></div>
         <div class="stat dim" title="Applications that went silent — no response after applying (ghosted)."><div class="num placeholder" id="stat-stranded">—</div><div class="label">Stranded</div></div>
         <div class="stat" title="Share of your applications that got any reply back (interview, response, or offer) — not counting ghosted or still-pending ones."><div class="num placeholder" id="stat-reply-rate">—</div><div class="label">Reply rate</div></div>
-        <button id="open-charts-btn" class="chart-link" title="Open visual breakdown" aria-label="Open visual breakdown">
+        <button id="open-charts-btn" class="chart-link" title="Harvest, cull, judge and the full funnel breakdown" aria-label="Open the funnel and charts">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="3" y1="20" x2="21" y2="20"></line>
             <rect x="5" y="11" width="3" height="7"></rect>
@@ -3876,6 +3916,17 @@
         else activateTab("gathered");
         return;
       }
+      // Crossing legend — show/hide the on-screen glossary (state remembered)
+      if (ev.target.closest("#legend-toggle")) {
+        const detail = document.getElementById("legend-detail");
+        const btn = document.getElementById("legend-toggle");
+        const open = detail.hidden;
+        detail.hidden = !open;
+        btn.setAttribute("aria-expanded", String(open));
+        btn.textContent = open ? "hide" : "what these mean";
+        try { localStorage.setItem("charon.legendOpen", open ? "1" : "0"); } catch (e) {}
+        return;
+      }
       // Stage chips (Awaiting header) — run the crossing from that stage
       // onward, skipping the harvest entirely.
       const chip = ev.target.closest(".stage-chip");
@@ -4155,6 +4206,19 @@
     loadRefused();
     loadGathered();
     loadStats();
+
+    // Restore the crossing legend's open/closed state from last visit.
+    try {
+      if (localStorage.getItem("charon.legendOpen") === "1") {
+        const detail = document.getElementById("legend-detail");
+        const lb = document.getElementById("legend-toggle");
+        if (detail && lb) {
+          detail.hidden = false;
+          lb.setAttribute("aria-expanded", "true");
+          lb.textContent = "hide";
+        }
+      }
+    } catch (e) { /* localStorage unavailable — legend just starts collapsed */ }
 
     // Background tabs get throttled by browsers — refresh whenever the
     // user comes back to this tab so the numbers reflect any CLI judge
