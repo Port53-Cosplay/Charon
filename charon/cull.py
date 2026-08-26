@@ -133,19 +133,23 @@ def _parse_model_output(text: str) -> dict[str, Any]:
 # only refuse when the location clearly names a foreign country, and never
 # when it mentions the US or Canada (so US/Canada and bare "Remote" pass).
 _FOREIGN_NAMES = (
-    "belgië", "belgium", "nederland", "netherlands", "france", "deutschland",
-    "germany", "united kingdom", "england", "scotland", "ireland", "españa",
-    "spain", "italia", "italy", "portugal", "poland", "polska", "schweiz",
-    "switzerland", "österreich", "austria", "sweden", "sverige", "denmark",
-    "danmark", "norway", "norge", "finland", "suomi", "luxembourg",
-    "south africa", "singapore", "hong kong", "japan", "czech", "romania",
-    "greece", "hungary", "méxico", "mexico", "brasil", "brazil", "australia",
-    "new zealand", "india", "united arab emirates", "dubai",
+    "belgië", "belgium", "belgique", "nederland", "netherlands", "pays-bas",
+    "france", "deutschland", "germany", "allemagne", "united kingdom",
+    "england", "scotland", "ireland", "éire", "españa", "spain", "espagne",
+    "cataluña", "catalunya", "italia", "italy", "italie", "portugal",
+    "poland", "polska", "schweiz", "switzerland", "suisse", "österreich",
+    "austria", "autriche", "sweden", "sverige", "denmark", "danmark",
+    "norway", "norge", "finland", "suomi", "luxembourg", "luxemburg",
+    "south africa", "singapore", "hong kong", "japan", "czech", "tchéquie",
+    "tchequie", "romania", "greece", "hungary", "méxico", "mexico", "brasil",
+    "brazil", "australia", "new zealand", "india", "united arab emirates",
+    "dubai",
 )
 # Trailing country codes that don't collide with US state abbreviations.
 _FOREIGN_CODES = (
     "nl", "be", "fr", "gb", "uk", "ie", "pt", "pl", "ch", "se", "dk", "fi",
     "lu", "za", "sg", "hk", "jp", "cz", "ro", "gr", "hu", "au", "nz", "ae",
+    "es", "it", "at",
 )
 
 
@@ -162,6 +166,21 @@ def _is_foreign_location(location: str | None) -> bool:
     if any(name in loc for name in _FOREIGN_NAMES):
         return True
     return any(loc.endswith(f", {cc}") or f", {cc}," in loc for cc in _FOREIGN_CODES)
+
+
+# Evergreen "send us your CV" pages, not real openings — junk in any language.
+_OPEN_APP_MARKERS = (
+    "open application", "candidature spontan", "spontaneous application",
+    "unsolicited application", "initiativbewerbung", "spontane sollicitatie",
+    "open sollicitatie", "speculative application", "talent community",
+    "talent pool", "candidatura espontá", "candidatura spontanea",
+)
+
+
+def _is_open_application(role: str | None) -> bool:
+    """True for evergreen open/spontaneous-application listings (not real jobs)."""
+    r = (role or "").lower()
+    return any(m in r for m in _OPEN_APP_MARKERS)
 
 
 def _matched_blocked_employer(row: dict[str, Any], profile: dict[str, Any]) -> str | None:
@@ -198,6 +217,14 @@ def cull_one(row: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
         return {
             "decision": "refuse",
             "reason": f"blocked employer: {blocked}",
+            "confidence": "high",
+        }
+
+    # Evergreen open/spontaneous-application pages are never real openings.
+    if _is_open_application(row.get("role")):
+        return {
+            "decision": "refuse",
+            "reason": "open/spontaneous application (not a real posting)",
             "confidence": "high",
         }
 
