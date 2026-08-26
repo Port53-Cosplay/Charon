@@ -129,6 +129,41 @@ def _parse_model_output(text: str) -> dict[str, Any]:
     return json.loads(m.group(0))
 
 
+# Geography gate (opt-in per profile via `us_canada_only`). High precision:
+# only refuse when the location clearly names a foreign country, and never
+# when it mentions the US or Canada (so US/Canada and bare "Remote" pass).
+_FOREIGN_NAMES = (
+    "belgië", "belgium", "nederland", "netherlands", "france", "deutschland",
+    "germany", "united kingdom", "england", "scotland", "ireland", "españa",
+    "spain", "italia", "italy", "portugal", "poland", "polska", "schweiz",
+    "switzerland", "österreich", "austria", "sweden", "sverige", "denmark",
+    "danmark", "norway", "norge", "finland", "suomi", "luxembourg",
+    "south africa", "singapore", "hong kong", "japan", "czech", "romania",
+    "greece", "hungary", "méxico", "mexico", "brasil", "brazil", "australia",
+    "new zealand", "india", "united arab emirates", "dubai",
+)
+# Trailing country codes that don't collide with US state abbreviations.
+_FOREIGN_CODES = (
+    "nl", "be", "fr", "gb", "uk", "ie", "pt", "pl", "ch", "se", "dk", "fi",
+    "lu", "za", "sg", "hk", "jp", "cz", "ro", "gr", "hu", "au", "nz", "ae",
+)
+
+
+def _is_foreign_location(location: str | None) -> bool:
+    """True only when the location clearly names a country outside the US/Canada.
+    Conservative: unknown/blank or any mention of the US or Canada returns False,
+    so US, Canadian, and bare 'Remote' postings are never blocked.
+    """
+    loc = (location or "").strip().lower()
+    if not loc:
+        return False
+    if "united states" in loc or "canada" in loc:
+        return False
+    if any(name in loc for name in _FOREIGN_NAMES):
+        return True
+    return any(loc.endswith(f", {cc}") or f", {cc}," in loc for cc in _FOREIGN_CODES)
+
+
 def _matched_blocked_employer(row: dict[str, Any], profile: dict[str, Any]) -> str | None:
     """Return the blocked-employer name if this row's company is on the
     profile's `blocked_employers` list (case-insensitive, trimmed exact match),
@@ -163,6 +198,15 @@ def cull_one(row: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
         return {
             "decision": "refuse",
             "reason": f"blocked employer: {blocked}",
+            "confidence": "high",
+        }
+
+    # Geography gate — only when this profile opts in (keeps Don's fork, which
+    # shares this code, unaffected). US, Canada, and bare "Remote" always pass.
+    if profile.get("us_canada_only") and _is_foreign_location(row.get("location")):
+        return {
+            "decision": "refuse",
+            "reason": f"outside US/Canada: {(row.get('location') or '').strip()}",
             "confidence": "high",
         }
 

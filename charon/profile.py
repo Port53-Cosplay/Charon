@@ -52,6 +52,9 @@ DEFAULT_PROFILE = {
     # municipal boards that would require relocation). Case-insensitive exact
     # match on the posting's company name.
     "blocked_employers": [],
+    # When true, the cull drops postings whose location clearly names a country
+    # outside the US/Canada (US, Canada, and bare "Remote" always pass).
+    "us_canada_only": False,
     "notifications": {
         "enabled": False,
         "mail_server": "smtp.yourmailserver.com",
@@ -218,6 +221,11 @@ def validate_profile(profile: dict[str, Any]) -> None:
         for i, item in enumerate(blocked):
             if not isinstance(item, str):
                 raise ProfileError(f"'blocked_employers[{i}]' must be a string")
+
+    # Validate us_canada_only (optional bool — geography cull gate)
+    us_ca = profile.get("us_canada_only")
+    if us_ca is not None and not isinstance(us_ca, bool):
+        raise ProfileError("'us_canada_only' must be true or false")
 
     # Validate ghostbust threshold
     ghostbust = profile.get("ghostbust", {})
