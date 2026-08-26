@@ -47,6 +47,11 @@ DEFAULT_PROFILE = {
         "penetration tester",
         "offensive security",
     ],
+    # Employers dropped by the cull before any paid analysis — categorically
+    # unsuitable regardless of the specific posting (e.g. always-on-site
+    # municipal boards that would require relocation). Case-insensitive exact
+    # match on the posting's company name.
+    "blocked_employers": [],
     "notifications": {
         "enabled": False,
         "mail_server": "smtp.yourmailserver.com",
@@ -204,6 +209,15 @@ def validate_profile(profile: dict[str, Any]) -> None:
         for i, item in enumerate(items):
             if not isinstance(item, str):
                 raise ProfileError(f"'{key}[{i}]' must be a string")
+
+    # Validate blocked_employers (optional list of strings — hard cull block)
+    blocked = profile.get("blocked_employers")
+    if blocked is not None:
+        if not isinstance(blocked, list):
+            raise ProfileError("'blocked_employers' must be a list")
+        for i, item in enumerate(blocked):
+            if not isinstance(item, str):
+                raise ProfileError(f"'blocked_employers[{i}]' must be a string")
 
     # Validate ghostbust threshold
     ghostbust = profile.get("ghostbust", {})

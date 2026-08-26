@@ -129,6 +129,23 @@ def _parse_model_output(text: str) -> dict[str, Any]:
     return json.loads(m.group(0))
 
 
+def _matched_blocked_employer(row: dict[str, Any], profile: dict[str, Any]) -> str | None:
+    """Return the blocked-employer name if this row's company is on the
+    profile's `blocked_employers` list (case-insensitive, trimmed exact match),
+    else None. These are employers categorically unsuitable regardless of the
+    specific posting — e.g. always-on-site municipal boards that would require
+    relocation — so they're dropped before any paid analysis.
+    """
+    blocked = profile.get("blocked_employers") or []
+    company = (row.get("company") or "").strip().casefold()
+    if not company or not blocked:
+        return None
+    for name in blocked:
+        if isinstance(name, str) and name.strip().casefold() == company:
+            return name.strip()
+    return None
+
+
 def cull_one(row: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     """Run cull on one discovery row.
 
@@ -138,6 +155,17 @@ def cull_one(row: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     Caller applies the conservative gate: only refuse when
     decision=='refuse' AND confidence=='high'.
     """
+    # Deterministic pre-filter: blocked employers never reach the LLM (or the
+    # paid judge). Returned as a high-confidence refuse so the conservative gate
+    # in apply_cull_decision writes it as rejected.
+    blocked = _matched_blocked_employer(row, profile)
+    if blocked:
+        return {
+            "decision": "refuse",
+            "reason": f"blocked employer: {blocked}",
+            "confidence": "high",
+        }
+
     # OpenAI SDK is OpenAI-compatible with DeepSeek's endpoint — just
     # point base_url at api.deepseek.com and use the same Chat
     # Completions surface.
