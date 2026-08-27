@@ -97,6 +97,20 @@ def _build_user_prompt(row: dict[str, Any], profile: dict[str, Any]) -> str:
         "## CANDIDATE DEALBREAKERS",
         *(f"- {d}" for d in dealbreakers),
         "",
+    ]
+    if profile.get("us_canada_only"):
+        lines += [
+            "## GEOGRAPHIC HARD RULE",
+            "The candidate can ONLY work in the United States or Canada. Refuse "
+            "(decision 'refuse', confidence 'high') if the Location is anywhere "
+            "else. Use your knowledge of world geography: a bare city such as "
+            "Bengaluru, Hyderabad, São Paulo, Paris, or London counts as its "
+            "real country. A bare 'Remote' with no country, or any US/Canada "
+            "location, is acceptable. Only refuse on geography when you can "
+            "actually place the location outside the US/Canada.",
+            "",
+        ]
+    lines += [
         "## POSTING",
         f"Company: {company}",
         f"Role: {role}",
