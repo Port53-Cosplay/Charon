@@ -438,7 +438,8 @@ def judge_batch(
     through all per-discovery calls.
 
     `status` filter only applies when rejudge=True (unjudged rows have
-    status='new' by default).
+    status='new' by default). Expired rows are excluded from a blanket
+    rejudge — pass status='expired' to deliberately re-score them.
 
     Rows run in a thread pool of `workers` (default CHARON_JUDGE_WORKERS
     or 4, cap 8); workers=1 keeps the sequential path and result order.
@@ -447,6 +448,10 @@ def judge_batch(
     """
     if rejudge:
         targets = get_discoveries(ats=ats, slug=slug, status=status, limit=limit)
+        if status is None:
+            # Archived rows only re-enter via an explicit status='expired'.
+            # cli.judge_cmd applies the same filter to its guardrail count.
+            targets = [t for t in targets if t.get("screened_status") != "expired"]
         if tier:
             tiers = {tier} if isinstance(tier, str) else set(tier)
             targets = [t for t in targets if t.get("tier") in tiers]
@@ -673,6 +678,10 @@ def reclassify_batch(
         #     refuse, identifiable by a known reason prefix/sentinel
         if prev_status == "applied":
             continue
+        if prev_status == "expired":
+            # Archived by `charon expire` — revive via judge --rejudge
+            # --status expired, not by a free re-gate.
+            continue
         if prev_reason.startswith("[cull]"):
             continue
         if prev_reason == "Manually refused — not interested":
@@ -734,9 +743,11 @@ def list_by_status(
     ats: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """List judged discoveries by screened_status (ready / rejected)."""
-    if status not in {"ready", "rejected"}:
-        raise JudgeError(f"status must be 'ready' or 'rejected', got '{status}'.")
+    """List judged discoveries by screened_status (ready / rejected / expired)."""
+    if status not in {"ready", "rejected", "expired"}:
+        raise JudgeError(
+            f"status must be 'ready', 'rejected', or 'expired', got '{status}'."
+        )
 
     rows = get_discoveries(ats=ats, status=status, limit=limit, order_by="combined_score")
     # Filter to only judged rows (status='rejected' could match unjudged

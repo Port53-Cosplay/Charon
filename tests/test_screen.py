@@ -400,6 +400,52 @@ class TestListByStatus:
         with pytest.raises(JudgeError, match="status must be"):
             list_by_status("nonsense")
 
+    def test_lists_expired(self, monkeypatch):
+        from charon.db import expire_ready_discoveries
+
+        _patch_analyzers(monkeypatch, ghost=5, redflag=5, alignment=95)
+        new_id = _seed_enriched(dedupe_hash="ls-exp")
+        judge_one_id(new_id, profile=PROFILE)
+        expire_ready_discoveries()
+
+        rows = list_by_status("expired")
+        assert new_id in [r["id"] for r in rows]
+
+
+class TestRejudgeExcludesExpired:
+    def test_blanket_rejudge_skips_expired(self, monkeypatch):
+        from charon.db import expire_ready_discoveries
+
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=85)
+        expired_id = _seed_enriched(dedupe_hash="rj-exp")
+        judge_one_id(expired_id, profile=PROFILE)
+        expire_ready_discoveries()
+
+        live_id = _seed_enriched(dedupe_hash="rj-live")
+        judge_one_id(live_id, profile=PROFILE)
+
+        results = judge_batch(rejudge=True, profile=PROFILE, workers=1)
+        ids = [r.get("discovery_id") for r in results]
+        assert live_id in ids
+        assert expired_id not in ids
+        assert get_discovery(expired_id)["screened_status"] == "expired"
+
+    def test_status_expired_revives(self, monkeypatch):
+        from charon.db import expire_ready_discoveries
+
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=85)
+        expired_id = _seed_enriched(dedupe_hash="rj-revive")
+        judge_one_id(expired_id, profile=PROFILE)
+        expire_ready_discoveries()
+
+        results = judge_batch(
+            rejudge=True, status="expired", profile=PROFILE, workers=1
+        )
+        assert expired_id in [r.get("discovery_id") for r in results]
+        row = get_discovery(expired_id)
+        assert row["screened_status"] == "ready"
+        assert row["expired_at"] is None
+
 
 # ── stats ────────────────────────────────────────────────────────────
 
@@ -509,6 +555,22 @@ class TestReclassify:
         # Tighten threshold to 80 — should now flip to rejected
         reclassify_batch(profile=PROFILE, threshold=80)
         assert get_discovery(new_id)["screened_status"] == "rejected"
+
+    def test_reclassify_skips_expired(self, monkeypatch):
+        """Archived rows are sacred — a free re-gate must not revive them."""
+        from charon.db import expire_ready_discoveries
+
+        _patch_analyzers(monkeypatch, ghost=10, redflag=10, alignment=85)
+        new_id = _seed_enriched(dedupe_hash="rc-exp")
+        judge_one_id(new_id, profile=PROFILE)
+        assert get_discovery(new_id)["screened_status"] == "ready"
+
+        expire_ready_discoveries()
+        assert get_discovery(new_id)["screened_status"] == "expired"
+
+        results = reclassify_batch(profile=PROFILE)
+        assert all(r["discovery_id"] != new_id for r in results)
+        assert get_discovery(new_id)["screened_status"] == "expired"
 
 
 class TestComputeCombinedWeighted:

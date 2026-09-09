@@ -2127,6 +2127,15 @@
       <section class="tab-pane" data-pane="ready">
         <div class="pane-toolbar">
           <button id="paste-judge-btn" title="Generate a free paste-judge prompt (up to 25 rows) for Claude Code — no API spend">Paste-judge (free)</button>
+          <button id="expire-stale-btn" title="Archive ready postings judged long ago — they leave this list without counting as refused">Archive stale</button>
+        </div>
+        <div id="expire-form" class="judge-form" hidden>
+          <span class="cost-est">Archive ready postings judged more than
+            <input type="number" id="expire-days" min="1" max="3650" value="30" style="width:60px"> days ago
+          </span>
+          <div class="spacer"></div>
+          <button class="cancel-btn" id="expire-cancel">Not now</button>
+          <button class="confirm-btn" id="expire-confirm">Archive them</button>
         </div>
         <div id="list-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading…</div>
@@ -2478,6 +2487,19 @@
       `;
     }
 
+    // Count of archived-as-expired rows, from /api/stats. renderList reads
+    // it because most POST responses re-render the ready list without
+    // carrying stats; loadStats() (via refreshFunnelState) keeps it fresh.
+    let expiredCount = 0;
+
+    function expiredFootnote() {
+      if (!expiredCount) return "";
+      return `<div class="state" style="padding:14px 20px;text-align:left;font-size:12px;border-style:solid;border-color:var(--card-border)">
+           <strong style="color:var(--plum-soft)">${expiredCount}</strong> stale posting${expiredCount === 1 ? "" : "s"} archived as expired.
+           Run <code>charon expire --list</code> to see them, or re-judge to revive.
+         </div>`;
+    }
+
     function renderList(ready) {
       const container = document.getElementById("list-container");
       // Don't clobber an in-progress "Not for me" form. If the user has
@@ -2500,10 +2522,10 @@
             <img src="/static/charon-boat.png" alt="Charon waiting on her boat with a lantern">
             <div class="title">No souls to ferry.</div>
             <div class="body">The crossing is quiet. Run <code>charon judge --all</code> to score more discoveries, or <code>charon gather</code> to pull fresh postings.</div>
-          </div>`;
+          </div>` + expiredFootnote();
         return;
       }
-      container.innerHTML = ready.map(renderCard).join("");
+      container.innerHTML = ready.map(renderCard).join("") + expiredFootnote();
     }
 
     // ── Stats band ─────────────────────────────────────────────
@@ -2631,6 +2653,7 @@
         document.getElementById("awaiting-enrich-n").textContent = s.awaiting_enrich ?? "—";
         document.getElementById("awaiting-judge-n").textContent = s.judgeable ?? "—";
         setStat("stat-ready", s.ready);
+        expiredCount = s.expired || 0;
         setStat("stat-applied", s.applied_total);
         setStat("stat-stranded", s.stranded);
         setStat("stat-reply-rate", s.reply_rate, true);
@@ -3506,6 +3529,31 @@
       }
     }
 
+    async function expireStale() {
+      const days = parseInt(document.getElementById("expire-days").value, 10);
+      if (!days || days < 1) {
+        showToast("Days must be at least 1.", true);
+        return;
+      }
+      try {
+        const r = await fetch("/api/expire", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ days }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        const n = (data.result && data.result.expired) || 0;
+        document.getElementById("expire-form").hidden = true;
+        showToast(n === 0
+          ? "Nothing stale enough to archive."
+          : `${n} stale posting${n === 1 ? "" : "s"} archived.`);
+        refreshFunnelState();
+      } catch (e) {
+        showToast("Couldn't archive: " + e.message, true);
+      }
+    }
+
     // Refresh every tab count + lifetime stat strip during long-running
     // operations. Cheap (small JSON, single-user dashboard) and keeps
     // every counter in sync as work moves through the funnel.
@@ -3874,6 +3922,21 @@
       // Paste-judge (Ready toolbar) — free judging via Claude Code paste
       if (ev.target.closest("#paste-judge-btn")) {
         generatePastePrompt(25, null);
+        return;
+      }
+
+      // Archive stale (Ready toolbar) — inline confirm, then POST /api/expire
+      if (ev.target.closest("#expire-stale-btn")) {
+        const form = document.getElementById("expire-form");
+        form.hidden = !form.hidden;
+        return;
+      }
+      if (ev.target.closest("#expire-cancel")) {
+        document.getElementById("expire-form").hidden = true;
+        return;
+      }
+      if (ev.target.closest("#expire-confirm")) {
+        expireStale();
         return;
       }
 

@@ -140,7 +140,7 @@ def _refused_discoveries(limit: int = 200) -> list[dict[str, Any]]:
 
 
 def _unreject_discovery(discovery_id: int) -> dict[str, Any]:
-    """Flip a refused discovery back to ready (override the judge).
+    """Flip a refused or expired discovery back to ready (override the judge).
 
     Doesn't re-judge — keeps the existing scores and reason for context.
     """
@@ -149,20 +149,39 @@ def _unreject_discovery(discovery_id: int) -> dict[str, Any]:
     discovery = get_discovery(discovery_id)
     if discovery is None:
         raise DashboardError(f"No discovery with id {discovery_id}.")
-    if discovery.get("screened_status") != "rejected":
+    if discovery.get("screened_status") not in ("rejected", "expired"):
         raise DashboardError(
-            f"Discovery #{discovery_id} isn't refused (status={discovery.get('screened_status')})."
+            f"Discovery #{discovery_id} isn't refused or expired "
+            f"(status={discovery.get('screened_status')})."
         )
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE discoveries SET screened_status = 'ready' WHERE id = ?",
+            "UPDATE discoveries SET screened_status = 'ready', expired_at = NULL "
+            "WHERE id = ?",
             (discovery_id,),
         )
         conn.commit()
     finally:
         conn.close()
     return {"id": discovery_id, "new_status": "ready"}
+
+
+def _expire_stale_ready(days: int) -> dict[str, Any]:
+    """Archive ready discoveries judged more than `days` days ago.
+
+    Synchronous — a single UPDATE, no worker thread. Refuses to run while
+    a pipeline job is writing statuses.
+    """
+    from charon.db import expire_ready_discoveries
+
+    if not 1 <= days <= 3650:
+        raise DashboardError("days must be between 1 and 3650.")
+    busy = _pipeline_busy()
+    if busy is not None:
+        raise DashboardError(f"A {busy} job is already running — wait for it.")
+    count = expire_ready_discoveries(older_than_days=days)
+    return {"expired": count, "days": days}
 
 
 def _stats(include_charts: bool = False) -> dict[str, Any]:
@@ -207,7 +226,8 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         cur.execute(
             "SELECT COUNT(*) FROM discoveries WHERE "
             "(enrichment_tier IS NULL OR enrichment_tier = 'failed') "
-            "AND (screened_status IS NULL OR screened_status != 'rejected')"
+            "AND (screened_status IS NULL "
+            "     OR screened_status NOT IN ('rejected', 'expired'))"
         )
         awaiting_enrich = cur.fetchone()[0]
         # "Cullable" = rows the cull picker (get_unculled_discoveries) will
@@ -215,7 +235,8 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         cur.execute(
             "SELECT COUNT(*) FROM discoveries WHERE culled_at IS NULL "
             "AND judged_at IS NULL "
-            "AND (screened_status IS NULL OR screened_status != 'rejected')"
+            "AND (screened_status IS NULL "
+            "     OR screened_status NOT IN ('rejected', 'expired'))"
         )
         cullable = cur.fetchone()[0]
         cur.execute("SELECT MAX(discovered_at) FROM discoveries")
@@ -224,6 +245,8 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         ready = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'rejected'")
         refused = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM discoveries WHERE screened_status = 'expired'")
+        expired = cur.fetchone()[0]
         cur.execute("SELECT status, COUNT(*) FROM applications GROUP BY status")
         app_buckets = dict(cur.fetchall())
 
@@ -269,6 +292,7 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         "last_gather": last_gather,
         "ready": ready,
         "refused": refused,
+        "expired": expired,
         "applied_total": total_apps,
         "stranded": stranded,
         "pending": pending,
@@ -1537,6 +1561,7 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "monoculture_score": _round1(r.get("monoculture_score")),
         "tier": r.get("tier"),
         "ats": r.get("ats"),
+        "judged_at": r.get("judged_at"),
         "offerings_path": offerings_path,
         "forged_at": r.get("forged_at"),
         "petition_at": r.get("petition_at"),
@@ -2088,6 +2113,27 @@ class _Handler(BaseHTTPRequestHandler):
                 "unrejected": rec,
                 "ready": _ready_discoveries(),
                 "refused": _refused_discoveries(),
+            })
+            return
+        if path == "/api/expire":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
+                return
+            try:
+                days = int(body.get("days", 30))
+            except (TypeError, ValueError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "days must be an integer")
+                return
+            try:
+                result = _expire_stale_ready(days)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({
+                "ok": True,
+                "result": result,
+                "ready": _ready_discoveries(),
             })
             return
         if path.startswith("/api/reject/"):

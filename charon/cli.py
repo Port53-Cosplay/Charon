@@ -49,9 +49,11 @@ from charon.gather import (
     load_registry,
 )
 from charon.db import (
+    expire_ready_discoveries,
     get_applied_companies,
     get_company_judgement_summary,
     get_enrichment_counts,
+    get_expirable_discoveries,
     get_judged_counts,
 )
 from charon.enrich import EnrichError, enrich_batch, enrich_one_id
@@ -2111,13 +2113,16 @@ def _print_enrich_line(result: dict) -> None:
 @click.option("--reclassify", is_flag=True,
               help="Re-apply the ready/rejected gating to existing scores. No AI calls. "
                    "Use after tuning ready_threshold or alignment_floor.")
-@click.option("--status", "status_filter", type=click.Choice(["ready", "rejected"]),
+@click.option("--status", "status_filter",
+              type=click.Choice(["ready", "rejected", "expired"]),
               help="Limit batch to discoveries currently in this status. "
-                   "Most useful with --rejudge to re-score just the survivors.")
+                   "Most useful with --rejudge to re-score just the survivors. "
+                   "--rejudge --status expired revives archived rows.")
 @click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
 @click.option("--threshold", type=float, default=None,
               help="Override ready_threshold (default from profile, fallback 60).")
-@click.option("--list", "list_status", type=click.Choice(["ready", "rejected"]),
+@click.option("--list", "list_status",
+              type=click.Choice(["ready", "rejected", "expired"]),
               help="List judged discoveries by status.")
 @click.option("--by-company", "by_company", is_flag=True,
               help="Aggregate stats per company across judged discoveries.")
@@ -2147,7 +2152,9 @@ def judge_cmd(
             return
         section_header("JUDGED COUNTS")
         for status, count in sorted(counts.items()):
-            style = {"ready": "good", "rejected": "danger"}.get(status, "info")
+            style = {"ready": "good", "rejected": "danger", "expired": "dim"}.get(
+                status, "info"
+            )
             console.print(f"  [{style}]{status:<10}[/{style}] {count}")
         return
 
@@ -2205,15 +2212,17 @@ def judge_cmd(
         section_header(f"DISCOVERIES — {list_status.upper()}")
         for r in rows:
             score = r.get("combined_score") or 0
-            style = "good" if list_status == "ready" else "danger"
+            style = {"ready": "good", "rejected": "danger"}.get(list_status, "dim")
             console.print(
                 f"  [{style}]#{r['id']:<5}[/{style}] {score:5.1f}  "
                 f"{r['company']:<24} {r['role']}"
             )
             if r.get("url"):
                 console.print(f"       [dim]{r['url']}[/dim]")
-            if list_status == "rejected" and r.get("judgement_reason"):
+            if list_status in ("rejected", "expired") and r.get("judgement_reason"):
                 console.print(f"       [dim]{r['judgement_reason']}[/dim]")
+            if list_status == "expired" and r.get("expired_at"):
+                console.print(f"       [dim]expired {str(r['expired_at'])[:10]}[/dim]")
         console.print(f"\n  [dim]{len(rows)} discoveries[/dim]")
         return
 
@@ -2306,6 +2315,10 @@ def judge_cmd(
         tier_list = list(tier_filter) if tier_filter else None
         if rejudge:
             targets = get_discoveries(ats=ats, slug=slug, status=status_filter, limit=limit)
+            if status_filter is None:
+                # Mirror judge_batch: archived rows need an explicit
+                # --status expired to re-enter judging.
+                targets = [t for t in targets if t.get("screened_status") != "expired"]
             if tier_list:
                 tiers_set = set(tier_list)
                 targets = [t for t in targets if t.get("tier") in tiers_set]
@@ -2382,7 +2395,7 @@ def judge_cmd(
         section_header("JUDGE SUMMARY")
         for status, n in tier_totals.items():
             if n:
-                style = {"ready": "good", "rejected": "danger"}[status]
+                style = {"ready": "good", "rejected": "danger"}.get(status, "info")
                 console.print(f"  [{style}]{status:<10}[/{style}] {n}")
 
 
@@ -2422,6 +2435,102 @@ def _print_judge_line(result: dict, threshold: float | None = None) -> None:
     reason = result.get("judgement_reason")
     if status == "rejected" and reason:
         console.print(f"      [dim]{reason}[/dim]")
+
+
+@cli.command("expire")
+@click.option("--older-than", "older_than_days", type=int,
+              help="Expire ready discoveries judged more than N days ago.")
+@click.option("--before", "before",
+              help="Expire ready discoveries judged before this ISO date/datetime (UTC).")
+@click.option("--all-ready", "all_ready", is_flag=True,
+              help="Expire every ready discovery regardless of age.")
+@click.option("--list", "list_expired", is_flag=True,
+              help="List currently-expired discoveries and exit.")
+@click.option("--limit", type=int, default=None, help="Cap listing output.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def expire_cmd(
+    older_than_days: int | None,
+    before: str | None,
+    all_ready: bool,
+    list_expired: bool,
+    limit: int | None,
+    yes: bool,
+) -> None:
+    """Archive stale ready discoveries. Not a rejection - the posting just sailed."""
+    if list_expired:
+        rows = list_by_status("expired", limit=limit)
+        if not rows:
+            print_info("No expired discoveries.")
+            return
+        section_header("DISCOVERIES — EXPIRED")
+        for r in rows:
+            score = r.get("combined_score") or 0
+            console.print(
+                f"  [dim]#{r['id']:<5}[/dim] {score:5.1f}  "
+                f"{r['company']:<24} {r['role']}"
+            )
+            if r.get("expired_at"):
+                console.print(f"       [dim]expired {str(r['expired_at'])[:10]}[/dim]")
+        console.print(f"\n  [dim]{len(rows)} discoveries[/dim]")
+        return
+
+    chosen = [older_than_days is not None, before is not None, all_ready]
+    if sum(chosen) != 1:
+        print_error(
+            "Pick exactly one of --older-than <days>, --before <date>, or "
+            "--all-ready. Or use --list to see already-expired rows."
+        )
+        return
+
+    try:
+        targets = get_expirable_discoveries(
+            before=before,
+            older_than_days=older_than_days,
+        )
+    except ValueError as e:
+        print_error(str(e))
+        return
+
+    if not targets:
+        print_info("Nothing to expire. The Ready list is either fresh or empty.")
+        return
+
+    section_header("EXPIRE BATCH")
+    if before:
+        print_info(f"Scope: ready rows judged before {before}")
+    elif older_than_days is not None:
+        print_info(f"Scope: ready rows judged more than {older_than_days} days ago")
+    else:
+        print_info("Scope: ALL ready rows")
+    console.print()
+    for r in targets[:10]:
+        score = r.get("combined_score") or 0
+        judged = str(r.get("judged_at") or "?")[:10]
+        console.print(
+            f"  [dim]#{r['id']:<5}[/dim] {score:5.1f}  "
+            f"{r['company']:<24} {r['role']}  [dim]judged {judged}[/dim]"
+        )
+    if len(targets) > 10:
+        console.print(f"  [dim]... and {len(targets) - 10} more[/dim]")
+    console.print()
+
+    if not yes:
+        print_warning(
+            f"About to expire {len(targets)} ready discoveries. They leave the "
+            f"Ready view but are NOT counted as rejected."
+        )
+        if not click.confirm("Proceed?", default=False):
+            print_info("Aborted. Use --yes to skip this prompt.")
+            return
+
+    count = expire_ready_discoveries(before=before, older_than_days=older_than_days)
+    console.print()
+    section_header("EXPIRE SUMMARY")
+    console.print(f"  [dim]expired[/dim]    {count}")
+    print_info(
+        "Revive with: charon judge --rejudge --status expired  "
+        "(or the portal's send-to-ready)."
+    )
 
 
 @cli.command("forge")

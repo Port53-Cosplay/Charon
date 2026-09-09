@@ -3,7 +3,7 @@
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +125,7 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN salary_data TEXT",
     "ALTER TABLE discoveries ADD COLUMN culled_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN monoculture_score REAL",
+    "ALTER TABLE discoveries ADD COLUMN expired_at TEXT",
 ]
 
 
@@ -668,7 +669,7 @@ def get_unenriched_discoveries(
     """
     clauses = [
         "enrichment_tier IS NULL",
-        "(screened_status IS NULL OR screened_status != 'rejected')",
+        "(screened_status IS NULL OR screened_status NOT IN ('rejected', 'expired'))",
     ]
     params: list[Any] = []
     if ats:
@@ -728,7 +729,8 @@ def update_discovery_judgement(
             "UPDATE discoveries SET "
             "  ghost_score = ?, redflag_score = ?, alignment_score = ?, "
             "  resume_match_score = ?, combined_score = ?, screened_status = ?, "
-            "  judgement_reason = ?, judgement_detail = ?, judged_at = ? "
+            "  judgement_reason = ?, judgement_detail = ?, judged_at = ?, "
+            "  expired_at = NULL "
             "WHERE id = ?",
             (
                 ghost_score,
@@ -798,6 +800,88 @@ def mark_discovery_rejected(discovery_id: int, reason: str | None = None) -> boo
         )
         conn.commit()
         return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def _resolve_expiry_cutoff(
+    before: str | None, older_than_days: int | None
+) -> str | None:
+    """Normalize an expiry cutoff to a UTC isoformat string, or None for all.
+
+    Stored judged_at values are datetime.now(timezone.utc).isoformat(), so
+    string comparison in SQL only works if the cutoff is normalized the same
+    way — never compare a raw user-supplied date string.
+    """
+    if before is not None and older_than_days is not None:
+        raise ValueError("Pass either 'before' or 'older_than_days', not both.")
+    if older_than_days is not None:
+        if older_than_days < 0:
+            raise ValueError("older_than_days must be >= 0.")
+        cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        return cutoff.isoformat()
+    if before is not None:
+        try:
+            parsed = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise ValueError(f"Invalid ISO date/datetime: '{before}'.") from e
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    return None
+
+
+def _expirable_where(
+    before: str | None, older_than_days: int | None
+) -> tuple[str, list[Any]]:
+    """Shared WHERE clause for the expire preview and mutator."""
+    clause = "screened_status = 'ready' AND judged_at IS NOT NULL"
+    params: list[Any] = []
+    cutoff = _resolve_expiry_cutoff(before, older_than_days)
+    if cutoff is not None:
+        clause += " AND judged_at < ?"
+        params.append(cutoff)
+    return clause, params
+
+
+def get_expirable_discoveries(
+    before: str | None = None,
+    older_than_days: int | None = None,
+) -> list[dict[str, Any]]:
+    """Ready discoveries that expire_ready_discoveries() would archive."""
+    clause, params = _expirable_where(before, older_than_days)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM discoveries WHERE " + clause + " ORDER BY judged_at ASC",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def expire_ready_discoveries(
+    before: str | None = None,
+    older_than_days: int | None = None,
+) -> int:
+    """Archive stale ready discoveries as 'expired'. Returns rows updated.
+
+    Leaves judgement_reason and scores untouched — the judge's verdict is
+    still true, the posting just went stale. Revive via a deliberate
+    rejudge (judge --rejudge --status expired) or the portal's unreject.
+    """
+    clause, params = _expirable_where(before, older_than_days)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET screened_status = 'expired', expired_at = ? "
+            "WHERE " + clause,
+            [now_iso, *params],
+        )
+        conn.commit()
+        return cursor.rowcount
     finally:
         conn.close()
 
@@ -874,7 +958,7 @@ def get_unculled_discoveries(
     clauses = [
         "culled_at IS NULL",
         "judged_at IS NULL",
-        "(screened_status IS NULL OR screened_status != 'rejected')",
+        "(screened_status IS NULL OR screened_status NOT IN ('rejected', 'expired'))",
     ]
     params: list[Any] = []
     if ats:
@@ -915,7 +999,7 @@ def get_enrichable_discoveries(
     """
     clauses = [
         "(enrichment_tier IS NULL OR enrichment_tier = 'failed')",
-        "(screened_status IS NULL OR screened_status != 'rejected')",
+        "(screened_status IS NULL OR screened_status NOT IN ('rejected', 'expired'))",
     ]
     params: list[Any] = []
     if ats:

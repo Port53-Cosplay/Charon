@@ -151,7 +151,8 @@ def main() -> int:
                     "  resume_match_score = ?, combined_score = ?, "
                     "  monoculture_score = ?, "
                     "  screened_status = ?, judgement_reason = ?, "
-                    "  judgement_detail = ?, judged_at = ? "
+                    "  judgement_detail = ?, judged_at = ?, "
+                    "  expired_at = NULL "
                     "WHERE id = ?",
                     (
                         ghost, redflag, alignment, rm, combined,
