@@ -628,6 +628,24 @@ VALID_ENRICHMENT_TIERS = {
     "skipped", "jsonld", "ats_css", "ai_fallback", "workday_cxs", "failed", "closed"
 }
 
+# Chars of gather-time `description` that stand on their own as a posting.
+# Mirrors the enrich cascade's skip threshold (charon.enrich reads this) —
+# a row with this much text never needs a fetch; an enrichment pass would
+# only stamp it 'skipped' and copy the text into full_description.
+USABLE_DESCRIPTION_CHARS = 500
+
+# "This row has text an analyzer can read." Either enrichment produced a
+# full_description, or the ATS handed over a long-enough description at
+# gather time. Both are judgeable — screen._description_for falls back to
+# `description` anyway. Rows of the second kind used to sit in the stuck
+# bucket indefinitely, waiting on an enrichment_tier column that nothing
+# actually needed: the cull can revive a row into the pool long after the
+# last enrichment pass, and the judge gate skips enrichment entirely.
+HAS_USABLE_TEXT_SQL = (
+    "(length(coalesce(full_description, '')) > 0 "
+    f"OR length(coalesce(description, '')) >= {USABLE_DESCRIPTION_CHARS})"
+)
+
 
 def update_discovery_enrichment(
     discovery_id: int,
@@ -1063,20 +1081,21 @@ def get_unjudged_discoveries(
     Optional filters: `ats` (one value), `slug` (one employer), `tier`
     (one tier or a list, e.g. ['tier_1','tier_2'] to combine).
 
-    By default requires enrichment_tier IS NOT NULL AND a non-empty
-    full_description — judging without a description is pointless.
-    Failed-enrichment rows (tier='failed' with desc_len=0) get
-    excluded explicitly so judge doesn't burn cycles re-picking
-    them every batch only to error out at the "no usable
-    description" check. Set require_enriched=False to override.
+    By default requires text an analyzer can actually read
+    (HAS_USABLE_TEXT_SQL): a non-empty full_description, or a gathered
+    description long enough to stand alone. Judging without a description
+    is pointless, and a row whose enrichment failed or never ran has
+    nothing to read — those stay out so judge doesn't burn cycles
+    re-picking them every batch only to error at the "no usable
+    description" check. The predicate deliberately ignores
+    enrichment_tier: the tier is bookkeeping, and a NULL or 'failed'
+    tier on a row that already carries its description was hiding
+    judgeable work. Set require_enriched=False to override.
     """
     clauses = ["judged_at IS NULL"]
     params: list[Any] = []
     if require_enriched:
-        clauses.append("enrichment_tier IS NOT NULL")
-        clauses.append("enrichment_tier != 'failed'")
-        clauses.append("full_description IS NOT NULL")
-        clauses.append("length(full_description) > 0")
+        clauses.append(HAS_USABLE_TEXT_SQL)
     if ats:
         clauses.append("ats = ?")
         params.append(ats)

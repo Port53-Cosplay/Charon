@@ -190,7 +190,7 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
     With include_charts=True, returns extra data for the visualization
     page: per-status application counts and a weekly application series.
     """
-    from charon.db import get_connection
+    from charon.db import HAS_USABLE_TEXT_SQL, get_connection
 
     conn = get_connection()
     try:
@@ -208,24 +208,27 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
         )
         culled = cur.fetchone()[0]
         judged_sonnet = max(judged - culled, 0)
-        # "Judgeable" = the actionable backlog: unjudged rows that actually
-        # have a usable enriched description, i.e. exactly what the judge
-        # picker (get_unjudged_discoveries, require_enriched=True) will grab.
-        # The rest of the unjudged pool (no description / failed enrichment)
-        # can never be judged, so it's not "waiting" — it's stuck.
+        # "Judgeable" = the actionable backlog: unjudged rows that carry text
+        # an analyzer can read, i.e. exactly what the judge picker
+        # (get_unjudged_discoveries, require_enriched=True) will grab. The
+        # rest of the unjudged pool has no description at all, so it can
+        # never be judged — that part is genuinely stuck.
         cur.execute(
             "SELECT COUNT(*) FROM discoveries WHERE judged_at IS NULL "
-            "AND enrichment_tier IS NOT NULL AND enrichment_tier != 'failed' "
-            "AND full_description IS NOT NULL AND length(full_description) > 0"
+            f"AND {HAS_USABLE_TEXT_SQL}"
         )
         judgeable = cur.fetchone()[0]
-        # "Awaiting enrich" = rows that still need an enrichment pass: never
-        # enriched OR a prior attempt failed, excluding anything already
-        # rejected. Matches get_enrichable_discoveries — what the Flush button
-        # will process.
+        # "Awaiting enrich" = rows that still need a description fetched:
+        # never enriched OR a prior attempt failed, and no usable text on
+        # hand either way, excluding anything already rejected. This is the
+        # "stuck" figure in the UI, so it counts only rows a human might
+        # care about — a row that arrived with its own description needs
+        # nothing, even though the enrich picker will still re-stamp its
+        # tier for free on the next crossing.
         cur.execute(
             "SELECT COUNT(*) FROM discoveries WHERE "
             "(enrichment_tier IS NULL OR enrichment_tier = 'failed') "
+            f"AND NOT {HAS_USABLE_TEXT_SQL} "
             "AND (screened_status IS NULL "
             "     OR screened_status NOT IN ('rejected', 'expired'))"
         )
@@ -943,16 +946,16 @@ def _pipeline_busy() -> str | None:
 def _count_judgeable() -> int:
     """COUNT of what the judge picker (get_unjudged_discoveries,
     require_enriched=True) will grab — same predicate as the stats
-    'judgeable' figure."""
-    from charon.db import get_connection
+    'judgeable' figure. The gate price and the gate count both ride on
+    this, so it must not drift from the picker."""
+    from charon.db import HAS_USABLE_TEXT_SQL, get_connection
 
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(
             "SELECT COUNT(*) FROM discoveries WHERE judged_at IS NULL "
-            "AND enrichment_tier IS NOT NULL AND enrichment_tier != 'failed' "
-            "AND full_description IS NOT NULL AND length(full_description) > 0"
+            f"AND {HAS_USABLE_TEXT_SQL}"
         )
         return cur.fetchone()[0]
     finally:

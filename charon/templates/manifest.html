@@ -2588,6 +2588,8 @@
     // The L1 strip: read the live funnel state and surface only what needs a
     // human, each with the action inline. Harvest is always offered.
     let stripJudgeable = 0;
+    // Last judgeable count seen from /api/stats — what openGate() trusts.
+    let lastJudgeable = 0;
     function renderActionStrip(s) {
       const strip = document.getElementById("action-strip");
       if (!strip) return;
@@ -2627,13 +2629,22 @@
 
     // Open the judge gate: show the banner if the crossing already parked here
     // in memory, otherwise re-park (free — just counts and prices the backlog).
-    function openGate() {
+    // The count on screen can be minutes old (stats only refresh on activity),
+    // so re-read it first: clicking a gate that has already emptied used to
+    // fire a pointless crossing whose only feedback was a harvest-shaped toast.
+    async function openGate() {
       if (ferryState.phase === "awaiting_judge" && (ferryState.judgeable_count || 0) > 0) {
         activateTab("gathered");
         showFerryBanner(ferryState);
-      } else if (!ferryState.running) {
-        startFerry("judge");
+        return;
       }
+      if (ferryState.running) return;
+      await loadStats();
+      if (lastJudgeable < 1) {
+        showToast("Nothing at the gate — that count was stale, refreshed now.");
+        return;
+      }
+      startFerry("judge");
     }
 
     async function loadStats() {
@@ -2642,6 +2653,7 @@
         if (!r.ok) return;
         const data = await r.json();
         const s = data.stats || {};
+        lastJudgeable = s.judgeable || 0;
         setStat("stat-gathered", s.gathered);
         setStat("stat-culled", s.culled);
         setStat("stat-judged", (s.judged_sonnet != null) ? s.judged_sonnet : s.judged);
@@ -3465,8 +3477,11 @@
             const sk = (j.skipped || 0) > 0 ? `, ${j.skipped} skipped` : "";
             showToast(`Crossing complete: ${j.ready_added || 0} ready, ${j.refused_added || 0} refused${sk}.`);
           } else {
-            const g = state.gather || {}, c = state.cull || {};
-            showToast(`Crossing complete: ${g.total_new || 0} new postings, ${c.refused || 0} culled, nothing left to judge.`);
+            const g = state.gather || {}, c = state.cull || {}, en = state.enrich || {};
+            const moved = (g.total_new || 0) + (c.processed || 0) + (en.processed || 0);
+            showToast(moved
+              ? `Crossing complete: ${g.total_new || 0} new postings, ${c.refused || 0} culled, nothing left to judge.`
+              : "Crossing complete — no work waiting at any stage.");
           }
         } else if (state.phase === "error") {
           showToast("Ferry ran aground: " + (state.error || "unknown error"), true);
@@ -3996,6 +4011,8 @@
       if (chip) {
         if (ferryState.running) {
           showToast("The ferry is already crossing — watch the bar above.");
+        } else if (chip.dataset.from === "judge") {
+          openGate();  // re-reads the count first; the gate empties as you work
         } else {
           startFerry(chip.dataset.from);
         }
@@ -4269,6 +4286,16 @@
     loadRefused();
     loadGathered();
     loadStats();
+
+    // Slow heartbeat so the gate count and the stuck count can't sit stale
+    // on an idle page. While a crossing runs, pollFerryProgress already
+    // refreshes every 3s, and a hidden tab refreshes on focus instead.
+    const STATS_HEARTBEAT_MS = 60000;
+    setInterval(() => {
+      if (ferryState.running) return;
+      if (document.visibilityState === "hidden") return;
+      loadStats();
+    }, STATS_HEARTBEAT_MS);
 
     // Restore the crossing legend's open/closed state from last visit.
     try {

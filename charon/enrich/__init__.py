@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from charon.db import (
+    USABLE_DESCRIPTION_CHARS,
     get_discoveries,
     get_discovery,
     get_enrichable_discoveries,
@@ -34,7 +35,10 @@ from charon.enrich.llm import LLMError
 from charon.fetcher import FetchError, extract_text, fetch_html
 
 
-SKIP_THRESHOLD_DEFAULT = 500  # chars of source description that qualify as "good enough"
+# Chars of source description that qualify as "good enough". Shared with
+# db.HAS_USABLE_TEXT_SQL so the judge picker and this cascade agree on
+# which rows already carry their own description.
+SKIP_THRESHOLD_DEFAULT = USABLE_DESCRIPTION_CHARS
 DEFAULT_RATE_LIMIT_SECONDS = 1.0
 
 # Rows enrich in a bounded thread pool; DB writes are short WAL transactions
