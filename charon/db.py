@@ -646,6 +646,20 @@ HAS_USABLE_TEXT_SQL = (
     f"OR length(coalesce(description, '')) >= {USABLE_DESCRIPTION_CHARS})"
 )
 
+# "The cheap pass has already had its say." Greenhouse, Lever and Ashby hand
+# over the whole posting at gather time, so a freshly harvested row is
+# textually judgeable the moment it lands — while the cull still refuses
+# ~93% of a harvest for pennies. Without this clause a harvest would inflate
+# the judge gate and its price estimate with rows that are about to be
+# thrown out, and one confirm could spend Sonnet money on all of them.
+PAST_CULL_SQL = "culled_at IS NOT NULL"
+
+# "Still queued for the cheap pass" — the cull picker's own predicate. A row
+# here hasn't been looked at yet, so it isn't stuck, it's just in line.
+# Judged rows from before the cull existed have culled_at NULL too, which is
+# why this pairs the NULL with judged_at rather than testing culled_at alone.
+AWAITING_CULL_SQL = "(culled_at IS NULL AND judged_at IS NULL)"
+
 
 def update_discovery_enrichment(
     discovery_id: int,
@@ -1081,9 +1095,13 @@ def get_unjudged_discoveries(
     Optional filters: `ats` (one value), `slug` (one employer), `tier`
     (one tier or a list, e.g. ['tier_1','tier_2'] to combine).
 
-    By default requires text an analyzer can actually read
+    By default requires a row that has cleared the cheap cull
+    (PAST_CULL_SQL) and carries text an analyzer can actually read
     (HAS_USABLE_TEXT_SQL): a non-empty full_description, or a gathered
-    description long enough to stand alone. Judging without a description
+    description long enough to stand alone. Un-culled rows stay out even
+    when they arrived with a full description — the cull refuses most of a
+    harvest for pennies, and paying Sonnet to reach the same verdict is
+    the expensive way round. Judging without a description
     is pointless, and a row whose enrichment failed or never ran has
     nothing to read — those stay out so judge doesn't burn cycles
     re-picking them every batch only to error at the "no usable
@@ -1095,6 +1113,7 @@ def get_unjudged_discoveries(
     clauses = ["judged_at IS NULL"]
     params: list[Any] = []
     if require_enriched:
+        clauses.append(PAST_CULL_SQL)
         clauses.append(HAS_USABLE_TEXT_SQL)
     if ats:
         clauses.append("ats = ?")

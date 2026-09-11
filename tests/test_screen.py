@@ -8,6 +8,7 @@ from charon import screen
 from charon.ai import AIError
 from charon.db import (
     add_discovery,
+    get_connection,
     get_discovery,
     get_judged_counts,
     update_discovery_enrichment,
@@ -54,6 +55,18 @@ def _seed_enriched(**overrides):
     new_id = add_discovery(**defaults)
     if full_desc:
         update_discovery_enrichment(new_id, "jsonld", full_desc)
+    # A row only reaches enrichment after the cull clears it, and the judge
+    # picker now requires that too — paying Sonnet for a verdict the cheap
+    # pass would have reached is the expensive way round.
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE discoveries SET culled_at = ? WHERE id = ?",
+            ("2026-08-27T03:34:52+00:00", new_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     return new_id
 
 

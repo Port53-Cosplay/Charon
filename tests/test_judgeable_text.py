@@ -20,7 +20,8 @@ LONG = "Security engineer wanted. " * 40  # comfortably over the threshold
 SHORT = "Apply on our site."
 
 
-def _seed(dedupe_hash, *, description=LONG, full_description=None, tier=None):
+def _seed(dedupe_hash, *, description=LONG, full_description=None, tier=None,
+          culled=True):
     new_id = add_discovery(
         ats="greenhouse",
         slug="brex",
@@ -35,6 +36,10 @@ def _seed(dedupe_hash, *, description=LONG, full_description=None, tier=None):
         category="security_product_general",
     )
     sets, params = [], []
+    if culled:
+        # Every documented flow culls before the judge; the cull stamps this.
+        sets.append("culled_at = ?")
+        params.append("2026-08-27T03:34:52+00:00")
     if full_description is not None:
         sets.append("full_description = ?")
         params.append(full_description)
@@ -84,6 +89,32 @@ class TestJudgePicker:
         assert rid in [
             r["id"] for r in get_unjudged_discoveries(require_enriched=False)
         ]
+
+
+class TestCullComesFirst:
+    def test_fresh_harvest_row_is_not_judgeable(self):
+        # Greenhouse hands over the posting at gather time, so this row has
+        # readable text on arrival — but the cull hasn't had its say, and it
+        # refuses most of a harvest for pennies.
+        rid = _seed("jt-uncull", culled=False)
+        assert rid not in [r["id"] for r in get_unjudged_discoveries()]
+
+    def test_same_row_is_judgeable_once_culled(self):
+        rid = _seed("jt-culled")
+        assert rid in [r["id"] for r in get_unjudged_discoveries()]
+
+    def test_harvest_does_not_inflate_the_gate_or_its_price(self):
+        for i in range(5):
+            _seed(f"jt-harvest-{i}", culled=False)
+        s = dashboard._stats()
+        assert s["judgeable"] == 0
+        assert dashboard._count_judgeable() == 0
+        # They're the cull's problem, and counted there instead.
+        assert s["cullable"] == 5
+
+    def test_unculled_rows_are_not_reported_as_stuck(self):
+        _seed("jt-harvest-nodesc", description="", culled=False)
+        assert dashboard._stats()["awaiting_enrich"] == 0
 
 
 class TestStatsAgree:

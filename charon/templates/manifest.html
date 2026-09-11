@@ -3498,7 +3498,21 @@
       judge: "Heading straight to the judge gate…",
     };
 
+    // A harvest-led crossing walks the whole registry and takes a while, so
+    // it asks first. The button sits next to the stage chips and reverts to
+    // "Begin the crossing" the moment a judge leg finishes — close enough to
+    // a watch button to be clicked by accident, and an accident here dumps a
+    // few hundred un-culled rows into the queue.
+    const HARVEST_CONFIRM = `Start a fresh harvest?
+
+Charon will check every board in the registry (~1,130 employers, 10-20 min),
+then cull and enrich whatever it finds. It stops at the judge gate - no paid
+judging happens without a separate confirm.`;
+
     async function startFerry(fromStage) {
+      if (!fromStage || fromStage === "gather") {
+        if (!window.confirm(HARVEST_CONFIRM)) return;
+      }
       const body = fromStage && fromStage !== "gather" ? { from: fromStage } : {};
       try {
         const r = await fetch("/api/ferry", {
