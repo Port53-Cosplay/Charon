@@ -3601,9 +3601,13 @@
       n = Math.min(n, total);
       // Measured real-world cost: 4 Sonnet calls/row over long postings.
       document.getElementById("ferry-cost").textContent = judgeCostRange(n);
-      // 3–6s per row across 4 judge workers
-      const lo = Math.max(1, Math.round(n * 3 / 4 / 60));
-      const hi = Math.max(1, Math.round(n * 6 / 4 / 60));
+      // Per-row seconds come from the server, which measures them off recent
+      // judge history. The old hardcoded 3-6s (divided by the worker count,
+      // on top) promised 4-7 minutes for batches that took well over an hour.
+      const sLo = ferryState.secs_per_row_low || 8;
+      const sHi = ferryState.secs_per_row_high || 20;
+      const lo = Math.max(1, Math.round(n * sLo / 60));
+      const hi = Math.max(1, Math.round(n * sHi / 60));
       document.getElementById("ferry-time").textContent = lo === hi ? String(hi) : `${lo}–${hi}`;
     }
 

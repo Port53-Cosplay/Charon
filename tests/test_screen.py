@@ -760,11 +760,31 @@ class TestKeyboardInterruptPropagates:
         def cancel(text):
             raise KeyboardInterrupt
         monkeypatch.setattr(screen, "analyze_ghostbust", cancel)
-        # Other analyzers shouldn't be reached
-        def boom(*a, **kw):
-            raise AssertionError("Should not be reached after KeyboardInterrupt")
-        monkeypatch.setattr(screen, "analyze_redflags", boom)
-        monkeypatch.setattr(screen, "analyze_role_alignment", boom)
+        # The analyzers for a row run concurrently, so the siblings do start.
+        # What matters is that Ctrl-C leaves judge_discovery as a
+        # KeyboardInterrupt instead of being booked as one failed row.
+        monkeypatch.setattr(screen, "analyze_redflags", lambda *a, **kw: {"redflag_score": 10})
+        monkeypatch.setattr(
+            screen, "analyze_role_alignment", lambda *a, **kw: {"alignment_score": 80}
+        )
+
+        d = {"full_description": "x" * 500}
+        with pytest.raises(KeyboardInterrupt):
+            judge_discovery(d, profile=PROFILE)
+
+    def test_ctrl_c_wins_over_a_concurrent_api_error(self, monkeypatch):
+        # One analyzer fails with an API error while another catches Ctrl-C.
+        # Raising the AIError instead would mark the row rejected and let the
+        # batch keep spending.
+        def cancel(text):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(screen, "analyze_ghostbust", cancel)
+        def api_down(*a, **kw):
+            raise AIError("rate limited")
+        monkeypatch.setattr(screen, "analyze_redflags", api_down)
+        monkeypatch.setattr(
+            screen, "analyze_role_alignment", lambda *a, **kw: {"alignment_score": 80}
+        )
 
         d = {"full_description": "x" * 500}
         with pytest.raises(KeyboardInterrupt):

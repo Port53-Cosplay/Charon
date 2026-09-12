@@ -13,6 +13,7 @@ trigger a confirmation prompt in the CLI layer.
 from __future__ import annotations
 
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
@@ -221,10 +222,21 @@ def judge_discovery(
 
     target_roles = profile.get("target_roles", []) or []
 
+    # Independent calls — run them together rather than one after another.
+    calls: dict[str, Any] = {
+        "ghost": lambda: analyze_ghostbust(text),
+        "redflag": lambda: analyze_redflags(text, profile),
+    }
+    if target_roles:
+        calls["role"] = lambda: analyze_role_alignment(text, target_roles)
+    if resume_text:
+        calls["resume"] = lambda: analyze_resume_match(text, resume_text)
+
     try:
-        ghost = analyze_ghostbust(text)
-        redflag = analyze_redflags(text, profile)
-        role = analyze_role_alignment(text, target_roles) if target_roles else {
+        done = _run_analyzers(calls)
+        ghost = done["ghost"]
+        redflag = done["redflag"]
+        role = done.get("role") or {
             "alignment_score": 50,
             "closest_target": None,
             "overlap": [],
@@ -232,9 +244,7 @@ def judge_discovery(
             "stepping_stone": False,
             "assessment": "no target_roles configured; skipping role alignment",
         }
-        resume_result = None
-        if resume_text:
-            resume_result = analyze_resume_match(text, resume_text)
+        resume_result = done.get("resume")
     except AIError as e:
         return {
             "screened_status": "rejected",
@@ -405,6 +415,63 @@ MAX_JUDGE_WORKERS = 8
 
 # Consecutive AI-error results that abort a batch (API down / balance empty).
 JUDGE_BREAKER_THRESHOLD = 5
+
+# The analyzers for one row don't depend on each other, so they run together
+# instead of in sequence. Measured on the portal beforehand: 4 sequential
+# Sonnet calls over a ~5k-char posting took ~70s a row, which at 4 row-workers
+# was 17.5s a row wall-clock while the dashboard promised 3-6s.
+#
+# Rows are already pooled, so the two multiply: 4 rows x 4 analyzers = 16
+# requests in flight. A 429 surfaces as an AIError that counts toward the
+# circuit breaker above, so the total is capped here rather than left to
+# multiply freely. Override with CHARON_JUDGE_API_CONCURRENCY.
+DEFAULT_JUDGE_API_CONCURRENCY = 12
+
+
+def _resolve_api_concurrency() -> int:
+    env = os.environ.get("CHARON_JUDGE_API_CONCURRENCY", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return DEFAULT_JUDGE_API_CONCURRENCY
+
+
+_API_GATE = threading.Semaphore(_resolve_api_concurrency())
+
+
+def _run_analyzers(
+    calls: dict[str, Callable[[], Any]],
+) -> dict[str, Any]:
+    """Run one row's analyzer calls concurrently, returning {name: result}.
+
+    Each call holds a slot in the shared API gate for its duration. A single
+    call is run inline — no pool, no gate — so the sequential paths and the
+    tests keep their existing behaviour. Exceptions (AIError, KeyboardInterrupt)
+    propagate to the caller unchanged.
+    """
+    if len(calls) <= 1:
+        return {name: fn() for name, fn in calls.items()}
+
+    def _guarded(fn: Callable[[], Any]) -> Any:
+        with _API_GATE:
+            return fn()
+
+    out: dict[str, Any] = {}
+    errors: list[BaseException] = []
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = {pool.submit(_guarded, fn): name for name, fn in calls.items()}
+        for fut in as_completed(futures):
+            try:
+                out[futures[fut]] = fut.result()
+            except BaseException as e:  # noqa: BLE001 — re-raised below
+                errors.append(e)
+    if errors:
+        # Ctrl-C outranks an API error. The batch loop has to stop entirely,
+        # not book this row as a failure and carry on to the next one.
+        for e in errors:
+            if not isinstance(e, Exception):
+                raise e
+        raise errors[0]
+    return out
 
 
 def _resolve_judge_workers(workers: int | None) -> int:

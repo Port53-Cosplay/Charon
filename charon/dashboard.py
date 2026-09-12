@@ -924,8 +924,16 @@ def _start_judge_batch(
 # under-billed a $20 refill by half.
 _JUDGE_COST_LOW = 0.08
 _JUDGE_COST_HIGH = 0.11
-_JUDGE_SECS_LOW = 3
-_JUDGE_SECS_HIGH = 6
+# Fallback per-row wall-clock seconds, used only until the DB has enough judge
+# history to measure. These were guesses (3-6s) that ran 4x optimistic for
+# months: real throughput on the portal was 17.5s a row. Measured now, see
+# _measured_judge_seconds().
+_JUDGE_SECS_LOW = 8
+_JUDGE_SECS_HIGH = 20
+# Completion gaps longer than this mean the batch stopped and another started
+# later — a pause, not a slow row.
+_JUDGE_GAP_CEILING_SECS = 600
+_JUDGE_HISTORY_ROWS = 120
 
 _ferry_lock = threading.Lock()
 
@@ -1019,17 +1027,80 @@ def _count_judgeable() -> int:
         conn.close()
 
 
-def _ferry_judge_estimates(n: int) -> dict[str, Any]:
-    """Cost + wall-time estimate for judging n rows (with pool parallelism)."""
-    from charon.screen import _resolve_judge_workers
+def _measured_judge_seconds() -> tuple[float, float] | None:
+    """Wall-clock seconds per row, measured from recent judging.
 
-    workers = _resolve_judge_workers(None)
+    Reads completion timestamps from the last `_JUDGE_HISTORY_ROWS` paid
+    judgements and takes the spread of the gaps between them. Because those
+    gaps already include however much parallelism was in play, this must NOT
+    be divided by the worker count — doing that by hand, against a guessed
+    per-row latency, is what made the old estimate promise 4-7 minutes for a
+    batch that took 85.
+
+    Returns (low, high) seconds per row, or None without enough history.
+    """
+    from charon.db import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT judged_at FROM discoveries "
+            "WHERE judged_at IS NOT NULL "
+            "  AND judgement_reason NOT LIKE '[cull]%' "
+            "  AND judgement_reason NOT LIKE '[prune]%' "
+            "ORDER BY judged_at DESC LIMIT ?",
+            (_JUDGE_HISTORY_ROWS,),
+        ).fetchall()
+    except Exception:  # noqa: BLE001 — an estimate is never worth an error
+        return None
+    finally:
+        conn.close()
+
+    stamps: list[datetime] = []
+    for (raw,) in rows:
+        try:
+            stamps.append(datetime.fromisoformat(raw))
+        except (TypeError, ValueError):
+            continue
+    if len(stamps) < 12:
+        return None
+
+    stamps.sort()
+    gaps = sorted(
+        gap
+        for a, b in zip(stamps, stamps[1:])
+        if 0 < (gap := (b - a).total_seconds()) <= _JUDGE_GAP_CEILING_SECS
+    )
+    if len(gaps) < 10:
+        return None
+
+    def pct(p: float) -> float:
+        return gaps[min(len(gaps) - 1, int(p * len(gaps)))]
+
+    low, high = pct(0.25), pct(0.75)
+    if high < low:
+        low, high = high, low
+    return max(0.5, low), max(1.0, high)
+
+
+def _ferry_judge_estimates(n: int) -> dict[str, Any]:
+    """Cost + wall-time estimate for judging n rows, from measured throughput."""
+    measured = _measured_judge_seconds()
+    if measured:
+        secs_low, secs_high = measured
+        basis = "measured"
+    else:
+        secs_low, secs_high = float(_JUDGE_SECS_LOW), float(_JUDGE_SECS_HIGH)
+        basis = "estimated"
     return {
         "judgeable_count": n,
         "cost_low": round(n * _JUDGE_COST_LOW, 2),
         "cost_high": round(n * _JUDGE_COST_HIGH, 2),
-        "est_minutes_low": max(1, round(n * _JUDGE_SECS_LOW / workers / 60)) if n else 0,
-        "est_minutes_high": max(1, round(n * _JUDGE_SECS_HIGH / workers / 60)) if n else 0,
+        "secs_per_row_low": round(secs_low, 1),
+        "secs_per_row_high": round(secs_high, 1),
+        "time_basis": basis,
+        "est_minutes_low": max(1, round(n * secs_low / 60)) if n else 0,
+        "est_minutes_high": max(1, round(n * secs_high / 60)) if n else 0,
     }
 
 

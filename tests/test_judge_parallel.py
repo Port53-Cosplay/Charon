@@ -170,3 +170,51 @@ def test_breaker_resets_on_success(monkeypatch):
 
     results = screen_mod.judge_batch(profile={}, workers=1)
     assert len(results) == 20
+
+
+class TestAnalyzersRunTogether:
+    """The analyzers for one row are independent; running them in sequence cost
+    ~70s a row on the portal against ~20s for the slowest single call."""
+
+    def test_analyzers_overlap(self, monkeypatch):
+        import threading
+        from charon import screen as screen_mod
+
+        # Three analyzers (ghost, redflag, role — no resume text passed). A
+        # barrier only clears if all three are in flight at once; sequential
+        # execution leaves the first waiting until it times out.
+        gate = threading.Barrier(3, timeout=5)
+
+        def ghost(text):
+            gate.wait()
+            return {"ghost_score": 10, "confidence": "high", "signals": [], "summary": ""}
+
+        def redflags(text, profile):
+            gate.wait()
+            return {"redflag_score": 10, "confidence": "high", "dealbreakers_found": [],
+                    "yellow_flags_found": [], "green_flags_found": [], "summary": ""}
+
+        def role(text, targets):
+            gate.wait()
+            return {"alignment_score": 80, "closest_target": None, "overlap": [],
+                    "gaps": [], "stepping_stone": False, "assessment": ""}
+
+        monkeypatch.setattr(screen_mod, "analyze_ghostbust", ghost)
+        monkeypatch.setattr(screen_mod, "analyze_redflags", redflags)
+        monkeypatch.setattr(screen_mod, "analyze_role_alignment", role)
+
+        profile = {
+            "target_roles": ["Security Analyst"],
+            "judge": {"ready_threshold": 70, "alignment_floor": 50},
+        }
+        result = screen_mod.judge_discovery(
+            {"full_description": "x" * 900}, profile=profile
+        )
+        assert result["alignment_score"] == 80.0
+
+    def test_api_concurrency_is_configurable(self, monkeypatch):
+        from charon import screen as screen_mod
+        monkeypatch.setenv("CHARON_JUDGE_API_CONCURRENCY", "3")
+        assert screen_mod._resolve_api_concurrency() == 3
+        monkeypatch.setenv("CHARON_JUDGE_API_CONCURRENCY", "nonsense")
+        assert screen_mod._resolve_api_concurrency() == screen_mod.DEFAULT_JUDGE_API_CONCURRENCY
