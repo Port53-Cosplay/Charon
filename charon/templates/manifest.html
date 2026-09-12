@@ -2340,7 +2340,18 @@
       return `<div class="chip-row ${extraClass}">${chips}</div>`;
     }
 
+    // Rows rendered from a list payload, kept so a deferred detail panel can
+    // be rebuilt once its analyzer detail arrives.
+    const rowStore = new Map();
+
     function detailHtml(d) {
+      // List payloads can omit the analyzer detail (it's ~13KB a row). Render
+      // a shell; the expand handler fills it from /api/detail/<id>.
+      if (d.digest_deferred) {
+        return `<div class="detail" data-id="${d.id}" data-deferred="1">
+                  <div class="judgement-summary">Loading details…</div>
+                </div>`;
+      }
       const desc = d.full_description || "";
       const dg = d.judgement_digest || {};
       const align = dg.alignment || {};
@@ -2946,6 +2957,7 @@
     // ── Refused tab ────────────────────────────────────────────
 
     function renderRefusedCard(d) {
+      rowStore.set(String(d.id), d);
       const fScore = d.combined_score != null ? d.combined_score.toFixed(1) : "—";
       const subScores = [
         pip("G", d.ghost_score),
@@ -2990,6 +3002,33 @@
           ${detailHtml(d)}
         </article>
       `;
+    }
+
+    // Fill a deferred detail panel the first time its card opens. The list
+    // payload carried only the card's own fields; the analyzer detail and the
+    // full posting come from /api/detail/<id> and then stay in the DOM.
+    async function loadCardDetail(panel) {
+      if (panel.dataset.loading === "1") return;
+      panel.dataset.loading = "1";
+      const id = panel.dataset.id;
+      try {
+        const r = await fetch(`/api/detail/${encodeURIComponent(id)}`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        const row = Object.assign({}, rowStore.get(String(id)) || {}, {
+          id: id,
+          full_description: data.full_description,
+          judgement_digest: data.judgement_digest,
+          digest_deferred: false,
+        });
+        const holder = document.createElement("div");
+        holder.innerHTML = detailHtml(row);
+        const rebuilt = holder.firstElementChild;
+        if (rebuilt) panel.replaceWith(rebuilt);
+      } catch (e) {
+        panel.innerHTML = `<div class="judgement-summary">Couldn't load details: ${escapeHtml(e.message)}</div>`;
+        delete panel.dataset.loading;
+      }
     }
 
     // Expand a posting. When the card came from a capped list payload, the
@@ -4261,6 +4300,10 @@ judging happens without a separate confirm.`;
         card.classList.toggle("is-open", opening);
         const label = expandBtn.querySelector(".expand-label");
         if (label) label.textContent = opening ? "Hide details" : "Show details";
+        if (opening) {
+          const panel = card.querySelector(".detail[data-deferred='1']");
+          if (panel) loadCardDetail(panel);
+        }
         return;
       }
 

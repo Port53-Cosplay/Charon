@@ -163,7 +163,9 @@ def _refused_discoveries(
     )
     rows = [r for r in rows if r.get("judged_at")]
     return [
-        _summarize_discovery(r, preview_chars=DESCRIPTION_PREVIEW_CHARS)
+        _summarize_discovery(
+            r, preview_chars=DESCRIPTION_PREVIEW_CHARS, include_digest=False
+        )
         for r in rows
     ]
 
@@ -1579,15 +1581,18 @@ def _summarize_discovery(
     r: dict[str, Any],
     *,
     preview_chars: int | None = None,
+    include_digest: bool = True,
 ) -> dict[str, Any]:
     """Cherry-pick fields the dashboard cares about — keeps the JSON tight.
 
-    `preview_chars` truncates full_description for list views. Shipping whole
-    postings for every row is what made the Refused tab a 4MB response: 200
-    rows at ~21KB of job text each, re-downloaded and re-rendered on every
-    window switch. The collapsed preview in the detail panel only shows the
-    first few lines anyway, and /api/description/<id> serves the rest when
-    the reader asks for it.
+    Two levers keep list payloads small, both served on demand by
+    /api/detail/<id> when a reader actually opens a card:
+
+    - `preview_chars` truncates full_description.
+    - `include_digest=False` drops judgement_digest, the analyzer detail
+      (flag evidence, ghost signals). At ~13KB a row it was 94% of the
+      Refused tab's 4MB response — 200 rows of it, re-downloaded and
+      re-rendered on every window switch.
     """
     from charon.contacts import CONTACTS_FILENAME
 
@@ -1655,7 +1660,8 @@ def _summarize_discovery(
         "description_chars": full_len,
         "description_truncated": truncated,
         "judgement_reason": r.get("judgement_reason"),
-        "judgement_digest": judgement_digest,
+        "judgement_digest": judgement_digest if include_digest else None,
+        "digest_deferred": not include_digest,
     }
 
 
@@ -2088,8 +2094,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
             return
-        if path.startswith("/api/description/"):
-            # The rest of a posting, for a card whose list payload was capped.
+        if path.startswith("/api/detail/") or path.startswith("/api/description/"):
+            # Everything a list payload left out: the full posting and the
+            # analyzer detail, fetched when a card is actually opened.
             try:
                 discovery_id = int(path.rsplit("/", 1)[-1])
             except ValueError:
@@ -2106,6 +2113,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json({
                 "id": discovery_id,
                 "full_description": row.get("full_description") or "",
+                "judgement_digest": _summarize_discovery(row)["judgement_digest"],
             })
             return
         if path == "/api/refused":

@@ -159,3 +159,59 @@ class TestPayloadSize:
         full = get_discovery(rid)["full_description"]
         row = dashboard._refused_discoveries()[0]
         assert full.startswith(row["full_description"])
+
+
+class TestDeferredDigest:
+    """judgement_digest was 94% of the Refused payload (~13KB a row). List
+    views leave it out; /api/detail/<id> serves it when a card opens."""
+
+    def _seed_with_digest(self, dedupe_hash):
+        import json
+        rid = _seed_refused(dedupe_hash, days_ago=2)
+        detail = {
+            "redflags": {
+                "dealbreakers_found": [
+                    {"flag": "on-site", "evidence": "x" * 400,
+                     "interpretation": "y" * 400},
+                ],
+            },
+            "ghostbust": {"summary": "z" * 400, "signals": []},
+        }
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE discoveries SET judgement_detail = ? WHERE id = ?",
+                (json.dumps(detail), rid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return rid
+
+    def test_list_payload_omits_the_digest(self):
+        self._seed_with_digest("dd-list")
+        row = dashboard._refused_discoveries()[0]
+        assert row["judgement_digest"] is None
+        assert row["digest_deferred"] is True
+
+    def test_uncapped_callers_keep_it(self):
+        from charon.db import get_discovery
+        rid = self._seed_with_digest("dd-full")
+        row = dashboard._summarize_discovery(get_discovery(rid))
+        assert row["digest_deferred"] is False
+        assert row["judgement_digest"] is not None
+        assert row["judgement_digest"]["redflags"]["dealbreakers"]
+
+    def test_analyzer_text_never_reaches_the_list_payload(self):
+        import json
+        for i in range(5):
+            self._seed_with_digest(f"dd-size-{i}")
+        listed = json.dumps(dashboard._refused_discoveries())
+        # The evidence and interpretation strings are the bulk of a digest.
+        assert "x" * 400 not in listed
+        assert "y" * 400 not in listed
+
+        from charon.db import get_discoveries
+        rows = [r for r in get_discoveries(status="rejected") if r.get("judged_at")]
+        whole = json.dumps([dashboard._summarize_discovery(r) for r in rows])
+        assert len(listed) < len(whole)
