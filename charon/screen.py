@@ -724,14 +724,27 @@ def reclassify_batch(
     limit: int | None = None,
     threshold: float | None = None,
     profile: dict[str, Any] | None,
+    judged_since: str | None = None,
+    discovered_since: str | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Reclassify all already-judged discoveries against the current profile.
+    """Reclassify already-judged discoveries against the current profile.
 
-    Free — no AI calls. Useful after tuning ready_threshold or alignment_floor.
+    Free — no AI calls. Useful after tuning weights, ready_threshold or
+    alignment_floor.
+
+    `judged_since` and `discovered_since` are ISO timestamps that narrow the
+    sweep — re-gating five months of history at once makes it impossible to
+    see what a change actually did, so a weight change is worth trying on one
+    recent batch first.
     """
-    targets = get_discoveries(ats=ats, limit=limit)
+    targets = get_discoveries(ats=ats, limit=limit, judged_since=judged_since)
     targets = [t for t in targets if t.get("judged_at")]
+    if discovered_since:
+        targets = [
+            t for t in targets
+            if (t.get("discovered_at") or "") >= discovered_since
+        ]
 
     results: list[dict[str, Any]] = []
     for discovery in targets:

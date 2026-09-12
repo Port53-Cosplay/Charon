@@ -87,3 +87,57 @@ class TestMeasurement:
         est = dashboard._ferry_judge_estimates(100)
         assert est["cost_low"] == 8.0
         assert est["cost_high"] == 11.0
+
+
+class TestReclassifyScope:
+    """A weight change re-gated against five months of history tells you
+    nothing about what it did. --since-days scopes it to a recent batch."""
+
+    def _seed(self, dedupe_hash, *, discovered_days_ago, judged_days_ago):
+        now = datetime.now(timezone.utc)
+        rid = _seed_judged(
+            dedupe_hash, (now - timedelta(days=judged_days_ago)).isoformat()
+        )
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE discoveries SET discovered_at = ? WHERE id = ?",
+                ((now - timedelta(days=discovered_days_ago)).isoformat(), rid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return rid
+
+    def _cutoff(self, days):
+        return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    def test_scope_takes_only_recent_rows(self):
+        from charon.screen import reclassify_batch
+        recent = self._seed("rs-recent", discovered_days_ago=1, judged_days_ago=1)
+        self._seed("rs-old", discovered_days_ago=90, judged_days_ago=90)
+        profile = {"judge": {"ready_threshold": 70, "alignment_floor": 50}}
+        cut = self._cutoff(7)
+        out = reclassify_batch(
+            profile=profile, judged_since=cut, discovered_since=cut
+        )
+        assert [r["discovery_id"] for r in out] == [recent]
+
+    def test_old_harvest_judged_recently_is_excluded(self):
+        # Harvested in May, judged last night: out of scope, because the ask
+        # was rows harvested AND judged inside the window.
+        from charon.screen import reclassify_batch
+        self._seed("rs-split", discovered_days_ago=90, judged_days_ago=1)
+        profile = {"judge": {"ready_threshold": 70, "alignment_floor": 50}}
+        cut = self._cutoff(7)
+        out = reclassify_batch(
+            profile=profile, judged_since=cut, discovered_since=cut
+        )
+        assert out == []
+
+    def test_no_scope_still_sweeps_everything(self):
+        from charon.screen import reclassify_batch
+        self._seed("rs-a", discovered_days_ago=1, judged_days_ago=1)
+        self._seed("rs-b", discovered_days_ago=90, judged_days_ago=90)
+        profile = {"judge": {"ready_threshold": 70, "alignment_floor": 50}}
+        assert len(reclassify_batch(profile=profile)) == 2

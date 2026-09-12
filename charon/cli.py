@@ -2112,7 +2112,11 @@ def _print_enrich_line(result: dict) -> None:
 @click.option("--rejudge", is_flag=True, help="Re-run judges even on already-judged discoveries.")
 @click.option("--reclassify", is_flag=True,
               help="Re-apply the ready/rejected gating to existing scores. No AI calls. "
-                   "Use after tuning ready_threshold or alignment_floor.")
+                   "Use after tuning weights, ready_threshold or alignment_floor.")
+@click.option("--since-days", type=int, default=None,
+              help="With --reclassify: only rows harvested AND judged within the last "
+                   "N days. Scopes a tuning change to one recent batch so you can see "
+                   "what it did.")
 @click.option("--status", "status_filter",
               type=click.Choice(["ready", "rejected", "expired"]),
               help="Limit batch to discoveries currently in this status. "
@@ -2136,6 +2140,7 @@ def judge_cmd(
     tier_filter: tuple[str, ...],
     rejudge: bool,
     reclassify: bool,
+    since_days: int | None,
     status_filter: str | None,
     limit: int | None,
     threshold: float | None,
@@ -2253,6 +2258,25 @@ def judge_cmd(
         floor = cfg.get("alignment_floor", 50)
         thresh = threshold if threshold is not None else cfg.get("ready_threshold", 60)
         print_info(f"Active gates: ready_threshold={thresh}, alignment_floor={floor}")
+        weights = cfg.get("weights") or {}
+        if weights:
+            print_info(
+                "Weights: "
+                + ", ".join(f"{k}={v}" for k, v in sorted(weights.items()))
+            )
+        from datetime import datetime, timedelta, timezone
+
+        cutoff: str | None = None
+        if since_days is not None:
+            if since_days < 1:
+                print_error("--since-days must be at least 1.")
+                return
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=since_days)
+            ).isoformat()
+            print_info(
+                f"Scope: harvested AND judged within the last {since_days} day(s)"
+            )
         console.print()
 
         changed_count = 0
@@ -2280,6 +2304,8 @@ def judge_cmd(
             limit=limit,
             threshold=threshold,
             profile=prof,
+            judged_since=cutoff,
+            discovered_since=cutoff,
             on_progress=on_progress,
         )
 
