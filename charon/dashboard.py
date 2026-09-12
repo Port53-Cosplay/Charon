@@ -22,7 +22,7 @@ import socket
 import threading
 import urllib.parse
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -126,17 +126,61 @@ def _gathered_discoveries(limit: int = 200) -> list[dict[str, Any]]:
     return out
 
 
-def _refused_discoveries(limit: int = 200) -> list[dict[str, Any]]:
+REFUSED_WINDOW_DAYS_DEFAULT = 30
+
+
+def _refused_window_cutoff(days: int | None) -> str | None:
+    """ISO cutoff for the refused recency window, or None for all time."""
+    if days is None:
+        return None
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _refused_discoveries(
+    limit: int = 200,
+    days: int | None = REFUSED_WINDOW_DAYS_DEFAULT,
+) -> list[dict[str, Any]]:
     """Discoveries the judge filtered out — 'refused' in the UI's voice.
 
-    Capped by default since a long judge run can produce thousands of
-    refusals and they're an audit view, not the daily flow.
+    Ordered by score and capped, since a long judge run can produce
+    thousands of refusals and they're an audit view, not the daily flow.
+
+    `days` keeps the view to recent judgements (None = all time). Ordering
+    the whole pile by score means the best postings Charon ever saw sit at
+    the top permanently — useful once, dispiriting daily, and a bad
+    comparison besides: the board mix behind the pool has changed, so a
+    May score and a September score aren't measuring the same market.
     """
     from charon.db import get_discoveries
 
-    rows = get_discoveries(status="rejected", order_by="combined_score", limit=limit)
+    rows = get_discoveries(
+        status="rejected",
+        order_by="combined_score",
+        limit=limit,
+        judged_since=_refused_window_cutoff(days),
+    )
     rows = [r for r in rows if r.get("judged_at")]
     return [_summarize_discovery(r) for r in rows]
+
+
+def _count_refused(days: int | None) -> int:
+    """How many refused rows fall inside the window (None = all time)."""
+    from charon.db import get_connection
+
+    sql = (
+        "SELECT COUNT(*) FROM discoveries "
+        "WHERE screened_status = 'rejected' AND judged_at IS NOT NULL"
+    )
+    params: list[Any] = []
+    cutoff = _refused_window_cutoff(days)
+    if cutoff:
+        sql += " AND judged_at >= ?"
+        params.append(cutoff)
+    conn = get_connection()
+    try:
+        return conn.execute(sql, params).fetchone()[0]
+    finally:
+        conn.close()
 
 
 def _unreject_discovery(discovery_id: int) -> dict[str, Any]:
@@ -2016,18 +2060,22 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_json({"ready": _ready_discoveries()})
             return
         if path == "/api/refused":
-            from charon.db import get_connection
-            conn = get_connection()
-            try:
-                total = conn.execute(
-                    "SELECT COUNT(*) FROM discoveries "
-                    "WHERE screened_status = 'rejected' AND judged_at IS NOT NULL"
-                ).fetchone()[0]
-            finally:
-                conn.close()
+            # ?days=30 (default) | ?days=all — the recency window. Anything
+            # unparseable falls back to the default rather than erroring; this
+            # is a view preference, not an operation.
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            raw_days = (qs.get("days", [""])[0] or "").strip().lower()
+            if raw_days in {"all", "0"}:
+                days: int | None = None
+            elif raw_days.isdigit() and int(raw_days) > 0:
+                days = min(int(raw_days), 3650)
+            else:
+                days = REFUSED_WINDOW_DAYS_DEFAULT
             self._serve_json({
-                "refused": _refused_discoveries(),
-                "total": total,
+                "refused": _refused_discoveries(days=days),
+                "total": _count_refused(days),
+                "total_all": _count_refused(None),
+                "days": days,
             })
             return
         if path == "/api/gathered":

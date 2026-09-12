@@ -561,11 +561,17 @@ def get_discoveries(
     status: str | None = None,
     limit: int | None = None,
     order_by: str = "discovered_at",
+    judged_since: str | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve discoveries with optional filters.
 
     `order_by` is a literal key into a whitelist (`discovered_at` or
     `combined_score`) — never interpolate user input directly.
+
+    `judged_since` is an ISO timestamp: only rows judged at or after it.
+    The refused view uses it to keep a recency window, since ordering the
+    whole pile by score turns the tab into an all-time hall of fame where
+    a four-month-old near-miss sits on top forever.
     """
     if order_by not in _ORDER_CLAUSES:
         raise ValueError(
@@ -583,6 +589,9 @@ def get_discoveries(
     if status:
         clauses.append("screened_status = ?")
         params.append(status)
+    if judged_since:
+        clauses.append("judged_at >= ?")
+        params.append(judged_since)
 
     sql = "SELECT * FROM discoveries"
     if clauses:

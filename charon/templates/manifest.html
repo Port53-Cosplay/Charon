@@ -710,6 +710,31 @@
 
     .pane-toolbar button[disabled] { opacity: 0.7; cursor: wait; }
 
+    /* Refused recency window — a segmented control, so which window is in
+       force is readable without clicking anything. */
+    .refused-toolbar { align-items: center; }
+
+    .refused-window-label {
+      margin-right: auto;
+      color: var(--ink-faint);
+      font-size: 12px;
+    }
+
+    .window-group { display: flex; gap: 6px; }
+
+    .pane-toolbar .window-btn {
+      padding: 5px 12px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+
+    .pane-toolbar .window-btn.active {
+      background: var(--lilac-soft);
+      color: var(--plum);
+      border-color: var(--plum-soft);
+      font-weight: 600;
+    }
+
     /* Maintenance action — quiet by default, for occasional buildup flushes. */
     .pane-toolbar button.subtle {
       color: var(--ink-faint);
@@ -2152,6 +2177,14 @@
       </section>
 
       <section class="tab-pane" data-pane="refused" hidden>
+        <div class="pane-toolbar refused-toolbar">
+          <span class="refused-window-label" id="refused-window-summary">Refusals from the last 30 days</span>
+          <div class="window-group" id="refused-window" title="Which judgements to show. Ordering every refusal ever by score leaves the best posting Charon has ever seen pinned to the top; a window shows the best of recent work instead.">
+            <button class="window-btn" data-days="30">30 days</button>
+            <button class="window-btn" data-days="90">90 days</button>
+            <button class="window-btn" data-days="all">All time</button>
+          </div>
+        </div>
         <div id="refused-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading refused discoveries…</div>
         </div>
@@ -2956,34 +2989,85 @@
       `;
     }
 
-    function renderRefused(refused, total) {
+    function refusedWindowText(days) {
+      if (days == null) return "Refusals from all time";
+      if (days === 30) return "Refusals from the last 30 days";
+      if (days === 90) return "Refusals from the last 90 days";
+      return `Refusals from the last ${days} days`;
+    }
+
+    // Reflect the live window in the toolbar: which button is lit, and how
+    // many rows the window holds against the all-time pile.
+    function renderRefusedWindow(days, total, totalAll) {
+      const group = document.getElementById("refused-window");
+      if (group) {
+        const want = (days == null) ? "all" : String(days);
+        group.querySelectorAll(".window-btn").forEach((b) => {
+          b.classList.toggle("active", b.dataset.days === want);
+        });
+      }
+      const label = document.getElementById("refused-window-summary");
+      if (!label) return;
+      let text = refusedWindowText(days);
+      if (total != null) {
+        text += ` — ${total.toLocaleString()}`;
+        if (totalAll != null && days != null && totalAll > total) {
+          text += ` of ${totalAll.toLocaleString()} all time`;
+        }
+      }
+      label.textContent = text;
+    }
+
+    function renderRefused(refused, total, totalAll, days) {
       const container = document.getElementById("refused-container");
-      // Tab chip shows the *full* refused total, not the 200-row display slice.
+      // Tab chip counts the window, matching what the list can show you.
       const chipTotal = (total != null) ? total : refused.length;
       document.getElementById("count-refused").textContent = chipTotal;
+      renderRefusedWindow(days, total, totalAll);
       if (refused.length === 0) {
         container.innerHTML = `
           <div class="state">
             <div class="glyph">·</div>
-            No refused discoveries yet.
+            ${days == null
+              ? "No refused discoveries yet."
+              : `Nothing refused in the last ${days} days. Widen the window above to look further back.`}
           </div>`;
         return;
       }
       const cards = refused.map(renderRefusedCard).join("");
+      const scope = (days == null) ? "refused" : `refused in this window`;
       const cappedNote = (total != null && total > refused.length)
         ? `<div class="state" style="padding:14px 20px;text-align:left;font-size:12px;border-style:solid;border-color:var(--card-border);margin-top:14px">
-             Showing the <strong>${refused.length}</strong> highest-scoring of <strong>${total}</strong> refused. Run <code>charon judge --list rejected</code> to see them all.
+             Showing the <strong>${refused.length}</strong> highest-scoring of <strong>${total.toLocaleString()}</strong> ${scope}. Run <code>charon judge --list rejected</code> to see them all.
            </div>`
         : "";
       container.innerHTML = cards + cappedNote;
     }
 
+    // Recency window for the Refused tab, remembered across visits. 30 days
+    // by default; null means all time.
+    let refusedDays = 30;
+    try {
+      const saved = localStorage.getItem("charon.refusedDays");
+      if (saved === "all") refusedDays = null;
+      else if (saved && /^\d+$/.test(saved)) refusedDays = parseInt(saved, 10);
+    } catch (e) { /* localStorage unavailable — default window it is */ }
+
+    function setRefusedWindow(days) {
+      refusedDays = days;
+      try {
+        localStorage.setItem("charon.refusedDays", days == null ? "all" : String(days));
+      } catch (e) { /* not worth surfacing — the window still applies */ }
+      loadRefused();
+    }
+
     async function loadRefused() {
       try {
-        const r = await fetch("/api/refused");
+        const param = (refusedDays == null) ? "all" : String(refusedDays);
+        const r = await fetch(`/api/refused?days=${encodeURIComponent(param)}`);
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
-        renderRefused(data.refused || [], data.total);
+        renderRefused(data.refused || [], data.total, data.total_all, data.days);
       } catch (e) {
         document.getElementById("refused-container").innerHTML = `
           <div class="state">
@@ -4017,6 +4101,14 @@ judging happens without a separate confirm.`;
         btn.setAttribute("aria-expanded", String(open));
         btn.textContent = open ? "hide" : "what these mean";
         try { localStorage.setItem("charon.legendOpen", open ? "1" : "0"); } catch (e) {}
+        return;
+      }
+      // Refused recency window — pure view state, no server work beyond a
+      // re-read of the list.
+      const windowBtn = ev.target.closest(".window-btn");
+      if (windowBtn) {
+        const raw = windowBtn.dataset.days;
+        setRefusedWindow(raw === "all" ? null : parseInt(raw, 10));
         return;
       }
       // Stage chips (Awaiting header) — run the crossing from that stage
