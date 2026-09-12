@@ -116,12 +116,12 @@ gather:
       notes: "Top-tier endpoint security; ~540 open roles"
       workday: { tenant: crowdstrike, wd: wd5, site: crowdstrikecareers }
 
-    - slug: cisco
-      name: "Cisco (incl. Splunk)"
-      tier: tier_3
-      category: security_product_general
-      notes: "Huge board (~975 jobs). Splunk roles now under Cisco. Use 'judge' aggressively to filter."
-      workday: { tenant: cisco, wd: wd5, site: cisco_careers }
+    # Cisco (incl. Splunk) removed 2026-09-11. It was the single biggest drain
+    # in the registry: 3,166 postings harvested, 931 paid judgements (~$88),
+    # best combined score 64.8, nothing ever reaching ready. Typical refusal was
+    # "alignment 15 < floor 50" — a vast generic-engineering board where the
+    # security roles are a rounding error. The note below used to say "use
+    # judge aggressively to filter", which is exactly the expensive way to do it.
 
     - slug: bitsight
       name: "BitSight"

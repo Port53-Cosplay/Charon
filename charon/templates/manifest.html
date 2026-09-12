@@ -2352,9 +2352,12 @@
       const sections = [];
 
       if (desc) {
+        // List payloads cap the posting text; the rest arrives from
+        // /api/description/<id> the first time the reader opens it.
+        const trunc = d.description_truncated ? ` data-truncated="1" data-id="${d.id}"` : "";
         sections.push(`
           <h3>The posting</h3>
-          <div class="desc-preview" data-collapsed="1">${escapeHtml(desc)}</div>
+          <div class="desc-preview" data-collapsed="1"${trunc}>${escapeHtml(desc)}</div>
           <button class="desc-more">Show full description</button>
         `);
       }
@@ -2989,6 +2992,36 @@
       `;
     }
 
+    // Expand a posting. When the card came from a capped list payload, the
+    // rest of the text is fetched once and kept in the DOM from then on.
+    async function expandDescription(preview, btn) {
+      const collapsing = preview.classList.contains("expanded");
+      if (collapsing) {
+        preview.classList.remove("expanded");
+        btn.textContent = "Show full description";
+        return;
+      }
+      if (preview.dataset.truncated === "1") {
+        const id = preview.dataset.id;
+        btn.disabled = true;
+        btn.textContent = "Loading the rest…";
+        try {
+          const r = await fetch(`/api/description/${encodeURIComponent(id)}`);
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+          if (data.full_description) preview.textContent = data.full_description;
+          delete preview.dataset.truncated;
+        } catch (e) {
+          // Keep the preview rather than blanking it; say what happened.
+          showToast("Couldn't load the rest of the posting: " + e.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      preview.classList.add("expanded");
+      btn.textContent = "Collapse description";
+    }
+
     function refusedWindowText(days) {
       if (days == null) return "Refusals from all time";
       if (days === 30) return "Refusals from the last 30 days";
@@ -3061,12 +3094,29 @@
       loadRefused();
     }
 
-    async function loadRefused() {
+    // Per-window response cache, so flipping between 30/90/all doesn't re-fetch
+    // and re-render the same rows. Any action that changes the pile clears it.
+    const refusedCache = new Map();
+
+    function clearRefusedCache() { refusedCache.clear(); }
+
+    async function loadRefused({ force = false } = {}) {
+      const param = (refusedDays == null) ? "all" : String(refusedDays);
+      if (!force && refusedCache.has(param)) {
+        const c = refusedCache.get(param);
+        renderRefused(c.refused, c.total, c.total_all, c.days);
+        return;
+      }
       try {
-        const param = (refusedDays == null) ? "all" : String(refusedDays);
         const r = await fetch(`/api/refused?days=${encodeURIComponent(param)}`);
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
+        refusedCache.set(param, {
+          refused: data.refused || [],
+          total: data.total,
+          total_all: data.total_all,
+          days: data.days,
+        });
         renderRefused(data.refused || [], data.total, data.total_all, data.days);
       } catch (e) {
         document.getElementById("refused-container").innerHTML = `
@@ -3094,7 +3144,8 @@
         setTimeout(() => {
           // The unreject endpoint returns refused list but not total;
           // re-fetch to get a fresh count for the chip.
-          loadRefused();
+          clearRefusedCache();
+          loadRefused({ force: true });
           renderList(data.ready || []);
           loadStats();
         }, 320);
@@ -3673,7 +3724,8 @@ judging happens without a separate confirm.`;
     function refreshFunnelState() {
       loadReady();
       loadGathered();
-      loadRefused();
+      clearRefusedCache();
+      loadRefused({ force: true });
       loadStats();
     }
 
@@ -4216,10 +4268,7 @@ judging happens without a separate confirm.`;
       const descMore = ev.target.closest(".desc-more");
       if (descMore) {
         const preview = descMore.parentElement?.querySelector(".desc-preview");
-        if (preview) {
-          const expanded = preview.classList.toggle("expanded");
-          descMore.textContent = expanded ? "Collapse description" : "Show full description";
-        }
+        if (preview) expandDescription(preview, descMore);
         return;
       }
 
@@ -4427,7 +4476,7 @@ judging happens without a separate confirm.`;
           const name = active.dataset.tab;
           if (name === "ready") loadReady();
           else if (name === "applications") loadApplications();
-          else if (name === "refused") loadRefused();
+          else if (name === "refused") { clearRefusedCache(); loadRefused({ force: true }); }
           else if (name === "gathered") loadGathered();
         }
       }

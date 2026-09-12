@@ -112,3 +112,50 @@ class TestGetDiscoveriesFilter:
         _seed_refused("gd-old2", days_ago=120)
         _seed_refused("gd-new2", days_ago=1)
         assert len(get_discoveries(status="rejected")) == 2
+
+
+class TestPayloadSize:
+    """The Refused list shipped whole job descriptions for 200 rows — 4.2MB
+    per window switch. List views now send a preview and serve the rest from
+    /api/description/<id>."""
+
+    def _seed_with_text(self, dedupe_hash, chars):
+        rid = _seed_refused(dedupe_hash, days_ago=2)
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE discoveries SET full_description = ? WHERE id = ?",
+                ("y" * chars, rid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return rid
+
+    def test_long_posting_is_truncated_with_a_flag(self):
+        self._seed_with_text("pl-long", 20000)
+        row = dashboard._refused_discoveries()[0]
+        assert row["description_truncated"] is True
+        assert len(row["full_description"]) == dashboard.DESCRIPTION_PREVIEW_CHARS
+        assert row["description_chars"] == 20000
+
+    def test_short_posting_is_sent_whole(self):
+        self._seed_with_text("pl-short", 120)
+        row = dashboard._refused_discoveries()[0]
+        assert row["description_truncated"] is False
+        assert len(row["full_description"]) == 120
+
+    def test_uncapped_callers_still_get_everything(self):
+        # The Ready tab shows a couple of rows; it has no reason to truncate.
+        from charon.db import get_discovery
+        rid = self._seed_with_text("pl-full", 20000)
+        row = dashboard._summarize_discovery(get_discovery(rid))
+        assert row["description_truncated"] is False
+        assert len(row["full_description"]) == 20000
+
+    def test_preview_is_a_prefix_of_the_real_text(self):
+        rid = self._seed_with_text("pl-prefix", 5000)
+        from charon.db import get_discovery
+        full = get_discovery(rid)["full_description"]
+        row = dashboard._refused_discoveries()[0]
+        assert full.startswith(row["full_description"])

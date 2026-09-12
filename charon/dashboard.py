@@ -81,6 +81,8 @@ def _ready_discoveries() -> list[dict[str, Any]]:
 
     rows = get_discoveries(status="ready", order_by="combined_score")
     rows = [r for r in rows if r.get("judged_at")]
+    # Not capped: Ready holds a handful of rows and it's where postings
+    # actually get read.
     return [_summarize_discovery(r) for r in rows]
 
 
@@ -160,7 +162,10 @@ def _refused_discoveries(
         judged_since=_refused_window_cutoff(days),
     )
     rows = [r for r in rows if r.get("judged_at")]
-    return [_summarize_discovery(r) for r in rows]
+    return [
+        _summarize_discovery(r, preview_chars=DESCRIPTION_PREVIEW_CHARS)
+        for r in rows
+    ]
 
 
 def _count_refused(days: int | None) -> int:
@@ -1567,8 +1572,23 @@ def _offering_has(offerings_path: str, stem: str) -> bool:
         return False
 
 
-def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
-    """Cherry-pick fields the dashboard cares about — keeps the JSON tight."""
+DESCRIPTION_PREVIEW_CHARS = 600
+
+
+def _summarize_discovery(
+    r: dict[str, Any],
+    *,
+    preview_chars: int | None = None,
+) -> dict[str, Any]:
+    """Cherry-pick fields the dashboard cares about — keeps the JSON tight.
+
+    `preview_chars` truncates full_description for list views. Shipping whole
+    postings for every row is what made the Refused tab a 4MB response: 200
+    rows at ~21KB of job text each, re-downloaded and re-rendered on every
+    window switch. The collapsed preview in the detail panel only shows the
+    first few lines anyway, and /api/description/<id> serves the rest when
+    the reader asks for it.
+    """
     from charon.contacts import CONTACTS_FILENAME
 
     offerings_path = r.get("offerings_path")
@@ -1600,6 +1620,12 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError, json.JSONDecodeError):
             judgement_digest = None
 
+    description = r.get("full_description") or ""
+    full_len = len(description)
+    truncated = preview_chars is not None and full_len > preview_chars
+    if truncated:
+        description = description[:preview_chars]
+
     return {
         "id": r["id"],
         "company": r["company"],
@@ -1623,8 +1649,11 @@ def _summarize_discovery(r: dict[str, Any]) -> dict[str, Any]:
         "has_resume": has_resume,
         "has_letter": has_letter,
         "salary_data": _parse_salary_data(r.get("salary_data")),
-        # Detail-view fields (loaded eagerly so click-to-expand is instant)
-        "full_description": r.get("full_description"),
+        # Detail-view fields — eager so click-to-expand is instant, but the
+        # posting text is capped for list views (see preview_chars).
+        "full_description": description,
+        "description_chars": full_len,
+        "description_truncated": truncated,
         "judgement_reason": r.get("judgement_reason"),
         "judgement_digest": judgement_digest,
     }
@@ -2058,6 +2087,26 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
+            return
+        if path.startswith("/api/description/"):
+            # The rest of a posting, for a card whose list payload was capped.
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            from charon.db import get_discovery
+            row = get_discovery(discovery_id)
+            if row is None:
+                self._serve_json(
+                    {"error": f"No discovery with id {discovery_id}."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            self._serve_json({
+                "id": discovery_id,
+                "full_description": row.get("full_description") or "",
+            })
             return
         if path == "/api/refused":
             # ?days=30 (default) | ?days=all — the recency window. Anything
