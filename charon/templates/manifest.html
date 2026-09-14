@@ -2472,7 +2472,7 @@
       let materialsBtn;
       if (hasOfferings) {
         const resumeBtn = (d.has_resume !== false)
-          ? `<button class="open-btn open-resume-btn" data-id="${d.id}" title="Open resume in a new tab — Ctrl+P to save as PDF">Resume</button>`
+          ? resumeButtonHtml(d.id, d.resume_file)
           : "";
         const letterBtn = d.has_letter
           ? `<button class="open-btn open-letter-btn" data-id="${d.id}" title="Open cover letter in a new tab — Ctrl+P to save as PDF">Cover letter</button>`
@@ -3235,7 +3235,7 @@
       let folderBtn = "";
       if (a.has_offerings && a.discovery_id != null) {
         const resumeBtn = (a.has_resume !== false)
-          ? `<button class="open-btn open-resume-btn" data-id="${a.discovery_id}" title="Open resume in a new tab — Ctrl+P to save as PDF">Resume</button>`
+          ? resumeButtonHtml(a.discovery_id, a.resume_file)
           : "";
         const letterBtn = a.has_letter
           ? `<button class="open-btn open-letter-btn" data-id="${a.discovery_id}" title="Open cover letter in a new tab — Ctrl+P to save as PDF">Cover letter</button>`
@@ -4038,6 +4038,18 @@ judging happens without a separate confirm.`;
       }
     }
 
+    // Forge attaches whichever résumé the posting routed to, as-is: rendered
+    // HTML for markdown, or the .docx itself, which downloads rather than
+    // opening in a tab.
+    function resumeButtonHtml(id, file) {
+      const f = file || "resume.html";
+      const isDocx = f.endsWith(".docx");
+      const title = isDocx
+        ? "Download the resume this posting was matched against"
+        : "Open resume in a new tab — Ctrl+P to save as PDF";
+      return `<button class="open-btn open-resume-btn" data-id="${id}" data-file="${escapeHtml(f)}" title="${title}">Resume${isDocx ? " (.docx)" : ""}</button>`;
+    }
+
     function openOfferingFile(id, filename) {
       // One file, one tab — one window.open per click so the browser
       // doesn't pop-up-block it. The tab title pre-fills the Ctrl+P
@@ -4359,7 +4371,8 @@ judging happens without a separate confirm.`;
       const resumeBtn = ev.target.closest(".open-resume-btn");
       if (resumeBtn) {
         const id = resumeBtn.getAttribute("data-id");
-        if (id) openOfferingFile(id, "resume.html");
+        const file = resumeBtn.getAttribute("data-file") || "resume.html";
+        if (id) openOfferingFile(id, file);
         return;
       }
       const letterBtn = ev.target.closest(".open-letter-btn");

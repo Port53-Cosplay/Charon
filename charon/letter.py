@@ -22,6 +22,7 @@ from typing import Any
 
 from charon import tailor as _tailor
 from charon.resume_match import ResumeMatchError, load_resume_text
+from charon.resumes import closest_target_of, resume_path_for
 from charon.tailor import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
@@ -278,11 +279,13 @@ def petition_discovery(
         }
 
     if not resume_text:
-        resume_path_str = cfg["resume_path"]
+        # The letter draws on the same résumé forge attaches and résumé match
+        # scored — IR or GRC by the judge's closest_target.
+        kind, resume_path_str = resume_path_for(profile, closest_target_of(discovery))
         if not resume_path_str:
             return {
                 "discovery_id": discovery.get("id"),
-                "error": "No resume configured. Set profile.resume_path.",
+                "error": f"No {kind.upper()} resume configured. Set profile.resumes.{kind}.",
             }
         try:
             resume_text = load_resume_text(resume_path_str)

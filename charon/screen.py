@@ -12,6 +12,7 @@ trigger a confirmation prompt in the CLI layer.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +26,7 @@ from charon.db import (
     get_unjudged_discoveries,
     update_discovery_classification,
     update_discovery_judgement,
+    update_discovery_rescore,
 )
 from charon.ghostbust import analyze_ghostbust
 from charon.hunt import analyze_role_alignment
@@ -35,6 +37,13 @@ from charon.resume_match import (
     load_resume_text,
 )
 from charon.monoculture import score_monoculture
+from charon.resumes import (
+    KIND_IR,
+    closest_target_of,
+    kind_for,
+    load_all,
+    load_resume_for,
+)
 
 
 DEFAULT_READY_THRESHOLD = 60
@@ -195,6 +204,7 @@ def judge_discovery(
     profile: dict[str, Any],
     threshold: float | None = None,
     resume_text: str | None = None,
+    resumes: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run the analyzers on one discovery. Returns a result dict.
 
@@ -227,15 +237,34 @@ def judge_discovery(
         "ghost": lambda: analyze_ghostbust(text),
         "redflag": lambda: analyze_redflags(text, profile),
     }
-    if target_roles:
-        calls["role"] = lambda: analyze_role_alignment(text, target_roles)
-    if resume_text:
-        calls["resume"] = lambda: analyze_resume_match(text, resume_text)
+    resume_kind: str | None = None
+    if target_roles and resumes:
+        # Which résumé to measure against depends on what role alignment says
+        # this posting is, so those two chain: alignment picks IR or GRC, then
+        # résumé match runs against that one. The chain still runs alongside
+        # ghostbust and red flags.
+        def _role_then_resume() -> tuple[dict[str, Any], str, dict[str, Any] | None]:
+            role_result = analyze_role_alignment(text, target_roles)
+            kind = kind_for(str(role_result.get("closest_target") or ""), profile)
+            chosen = resumes.get(kind) or resumes.get(KIND_IR)
+            match = analyze_resume_match(text, chosen) if chosen else None
+            return role_result, kind, match
+
+        calls["role_resume"] = _role_then_resume
+    else:
+        if target_roles:
+            calls["role"] = lambda: analyze_role_alignment(text, target_roles)
+        if resume_text:
+            calls["resume"] = lambda: analyze_resume_match(text, resume_text)
 
     try:
         done = _run_analyzers(calls)
         ghost = done["ghost"]
         redflag = done["redflag"]
+        if "role_resume" in done:
+            routed_role, resume_kind, routed_match = done["role_resume"]
+            done["role"] = routed_role
+            done["resume"] = routed_match
         role = done.get("role") or {
             "alignment_score": 50,
             "closest_target": None,
@@ -300,6 +329,8 @@ def judge_discovery(
     }
     if resume_result is not None:
         detail["resume_match"] = resume_result
+    if resume_kind is not None:
+        detail["resume_kind"] = resume_kind
     if monoculture is not None:
         detail["screening_monoculture"] = monoculture
 
@@ -318,14 +349,10 @@ def judge_discovery(
 
 def _maybe_load_resume(profile: dict[str, Any] | None) -> str | None:
     """Load resume text from configured path, or None if unset/missing."""
-    cfg = _judge_config(profile)
-    raw_path = cfg["resume_path"]
-    if not raw_path:
-        return None
-    try:
-        return load_resume_text(raw_path)
-    except ResumeMatchError:
-        return None
+    # Through the shared resolver, so a profile with a `resumes` block gives
+    # the IR résumé here rather than whatever resume_path last pointed at.
+    _, text = load_resume_for(profile)
+    return text
 
 
 def judge_one_id(
@@ -335,6 +362,7 @@ def judge_one_id(
     threshold: float | None = None,
     rejudge: bool = False,
     resume_text: str | None = None,
+    resumes: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Judge one discovery by ID, write to DB. Returns the result.
 
@@ -364,9 +392,15 @@ def judge_one_id(
 
     if resume_text is None:
         resume_text = _maybe_load_resume(profile)
+    if resumes is None:
+        resumes = load_all(profile)
 
     result = judge_discovery(
-        discovery, profile=profile, threshold=threshold, resume_text=resume_text
+        discovery,
+        profile=profile,
+        threshold=threshold,
+        resume_text=resume_text,
+        resumes=resumes,
     )
     if result.get("error") and result["judgement_reason"].startswith("no usable description"):
         # Don't write rejection rows for un-enriched discoveries — let the user
@@ -527,8 +561,9 @@ def judge_batch(
             ats=ats, slug=slug, tier=tier, limit=limit
         )
 
-    # Load resume once for the whole batch
+    # Load resume(s) once for the whole batch
     resume_text = _maybe_load_resume(profile)
+    resumes = load_all(profile)
 
     def _error_result(discovery: dict[str, Any], e: Exception) -> dict[str, Any]:
         return {
@@ -565,6 +600,7 @@ def judge_batch(
                     threshold=threshold,
                     rejudge=rejudge,
                     resume_text=resume_text,
+                    resumes=resumes,
                 )
             except JudgeError as e:
                 result = _error_result(discovery, e)
@@ -584,6 +620,7 @@ def judge_batch(
                 threshold=threshold,
                 rejudge=rejudge,
                 resume_text=resume_text,
+                resumes=resumes,
             ): discovery
             for discovery in targets
         }
@@ -835,6 +872,174 @@ def list_by_status(
     return [r for r in rows if r.get("judged_at")]
 
 
+# Human-set states a free re-gate must never overwrite (mirrors reclassify).
+_RESCORE_SKIP_STATUSES = {"applied", "expired"}
+_MANUAL_REFUSAL_REASON = "Manually refused — not interested"
+
+
+def rescore_resume_one(
+    discovery: dict[str, Any],
+    *,
+    profile: dict[str, Any],
+    resumes: dict[str, str],
+    threshold: float | None = None,
+) -> dict[str, Any] | None:
+    """Re-run only the résumé-match analyzer for an already-judged row.
+
+    Measures the posting against the résumé it routes to (IR or GRC, by the
+    stored closest_target), then re-gates with the current weights using the
+    stored ghost, red-flag, alignment and monoculture scores. One Sonnet call
+    a row instead of four — for when a résumé changes and nothing else has.
+
+    Returns None when the row can't be rescored (not judged, no scores, no
+    posting text). Raises JudgeError when no résumé is configured and AIError
+    when the analyzer call fails. Does not write to the DB.
+    """
+    cfg = _judge_config(profile)
+    if threshold is None:
+        threshold = cfg["ready_threshold"]
+
+    ghost = discovery.get("ghost_score")
+    redflag = discovery.get("redflag_score")
+    alignment = discovery.get("alignment_score")
+    if not discovery.get("judged_at") or ghost is None or redflag is None or alignment is None:
+        return None
+
+    posting = _description_for(discovery)
+    if not posting or len(posting) < 100:
+        return None
+
+    closest = closest_target_of(discovery)
+    kind = kind_for(closest, profile)
+    resume = resumes.get(kind) or resumes.get(KIND_IR)
+    if not resume:
+        raise JudgeError(f"No {kind.upper()} resume configured. Set profile.resumes.{kind}.")
+
+    match = analyze_resume_match(posting, resume)
+    new_resume = float(match.get("match_score", 0))
+
+    detail: dict[str, Any] = {}
+    raw = discovery.get("judgement_detail")
+    if isinstance(raw, str):
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                detail = loaded
+        except (ValueError, TypeError):
+            detail = {}
+    elif isinstance(raw, dict):
+        detail = dict(raw)
+
+    redflags = detail.get("redflags") if isinstance(detail.get("redflags"), dict) else {}
+    dealbreakers_count = len(redflags.get("dealbreakers_found") or [])
+
+    mono_raw = discovery.get("monoculture_score")
+    monoculture = float(mono_raw) if mono_raw is not None else None
+
+    combined = compute_combined_weighted(
+        ghost=float(ghost),
+        redflag=float(redflag),
+        alignment=float(alignment),
+        resume_match=new_resume,
+        weights=cfg["weights"],
+        monoculture=monoculture,
+    )
+    status, reason = _decide_status(
+        threshold=threshold,
+        floor=cfg["alignment_floor"],
+        ghost=float(ghost),
+        redflag=float(redflag),
+        alignment=float(alignment),
+        resume_match=new_resume,
+        combined=combined,
+        dealbreakers_count=dealbreakers_count,
+        monoculture=monoculture,
+    )
+
+    detail["resume_match"] = match
+    detail["resume_kind"] = kind
+
+    old_resume = discovery.get("resume_match_score")
+    return {
+        "discovery_id": discovery.get("id"),
+        "company": discovery.get("company"),
+        "role": discovery.get("role"),
+        "resume_kind": kind,
+        "closest_target": closest,
+        "old_resume_match": float(old_resume) if old_resume is not None else None,
+        "new_resume_match": new_resume,
+        "old_combined": discovery.get("combined_score"),
+        "new_combined": combined,
+        "old_status": discovery.get("screened_status"),
+        "screened_status": status,
+        "judgement_reason": reason,
+        "judgement_detail": detail,
+    }
+
+
+def rescore_resume_batch(
+    *,
+    profile: dict[str, Any],
+    ids: list[int] | None = None,
+    status: str | None = None,
+    threshold: float | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Rescore résumé match for chosen rows and write the results.
+
+    Pick rows by `ids` or by current `status`. Skips anything a person decided
+    (applied, expired, manually refused) and cull refusals, exactly as
+    reclassify does. Résumés are read once for the batch.
+    """
+    if ids:
+        targets = [d for d in (get_discovery(i) for i in ids) if d is not None]
+    else:
+        targets = get_discoveries(status=status)
+
+    resumes = load_all(profile)
+    if not resumes:
+        legacy = _maybe_load_resume(profile)
+        if legacy:
+            resumes = {KIND_IR: legacy}
+
+    results: list[dict[str, Any]] = []
+    for discovery in targets:
+        prev_status = discovery.get("screened_status")
+        prev_reason = discovery.get("judgement_reason") or ""
+        if prev_status in _RESCORE_SKIP_STATUSES:
+            continue
+        if prev_reason.startswith("[cull]") or prev_reason == _MANUAL_REFUSAL_REASON:
+            continue
+
+        try:
+            result = rescore_resume_one(
+                discovery, profile=profile, resumes=resumes, threshold=threshold
+            )
+        except (AIError, JudgeError) as e:
+            result = {
+                "discovery_id": discovery.get("id"),
+                "company": discovery.get("company"),
+                "role": discovery.get("role"),
+                "error": str(e),
+            }
+        if result is None:
+            continue
+
+        if not result.get("error"):
+            update_discovery_rescore(
+                discovery["id"],
+                resume_match_score=result["new_resume_match"],
+                combined_score=result["new_combined"],
+                screened_status=result["screened_status"],
+                judgement_reason=result["judgement_reason"],
+                judgement_detail=result["judgement_detail"],
+            )
+        results.append(result)
+        if on_progress:
+            on_progress(result)
+    return results
+
+
 __all__ = [
     "DEFAULT_ALIGNMENT_FLOOR",
     "DEFAULT_BULK_WARN_AT",
@@ -846,5 +1051,7 @@ __all__ = [
     "judge_one_id",
     "list_by_status",
     "reclassify_batch",
+    "rescore_resume_batch",
+    "rescore_resume_one",
     "reclassify_one",
 ]

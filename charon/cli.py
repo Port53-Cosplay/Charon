@@ -2113,6 +2113,10 @@ def _print_enrich_line(result: dict) -> None:
 @click.option("--reclassify", is_flag=True,
               help="Re-apply the ready/rejected gating to existing scores. No AI calls. "
                    "Use after tuning weights, ready_threshold or alignment_floor.")
+@click.option("--rescore-resume", is_flag=True,
+              help="Re-run only the resume-match analyzer against each posting's routed "
+                   "resume (IR or GRC), then re-gate with current weights. One AI call "
+                   "per row. Pick rows with --id or --status.")
 @click.option("--since-days", type=int, default=None,
               help="With --reclassify: only rows harvested AND judged within the last "
                    "N days. Scopes a tuning change to one recent batch so you can see "
@@ -2140,6 +2144,7 @@ def judge_cmd(
     tier_filter: tuple[str, ...],
     rejudge: bool,
     reclassify: bool,
+    rescore_resume: bool,
     since_days: int | None,
     status_filter: str | None,
     limit: int | None,
@@ -2235,9 +2240,9 @@ def judge_cmd(
     if rejudge and not discovery_id and not judge_all:
         judge_all = True
 
-    if not discovery_id and not judge_all and not reclassify:
+    if not discovery_id and not judge_all and not reclassify and not rescore_resume:
         print_error(
-            "Provide --id <N>, --all, --rejudge, --reclassify, "
+            "Provide --id <N>, --all, --rejudge, --reclassify, --rescore-resume, "
             "--list ready/rejected, --by-company, or --stats."
         )
         return
@@ -2246,6 +2251,72 @@ def judge_cmd(
         prof = load_profile()
     except ProfileError as e:
         print_error(f"Profile error: {e}")
+        return
+
+    # ── --rescore-resume: re-run resume match only ──────────────────
+    if rescore_resume:
+        from charon.resumes import describe
+        from charon.screen import rescore_resume_batch
+
+        if not discovery_id and not status_filter:
+            print_error("--rescore-resume needs --id <N> or --status <ready|rejected>.")
+            return
+
+        section_header("RESCORE RESUME MATCH")
+        names = describe(prof)
+        print_info(f"IR resume:  {names.get('ir') or '(not configured)'}")
+        print_info(f"GRC resume: {names.get('grc') or '(not configured)'}")
+        print_info("One resume-match call per row; other scores reused.")
+        console.print()
+
+        rows = rescore_resume_batch(
+            profile=prof,
+            ids=[discovery_id] if discovery_id else None,
+            status=None if discovery_id else status_filter,
+            threshold=threshold,
+        )
+        if not rows:
+            print_info("Nothing to rescore.")
+            return
+
+        def _fmt(v: float | None) -> str:
+            return "-" if v is None else f"{v:.1f}"
+
+        def _delta(old: float | None, new: float | None) -> str:
+            if old is None or new is None:
+                return "-"
+            d = new - old
+            return f"{d:+.1f}"
+
+        table = Table(border_style="dim", header_style="bold white")
+        for col in ("ID", "Company", "Resume", "Match old", "Match new", "Diff",
+                    "Combined old", "Combined new", "Diff", "Status"):
+            table.add_column(col)
+        errors = 0
+        for r in rows:
+            if r.get("error"):
+                errors += 1
+                table.add_row(str(r.get("discovery_id")), r.get("company") or "",
+                              "-", "-", "-", "-", "-", "-", "-", f"error: {r['error']}")
+                continue
+            old_c = r.get("old_combined")
+            old_c = float(old_c) if old_c is not None else None
+            moved = r["old_status"] != r["screened_status"]
+            table.add_row(
+                str(r["discovery_id"]),
+                (r.get("company") or "")[:28],
+                r["resume_kind"].upper(),
+                _fmt(r["old_resume_match"]),
+                _fmt(r["new_resume_match"]),
+                _delta(r["old_resume_match"], r["new_resume_match"]),
+                _fmt(old_c),
+                _fmt(r["new_combined"]),
+                _delta(old_c, r["new_combined"]),
+                f"{r['old_status']} -> {r['screened_status']}" if moved else r["screened_status"],
+            )
+        console.print(table)
+        if errors:
+            print_error(f"{errors} row(s) failed and were left unchanged.")
         return
 
     # ── --reclassify: free re-gating of existing scores ─────────────

@@ -687,7 +687,10 @@ class TestResumeMatchIntegration:
         def counting_load(path):
             load_count["n"] += 1
             return original_load(path)
-        monkeypatch.setattr(screen, "load_resume_text", counting_load)
+        # Loading lives in charon.resumes now (one resolver for judge, forge
+        # and petition), so that's where the count has to be taken.
+        import charon.resumes as resumes_mod
+        monkeypatch.setattr(resumes_mod, "load_resume_text", counting_load)
 
         analyze_count = {"n": 0}
         def fake_resume(posting, resume):

@@ -945,6 +945,46 @@ def set_discovery_monoculture(discovery_id: int, score: float | None) -> bool:
         conn.close()
 
 
+def update_discovery_rescore(
+    discovery_id: int,
+    *,
+    resume_match_score: float,
+    combined_score: float,
+    screened_status: str,
+    judgement_reason: str,
+    judgement_detail: dict[str, Any],
+) -> bool:
+    """Record a résumé-match-only rescore.
+
+    Unlike update_discovery_judgement, judged_at is left untouched: only one
+    analyzer re-ran, and judged_at drives the refused-tab window and the
+    judge throughput estimate, both of which a burst of rescores would skew.
+    """
+    if screened_status not in {"ready", "rejected"}:
+        raise ValueError(
+            f"screened_status must be 'ready' or 'rejected', got '{screened_status}'."
+        )
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discoveries SET resume_match_score = ?, combined_score = ?, "
+            "screened_status = ?, judgement_reason = ?, judgement_detail = ? "
+            "WHERE id = ?",
+            (
+                resume_match_score,
+                combined_score,
+                screened_status,
+                judgement_reason,
+                json.dumps(judgement_detail),
+                discovery_id,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def update_discovery_judgement_detail(discovery_id: int, detail_json: str | None) -> bool:
     """Overwrite a discovery's judgement_detail JSON. Used by reclassify when
     a freshly-computed analyzer block (e.g. screening_monoculture) needs to

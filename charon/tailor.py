@@ -2,8 +2,9 @@
 
 Charon keeps two curated resumes and routes by the judge's closest_target:
 GRC/audit roles get the GRC resume, everything else gets the IR/blue-team
-resume. The chosen markdown is copied verbatim — no LLM, no fabrication
-risk. Materials land in `<offerings_dir>/<company-slug>-<role-slug>-<id>/`.
+resume (see charon.resumes, which résumé match and petition share). The
+chosen file is copied as-is — no LLM, no fabrication risk. Materials land in
+`<offerings_dir>/<company-slug>-<role-slug>-<id>/`.
 
 Cover letters are still tailored per posting (see letter.py), which is why
 this module retains the shared LLM helpers (`_generate`,
@@ -24,6 +25,8 @@ from typing import Any
 import httpx
 
 from charon.resume_match import ResumeMatchError, load_resume_text
+from charon.resumes import DEFAULT_GRC_TARGETS as _SHARED_GRC_TARGETS
+from charon.resumes import closest_target_of, grc_targets, resume_path_for
 from charon.secrets import SecretsError, read_secret
 
 
@@ -33,6 +36,11 @@ DEFAULT_OFFERINGS_DIR = "~/.charon/offerings"
 TIMEOUT_SECONDS = 90
 
 OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions"
+
+
+# Résumé formats forge will attach. Markdown is rendered to HTML afterwards;
+# .docx and .pdf are finished documents and are served as they are.
+RESUME_ATTACH_SUFFIXES = (".md", ".docx", ".pdf")
 
 
 class ForgeError(Exception):
@@ -296,54 +304,32 @@ def _generate(
 # ── core forge logic ────────────────────────────────────────────────
 
 
-DEFAULT_GRC_TARGETS = [
-    "compliance auditor",
-    "it auditor",
-    "grc analyst",
-    "security auditor",
-]
+# Kept importable from here for existing callers; the list lives in resumes.py.
+DEFAULT_GRC_TARGETS = _SHARED_GRC_TARGETS
 
 
 def _forge_config(profile: dict[str, Any] | None) -> dict[str, Any]:
     cfg = (profile or {}).get("forge") or {}
-    grc_targets = cfg.get("grc_targets")
-    if not isinstance(grc_targets, list) or not grc_targets:
-        grc_targets = DEFAULT_GRC_TARGETS
     return {
         "model": cfg.get("model", DEFAULT_MODEL),
         "max_tokens": int(cfg.get("max_tokens", DEFAULT_MAX_TOKENS)),
         "offerings_dir": cfg.get("offerings_dir", DEFAULT_OFFERINGS_DIR),
         "resume_path": (profile or {}).get("resume_path") or "",
-        # Two static resumes. GRC-type roles get grc_resume_md; everything
-        # else gets default_resume_md (the IR / blue-team resume).
-        "grc_resume_md": cfg.get("grc_resume_md", ""),
-        "default_resume_md": cfg.get("default_resume_md", ""),
-        "grc_targets": [str(t).strip().lower() for t in grc_targets],
+        # Which résumé a posting gets is decided in charon.resumes, shared
+        # with the résumé-match analyzer and petition.
+        "grc_targets": grc_targets(profile),
     }
 
 
 def _closest_target(discovery: dict[str, Any]) -> str:
     """Pull role_alignment.closest_target from stored judgement_detail."""
-    detail_raw = discovery.get("judgement_detail")
-    if not detail_raw:
-        return ""
-    try:
-        import json
-        detail = json.loads(detail_raw) if isinstance(detail_raw, str) else detail_raw
-    except (ValueError, TypeError):
-        return ""
-    if not isinstance(detail, dict):
-        return ""
-    ra = detail.get("role_alignment") or {}
-    if not isinstance(ra, dict):
-        return ""
-    return str(ra.get("closest_target") or "").strip()
+    return closest_target_of(discovery)
 
 
-def _is_grc_role(discovery: dict[str, Any], grc_targets: list[str]) -> bool:
+def _is_grc_role(discovery: dict[str, Any], targets: list[str]) -> bool:
     """True when the judge's closest_target marks this as a GRC-type role."""
-    ct = _closest_target(discovery).lower()
-    return bool(ct) and ct in grc_targets
+    ct = closest_target_of(discovery).lower()
+    return bool(ct) and ct in targets
 
 
 def forge_discovery(
@@ -354,13 +340,14 @@ def forge_discovery(
     model_override: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Place a static resume into a ready discovery's offerings folder.
+    """Place the right résumé into a ready discovery's offerings folder.
 
-    Charon keeps two curated resumes — a GRC/audit one and an IR/blue-team
-    one — and routes by the judge's closest_target: GRC-type roles get
-    grc_resume_md, everything else gets default_resume_md. The chosen
-    markdown is copied verbatim. No LLM call, no fabrication risk. Cover
-    letters are still tailored per posting (see letter.py).
+    Routing comes from charon.resumes: GRC-type roles get the GRC résumé,
+    everything else the IR one. That's the same rule the résumé-match analyzer
+    uses, so the file attached is the file the posting was scored against. The
+    file is copied as-is — a .docx stays a .docx, markdown lands as resume.md
+    for rendering. No LLM call, no fabrication risk. Cover letters are still
+    tailored per posting (see letter.py).
 
     `resume_text` and `model_override` are accepted for call-site
     compatibility but ignored — there's no tailoring to feed them into.
@@ -381,40 +368,60 @@ def forge_discovery(
             ),
         }
 
-    # Route to the static resume by role type.
-    if _is_grc_role(discovery, cfg["grc_targets"]):
-        md_path_str = cfg["grc_resume_md"]
-        resume_kind = "GRC"
-        cfg_key = "grc_resume_md"
-    else:
-        md_path_str = cfg["default_resume_md"]
-        resume_kind = "IR"
-        cfg_key = "default_resume_md"
+    # Route to the résumé by role type — the rule résumé match uses too.
+    closest = closest_target_of(discovery)
+    kind, source_str = resume_path_for(profile, closest)
+    resume_kind = kind.upper()
 
-    if not md_path_str:
+    if not source_str:
         return {
             "discovery_id": discovery.get("id"),
-            "error": f"No {resume_kind} resume configured. Set profile.forge.{cfg_key}.",
+            "error": f"No {resume_kind} resume configured. Set profile.resumes.{kind}.",
         }
-    md_path = Path(os.path.expanduser(md_path_str))
-    if not md_path.is_file():
+    source = Path(os.path.expanduser(source_str))
+    if source.is_dir():
         return {
             "discovery_id": discovery.get("id"),
-            "error": f"{resume_kind} resume markdown not found on disk: {md_path}",
+            "error": (
+                f"{resume_kind} resume is a directory, not a file: {source}. "
+                f"Point profile.resumes.{kind} at the file itself."
+            ),
+        }
+    if not source.is_file():
+        return {
+            "discovery_id": discovery.get("id"),
+            "error": f"{resume_kind} resume not found on disk: {source}",
+        }
+    suffix = source.suffix.lower()
+    if suffix not in RESUME_ATTACH_SUFFIXES:
+        return {
+            "discovery_id": discovery.get("id"),
+            "error": (
+                f"{resume_kind} resume must be one of "
+                f"{', '.join(RESUME_ATTACH_SUFFIXES)}; got {suffix or 'no extension'}."
+            ),
         }
 
     folder = offerings_folder(discovery, base_dir=cfg["offerings_dir"])
-    resume_out = folder / "resume.md"
-    if resume_out.exists() and not force:
+    resume_out = folder / f"resume{suffix}"
+    existing = [folder / f"resume{ext}" for ext in RESUME_ATTACH_SUFFIXES]
+    if any(p.exists() for p in existing) and not force:
+        found = next(p for p in existing if p.exists())
         return {
             "discovery_id": discovery.get("id"),
             "offerings_path": str(folder),
-            "resume_path": str(resume_out),
+            "resume_path": str(found),
             "skipped_reason": "offerings folder already exists (use --force to overwrite)",
         }
 
     folder.mkdir(parents=True, exist_ok=True)
-    resume_out.write_text(md_path.read_text(encoding="utf-8"), encoding="utf-8")
+    if force:
+        # A re-forge can change kind or format; don't leave the old résumé
+        # sitting next to the new one.
+        for stale in existing:
+            if stale != resume_out and stale.exists():
+                stale.unlink()
+    resume_out.write_bytes(source.read_bytes())
 
     audit_out = folder / "forge_audit.md"
     audit_out.write_text(
@@ -423,8 +430,8 @@ def forge_discovery(
         f"- **Discovery:** #{discovery.get('id')} — "
         f"{discovery.get('company')} — {discovery.get('role')}\n"
         f"- **Mode:** static {resume_kind} resume (no LLM tailoring)\n"
-        f"- **Source:** `{md_path}`\n"
-        f"- **closest_target:** {_closest_target(discovery)!r}\n\n"
+        f"- **Source:** `{source}`\n"
+        f"- **closest_target:** {closest!r}\n\n"
         f"This role was routed to the {resume_kind} resume and copied "
         "verbatim. No AI calls were made; no fabrication risk.\n",
         encoding="utf-8",

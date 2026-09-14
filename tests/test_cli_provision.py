@@ -139,8 +139,9 @@ class TestProvisionBatch:
         result = runner.invoke(cli, ["provision", "--ready"])
 
         assert result.exit_code == 0, result.output
-        # forge + petition for each of 2 discoveries = 4 calls
-        assert call_count["n"] == 4
+        # Forge copies a curated résumé without calling a model, so only
+        # petition generates: one call for each of the 2 discoveries.
+        assert call_count["n"] == 2
 
     def test_skips_already_complete_without_force(self, tmp_path, monkeypatch):
         new_id = _seed_ready(tmp_path)

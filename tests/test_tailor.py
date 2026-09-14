@@ -129,157 +129,128 @@ def _ready_discovery(**overrides):
 
 
 class TestForgeDiscovery:
-    def test_writes_resume_and_audit_files(self, tmp_path, monkeypatch):
-        # Mock the AI generation
-        def fake_generate(system, user, *, model, max_tokens, profile):
-            return ("# DeAnna Shanks\n\n5 years of experience.\n", {"input_tokens": 100, "output_tokens": 50})
-        monkeypatch.setattr(tailor, "_generate", fake_generate)
+    """Forge attaches one of two curated résumés — no LLM, no tailoring.
 
-        profile = dict(PROFILE)
-        profile["forge"] = {
-            "model": "claude-haiku-4-5",
-            "max_tokens": 4096,
-            "offerings_dir": str(tmp_path),
-        }
+    These replace tests written for the retired LLM-tailoring forge, which
+    asserted on prompt contents and invented-claim lists that the static
+    version has no reason to produce.
+    """
 
-        result = forge_discovery(
-            _ready_discovery(),
-            profile=profile,
-            resume_text="DeAnna Shanks. 5 years of experience.",
-        )
+    @staticmethod
+    def _profile(tmp_path, *, ir=None, grc=None):
+        prof = dict(PROFILE)
+        prof["forge"] = {"offerings_dir": str(tmp_path / "offerings")}
+        resumes = {}
+        if ir is not None:
+            resumes["ir"] = str(ir)
+        if grc is not None:
+            resumes["grc"] = str(grc)
+        if resumes:
+            prof["resumes"] = resumes
+        return prof
 
-        assert result.get("error") is None
-        folder = Path(result["offerings_path"])
-        assert folder.exists()
-        assert (folder / "resume.md").exists()
-        assert (folder / "forge_audit.md").exists()
-        assert (folder / "resume.md").read_text(encoding="utf-8").startswith("# DeAnna Shanks")
-        assert result["unverified_claims"] == []
-        assert result["usage"]["input_tokens"] == 100
-
-    def test_verifier_warns_on_fabrication(self, tmp_path, monkeypatch):
-        # AI claims 99% — not in source resume
-        def fake_generate(system, user, *, model, max_tokens, profile):
-            return ("# DeAnna\n\nReduced incidents by 99%.", {"input_tokens": 0, "output_tokens": 0})
-        monkeypatch.setattr(tailor, "_generate", fake_generate)
-
-        profile = dict(PROFILE)
-        profile["forge"] = {
-            "model": "claude-haiku-4-5",
-            "max_tokens": 4096,
-            "offerings_dir": str(tmp_path),
-        }
-
-        result = forge_discovery(
-            _ready_discovery(),
-            profile=profile,
-            resume_text="DeAnna Shanks. Worked in DFIR.",
-        )
-
-        # Unverified claim is surfaced
-        assert "99%" in result["unverified_claims"]
-        # File is still written — verifier warns, doesn't block
-        assert Path(result["offerings_path"]).exists()
-        # Audit file mentions the unverified claim
-        audit = (Path(result["offerings_path"]) / "forge_audit.md").read_text(encoding="utf-8")
-        assert "99%" in audit
-        assert "unverified" in audit.lower()
-
-    def test_skips_when_folder_exists_without_force(self, tmp_path, monkeypatch):
-        called = {"n": 0}
-        def fake_generate(system, user, *, model, max_tokens, profile):
-            called["n"] += 1
-            return ("# X\n\n", {"input_tokens": 0, "output_tokens": 0})
-        monkeypatch.setattr(tailor, "_generate", fake_generate)
-
-        profile = dict(PROFILE)
-        profile["forge"] = {
-            "model": "claude-haiku-4-5",
-            "max_tokens": 4096,
-            "offerings_dir": str(tmp_path),
-        }
-
-        d = _ready_discovery()
-        # First run creates folder
-        forge_discovery(d, profile=profile, resume_text="resume content")
-        # Second run without --force should skip
-        result = forge_discovery(d, profile=profile, resume_text="resume content")
-
-        assert "already exists" in (result.get("skipped_reason") or "")
-        # Generator should have been called only once
-        assert called["n"] == 1
-
-    def test_force_overwrites(self, tmp_path, monkeypatch):
-        call_count = {"n": 0}
-        def fake_generate(system, user, *, model, max_tokens, profile):
-            call_count["n"] += 1
-            return (f"# Run {call_count['n']}\n\n", {"input_tokens": 0, "output_tokens": 0})
-        monkeypatch.setattr(tailor, "_generate", fake_generate)
-
-        profile = dict(PROFILE)
-        profile["forge"] = {
-            "model": "claude-haiku-4-5",
-            "max_tokens": 4096,
-            "offerings_dir": str(tmp_path),
-        }
-
-        d = _ready_discovery()
-        forge_discovery(d, profile=profile, resume_text="x")
-        forge_discovery(d, profile=profile, resume_text="x", force=True)
-
-        assert call_count["n"] == 2
-        folder = offerings_folder(d, base_dir=str(tmp_path))
-        # Last write wins
-        assert "Run 2" in (folder / "resume.md").read_text(encoding="utf-8")
-
-    def test_rejects_unready_discovery(self, tmp_path, monkeypatch):
-        def boom(*a, **kw):
-            raise AssertionError("AI should not be called for non-ready discoveries")
-        monkeypatch.setattr(tailor, "_generate", boom)
-
-        profile = dict(PROFILE)
-        profile["forge"] = {"offerings_dir": str(tmp_path)}
-
-        d = _ready_discovery(screened_status="rejected")
-        result = forge_discovery(d, profile=profile, resume_text="x")
-        assert "not 'ready'" in (result.get("error") or "")
-
-    def test_rejects_no_description(self, tmp_path, monkeypatch):
-        def boom(*a, **kw):
-            raise AssertionError("AI should not be called when there's no description")
-        monkeypatch.setattr(tailor, "_generate", boom)
-
-        profile = dict(PROFILE)
-        profile["forge"] = {"offerings_dir": str(tmp_path)}
-
-        d = _ready_discovery(full_description="", description="")
-        result = forge_discovery(d, profile=profile, resume_text="x")
-        assert "no usable description" in (result.get("error") or "")
-
-    def test_judgement_hints_included_in_prompt(self, tmp_path, monkeypatch):
-        captured = {}
-        def fake_generate(system, user, *, model, max_tokens, profile):
-            captured["user"] = user
-            return ("# x\n", {"input_tokens": 0, "output_tokens": 0})
-        monkeypatch.setattr(tailor, "_generate", fake_generate)
-
+    @staticmethod
+    def _with_target(closest_target, **overrides):
         import json
-        d = _ready_discovery()
-        d["judgement_detail"] = json.dumps({
-            "resume_match": {
-                "overlap": ["EDR experience", "Splunk hands-on"],
-                "gaps": ["No GRC framework knowledge"],
-            },
-            "role_alignment": {"overlap": ["DFIR"]},
-        })
+        detail = {"role_alignment": {"closest_target": closest_target}}
+        return _ready_discovery(judgement_detail=json.dumps(detail), **overrides)
 
-        profile = dict(PROFILE)
-        profile["forge"] = {"offerings_dir": str(tmp_path)}
-        forge_discovery(d, profile=profile, resume_text="x")
+    @staticmethod
+    def _resumes(tmp_path):
+        ir = tmp_path / "DeAnnaShanks_Resume_IR_2Page.docx"
+        grc = tmp_path / "DeAnnaShanks_Resume_AuditGRC_2Page.docx"
+        ir.write_bytes(b"PK\x03\x04 IR resume bytes")
+        grc.write_bytes(b"PK\x03\x04 GRC resume bytes")
+        return ir, grc
 
-        assert "EXPERIENCE TO EMPHASIZE" in captured["user"]
-        assert "EDR experience" in captured["user"]
-        assert "Splunk" in captured["user"]
+    def test_ir_role_gets_the_ir_resume_as_docx(self, tmp_path):
+        ir, grc = self._resumes(tmp_path)
+        result = forge_discovery(
+            self._with_target("Detection engineer"),
+            profile=self._profile(tmp_path, ir=ir, grc=grc),
+        )
+        assert result.get("error") is None
+        assert result["resume_kind"] == "IR"
+        out = Path(result["resume_path"])
+        assert out.name == "resume.docx"
+        assert out.read_bytes() == ir.read_bytes()
+
+    def test_grc_role_gets_the_grc_resume(self, tmp_path):
+        ir, grc = self._resumes(tmp_path)
+        result = forge_discovery(
+            self._with_target("IT auditor"),
+            profile=self._profile(tmp_path, ir=ir, grc=grc),
+        )
+        assert result["resume_kind"] == "GRC"
+        assert Path(result["resume_path"]).read_bytes() == grc.read_bytes()
+
+    def test_markdown_resume_still_lands_as_resume_md(self, tmp_path):
+        md = tmp_path / "ir.md"
+        md.write_text("# DeAnna Shanks\n\nDFIR.", encoding="utf-8")
+        result = forge_discovery(
+            self._with_target("Detection engineer"),
+            profile=self._profile(tmp_path, ir=md),
+        )
+        assert Path(result["resume_path"]).name == "resume.md"
+
+    def test_audit_trail_names_the_source_and_makes_no_ai_calls(self, tmp_path):
+        ir, grc = self._resumes(tmp_path)
+        result = forge_discovery(
+            self._with_target("GRC analyst"),
+            profile=self._profile(tmp_path, ir=ir, grc=grc),
+        )
+        audit = Path(result["audit_path"]).read_text(encoding="utf-8")
+        assert "DeAnnaShanks_Resume_AuditGRC_2Page.docx" in audit
+        assert "No AI calls were made" in audit
+        assert result["usage"] == {"input_tokens": 0, "output_tokens": 0}
+
+    def test_unconfigured_resume_is_a_clear_error(self, tmp_path):
+        result = forge_discovery(
+            self._with_target("Detection engineer"),
+            profile=self._profile(tmp_path),
+        )
+        assert "No IR resume configured" in result["error"]
+        assert "profile.resumes.ir" in result["error"]
+
+    def test_directory_instead_of_file_is_rejected(self, tmp_path):
+        folder = tmp_path / "resume_dir"
+        folder.mkdir()
+        result = forge_discovery(
+            self._with_target("Detection engineer"),
+            profile=self._profile(tmp_path, ir=folder),
+        )
+        assert "is a directory" in result["error"]
+
+    def test_non_ready_discovery_is_refused(self, tmp_path):
+        ir, grc = self._resumes(tmp_path)
+        result = forge_discovery(
+            self._with_target("Detection engineer", screened_status="rejected"),
+            profile=self._profile(tmp_path, ir=ir, grc=grc),
+        )
+        assert "not 'ready'" in result["error"]
+
+    def test_existing_resume_is_left_alone_without_force(self, tmp_path):
+        ir, grc = self._resumes(tmp_path)
+        prof = self._profile(tmp_path, ir=ir, grc=grc)
+        d = self._with_target("Detection engineer")
+        first = forge_discovery(d, profile=prof)
+        ir.write_bytes(b"PK\x03\x04 edited IR resume")
+        second = forge_discovery(d, profile=prof)
+        assert "skipped_reason" in second
+        assert Path(first["resume_path"]).read_bytes() == b"PK\x03\x04 IR resume bytes"
+
+    def test_force_replaces_and_clears_the_other_format(self, tmp_path):
+        md = tmp_path / "old.md"
+        md.write_text("old markdown resume", encoding="utf-8")
+        d = self._with_target("Detection engineer")
+        first = forge_discovery(d, profile=self._profile(tmp_path, ir=md))
+        folder = Path(first["offerings_path"])
+        assert (folder / "resume.md").exists()
+
+        ir, grc = self._resumes(tmp_path)
+        forge_discovery(d, profile=self._profile(tmp_path, ir=ir, grc=grc), force=True)
+        assert (folder / "resume.docx").exists()
+        assert not (folder / "resume.md").exists()
 
 
 # ── model routing ───────────────────────────────────────────────────

@@ -495,6 +495,7 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
             "has_offerings": bool(offerings_path),
             "has_contacts": has_contacts,
             "has_resume": has_resume,
+            "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
             "has_letter": has_letter,
             "is_archived": is_archived,
         })
@@ -1391,13 +1392,11 @@ def _generate_judge_prompt(limit: int, tier: list[str] | None = None) -> dict[st
     except Exception as e:  # noqa: BLE001
         raise DashboardError(f"Profile error: {e}") from e
 
-    resume_text = ""
-    resume_path = profile.get("resume_path", "") if isinstance(profile, dict) else ""
-    if resume_path:
-        try:
-            resume_text = load_resume_text(resume_path) or ""
-        except Exception:  # noqa: BLE001 — best-effort
-            resume_text = ""
+    # The paste prompt covers a mixed batch, so it uses the IR résumé.
+    from charon.resumes import load_resume_for
+
+    _, loaded = load_resume_for(profile if isinstance(profile, dict) else None)
+    resume_text = loaded or ""
     if len(resume_text) > 3500:
         resume_text = resume_text[:3500].rstrip() + "\n\n[truncated]"
 
@@ -1634,15 +1633,30 @@ def _parse_salary_data(raw: Any) -> dict[str, Any] | None:
         return None
 
 
-def _offering_has(offerings_path: str, stem: str) -> bool:
-    """True if <offerings_path>/<stem>.html or .md exists. Used to decide
-    which 'Open' buttons to show (resume always; cover letter only when
-    petition ran)."""
+_OFFERING_OPEN_ORDER = (".html", ".md", ".pdf", ".docx")
+
+
+def _offering_file(offerings_path: str, stem: str) -> str | None:
+    """Filename to open for <stem> in an offering, or None if none exists.
+
+    Rendered HTML wins, then markdown, then a finished .pdf or .docx — forge
+    attaches a .docx résumé as-is, which never gets an HTML render.
+    """
     try:
         folder = Path(offerings_path)
-        return (folder / f"{stem}.html").exists() or (folder / f"{stem}.md").exists()
+        for ext in _OFFERING_OPEN_ORDER:
+            if (folder / f"{stem}{ext}").exists():
+                return f"{stem}{ext}"
     except OSError:
-        return False
+        return None
+    return None
+
+
+def _offering_has(offerings_path: str, stem: str) -> bool:
+    """True if <stem> exists in any openable form. Used to decide which
+    'Open' buttons to show (resume always; cover letter only when petition
+    ran)."""
+    return _offering_file(offerings_path, stem) is not None
 
 
 DESCRIPTION_PREVIEW_CHARS = 600
@@ -1723,6 +1737,7 @@ def _summarize_discovery(
         "has_contacts": has_contacts,
         "has_salary": has_salary,
         "has_resume": has_resume,
+        "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
         "has_letter": has_letter,
         "salary_data": _parse_salary_data(r.get("salary_data")),
         # Detail-view fields — eager so click-to-expand is instant, but the
@@ -2038,6 +2053,8 @@ _OFFERING_ALLOWED_FILES = {
     "cover_letter.md",
     "resume.html",
     "resume.md",
+    "resume.docx",
+    "resume.pdf",
     "forge_audit.md",
     "petition_audit.md",
     "salary_intel.md",
@@ -2080,11 +2097,11 @@ def _candidate_name_from_resume() -> str:
     convention the candidate's name. Falls back to 'Candidate' on any
     error (missing resume, unreadable, etc.)."""
     from charon.profile import load_profile
-    from charon.resume_match import load_resume_text
+    from charon.resumes import load_resume_for
 
     try:
-        profile = load_profile()
-        text = load_resume_text(profile.get("resume_path", "")) or ""
+        _, text = load_resume_for(load_profile())
+        text = text or ""
         for line in text.splitlines():
             stripped = line.strip()
             if stripped:
@@ -2705,14 +2722,31 @@ class _Handler(BaseHTTPRequestHandler):
             ctype = "text/html; charset=utf-8"
         elif filename.endswith(".md"):
             ctype = "text/plain; charset=utf-8"
+        elif filename.endswith(".pdf"):
+            ctype = "application/pdf"
+        elif filename.endswith(".docx"):
+            ctype = (
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            )
         else:
             ctype = "application/octet-stream"
+
+        # Browsers can't display a .docx, so it downloads under a useful name;
+        # everything else opens in the tab.
+        if filename.endswith(".docx"):
+            import re
+
+            kind = "Resume" if filename.startswith("resume") else "Document"
+            safe = re.sub(r'[\\/:*?"<>|]+', "-", _pdf_friendly_title(discovery, kind))
+            disposition = f'attachment; filename="{safe}.docx"'
+        else:
+            disposition = "inline"
 
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        # Inline: browser opens in tab, doesn't trigger download
-        self.send_header("Content-Disposition", "inline")
+        self.send_header("Content-Disposition", disposition)
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)

@@ -29,7 +29,7 @@ def test_judge_batch_runs_in_parallel(monkeypatch):
     resume_loads = 0
     lock = threading.Lock()
 
-    def fake_judge_one_id(did, *, profile, threshold, rejudge, resume_text):
+    def fake_judge_one_id(did, *, profile, threshold, rejudge, resume_text, resumes=None):
         nonlocal active, max_active
         with lock:
             active += 1
