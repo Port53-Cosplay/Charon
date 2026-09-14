@@ -556,6 +556,65 @@ def _rescore_resume(ids: list[int] | None, status: str | None) -> dict[str, Any]
     return {"rows": out, "count": len(out)}
 
 
+def _rewrite_cover_letter(discovery_id: int) -> dict[str, Any]:
+    """Regenerate one discovery's cover letter with the current voice.
+
+    The previous letter is kept alongside as cover_letter.previous-<time>.md
+    (and .html) rather than overwritten, so the two can be compared and
+    nothing she has already sent is lost. Runs inside the service because
+    that's where the API key is.
+    """
+    import shutil
+
+    from charon.db import get_discovery, update_discovery_petitioned
+    from charon.letter import petition_discovery
+    from charon.profile import load_profile
+    from charon.render import RenderError, render_offering
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+    try:
+        profile = load_profile()
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Profile error: {e}") from e
+
+    kept: list[str] = []
+    folder_raw = discovery.get("offerings_path")
+    if folder_raw:
+        folder = Path(folder_raw)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        for ext in (".md", ".html"):
+            current = folder / f"cover_letter{ext}"
+            if current.is_file():
+                backup = folder / f"cover_letter.previous-{stamp}{ext}"
+                shutil.copy2(current, backup)
+                kept.append(backup.name)
+
+    result = petition_discovery(discovery, profile=profile, force=True)
+    if result.get("error"):
+        raise DashboardError(result["error"])
+    update_discovery_petitioned(discovery_id, offerings_path=result.get("offerings_path"))
+
+    render_errors: list[str] = []
+    try:
+        render_errors = list(render_offering(discovery_id).get("errors") or [])
+    except RenderError as e:
+        render_errors = [str(e)]
+
+    text = Path(result["letter_path"]).read_text(encoding="utf-8")
+    return {
+        "discovery_id": discovery_id,
+        "letter_path": result["letter_path"],
+        "previous": kept,
+        "dash_cleanup": result.get("dash_cleanup"),
+        "unverified_claims": result.get("unverified_claims") or [],
+        "words": len(text.split()),
+        "dashes_remaining": sum(text.count(d) for d in ("\u2014", "\u2013")),
+        "render_errors": render_errors,
+    }
+
+
 def _stats(include_charts: bool = False) -> dict[str, Any]:
     """Pipeline-wide counters for the stats band.
 
@@ -2748,6 +2807,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, "rejection": rec, "ready": _ready_discoveries()})
+            return
+        if path.startswith("/api/rewrite-letter/"):
+            try:
+                discovery_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
+                return
+            try:
+                summary = _rewrite_cover_letter(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "summary": summary})
             return
         if path.startswith("/api/provision/"):
             try:

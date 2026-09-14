@@ -17,6 +17,7 @@ the two materials always travel together.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ beats "Extensive experience in financial crimes." Real beats vague.
 - Vary sentence length. Some short. Others longer because the actual \
 thought needs more setup. Robotic uniform sentences signal AI.
 - Contractions ("I'm," "we'd," "didn't") are fine where they fit. Read \
-the sentence aloud — if no real person would say it that way, rewrite.
+the sentence aloud. If no real person would say it that way, rewrite.
 - Use "I think" or "I've been thinking about" naturally where they fit, \
 but don't make them tics."""
 
@@ -67,7 +68,7 @@ city, state, or country that doesn't appear on their resume. If the \
 resume lists a location and "open to remote," reflect that exactly. Do \
 NOT invent a relocation just because the posting mentions a location. If \
 the candidate's location and the posting's location differ and remote \
-isn't stated, you may note interest in remote work — but never invent \
+isn't stated, you may note interest in remote work, but never invent \
 a move.
 
 2. Do NOT use these phrases or anything in their family:
@@ -90,13 +91,17 @@ restart it from a real, specific thought.
 3. Do NOT list certifications back at them when those certifications are \
 already on the resume. The recruiter will see the resume.
 
-VOICE — match these traits:
+4. Never use em dashes or en dashes anywhere in the letter. The candidate \
+doesn't write with them. Use a comma, a period, a colon or parentheses \
+instead.
+
+VOICE (match these traits):
 
 {voice_block}
 
 LETTER-SPECIFIC TONAL NOTES (apply on top of the voice above):
 
-- A cover letter is tighter than a post — ONE associative connection or \
+- A cover letter is tighter than a post. ONE associative connection or \
 parenthetical aside is good; two starts to feel performative. Don't force it.
 - Light mythology or metaphor is okay if it lands naturally and serves \
 the point. Don't reach for it. The letter should feel grounded, not poetic.
@@ -110,7 +115,7 @@ gratitude.
 STRUCTURE (loose, not rigid; let the content shape it):
 
 Opening (1-2 sentences): Why this role/company specifically caught attention. \
-NOT "I am writing to apply for..." Better: a real, specific reason — \
+NOT "I am writing to apply for..." Better: a real, specific reason: \
 something about the company, the role, or a concrete piece of experience \
 that maps directly to a posting requirement.
 
@@ -127,7 +132,7 @@ LENGTH: 250-400 words. Tighter is usually better.
 
 OUTPUT: Return only the cover letter in plain markdown. No subject line, \
 no "Dear Hiring Manager," at the start unless it actually fits naturally \
-(usually it doesn't — modern cover letters often skip the salutation \
+(usually it doesn't; modern cover letters often skip the salutation \
 entirely or open with the candidate's name as a level-1 header followed \
 by the letter body). No commentary outside the letter."""
 
@@ -165,7 +170,7 @@ PETITION_USER_TEMPLATE = """\
 Write a tailored cover letter for the candidate below applying to this \
 posting.
 
---- CANDIDATE RESUME (source of truth — don't invent beyond this) ---
+--- CANDIDATE RESUME (source of truth; don't invent beyond this) ---
 {resume_text}
 --- END RESUME ---
 
@@ -180,6 +185,51 @@ Location: {location}
 {judgement_hints}
 
 Return only the cover letter in markdown."""
+
+
+# The candidate never writes with these, and a model will slip one in even
+# when told not to (the prompt used to be full of them), so the finished
+# letter is checked in code rather than trusted to the instruction.
+_DASHES = ("\u2014", "\u2013")
+
+DASH_REWRITE_SYSTEM = """\
+You fix punctuation in a cover letter. Rewrite ONLY the sentences that \
+contain an em dash or an en dash so they use a comma, a period, a colon or \
+parentheses instead. Keep every other sentence exactly as written, keep the \
+wording of the rewritten sentences as close to the original as possible, and \
+add nothing. Return only the full letter."""
+
+
+def has_dashes(text: str) -> bool:
+    return any(d in (text or "") for d in _DASHES)
+
+
+def strip_dashes(text: str) -> str:
+    """Last-resort mechanical removal, used only if a rewrite leaves any behind."""
+    out = re.sub(r"(?<=\d)\s*\u2013\s*(?=\d)", "-", text)  # 2016–2021 -> 2016-2021
+    out = re.sub(r"\s*[\u2014\u2013]\s*", ", ", out)
+    out = re.sub(r",\s*([,.;:!?])", r"\1", out)
+    return re.sub(r"[ \t]{2,}", " ", out)
+
+
+def remove_dashes(
+    text: str, *, model: str, max_tokens: int, profile: dict[str, Any] | None
+) -> tuple[str, dict[str, int], str | None]:
+    """Return (letter, extra_usage, note). The note records what cleanup ran."""
+    if not has_dashes(text):
+        return text, {"input_tokens": 0, "output_tokens": 0}, None
+    count = sum(text.count(d) for d in _DASHES)
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    try:
+        rewritten, usage = _tailor._generate(
+            DASH_REWRITE_SYSTEM, text, model=model, max_tokens=max_tokens, profile=profile
+        )
+    except ForgeError:
+        rewritten = text
+    if rewritten and not has_dashes(rewritten):
+        return rewritten.strip() + "\n", usage, f"rewrote sentences to remove {count} dash(es)"
+    base = rewritten if rewritten else text
+    return strip_dashes(base), usage, f"removed {count} dash(es); rewrite left some, stripped mechanically"
 
 
 def _description_for(discovery: dict[str, Any]) -> str:
@@ -234,7 +284,7 @@ def _judgement_hints_for_letter(discovery: dict[str, Any]) -> str:
             if flag:
                 line = f"- {flag}"
                 if evidence:
-                    line += f" — {evidence[:100]}"
+                    line += f": {evidence[:100]}"
                 sections.append(line)
 
     return "\n".join(sections) if sections else ""
@@ -334,6 +384,14 @@ def petition_discovery(
     except ForgeError as e:
         return {"discovery_id": discovery.get("id"), "error": str(e)}
 
+    generated, dash_usage, dash_note = remove_dashes(
+        generated, model=model, max_tokens=cfg["max_tokens"], profile=profile
+    )
+    usage = {
+        k: int(usage.get(k, 0)) + int(dash_usage.get(k, 0))
+        for k in ("input_tokens", "output_tokens")
+    }
+
     unverified = verify_against_source(generated, resume_text)
 
     folder.mkdir(parents=True, exist_ok=True)
@@ -350,12 +408,15 @@ def petition_discovery(
         generated=generated,
         discovery=discovery,
     )
+    if dash_note:
+        audit += f"\n\n## Punctuation cleanup\n\n{dash_note}\n"
     audit_out.write_text(audit, encoding="utf-8")
 
     return {
         "discovery_id": discovery.get("id"),
         "offerings_path": str(folder),
         "letter_path": str(letter_out),
+        "dash_cleanup": dash_note,
         "audit_path": str(audit_out),
         "unverified_claims": unverified,
         "usage": usage,
