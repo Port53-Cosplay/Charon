@@ -76,6 +76,52 @@ def _env_info() -> dict[str, Any]:
     }
 
 
+# A dossier older than this gets flagged on the card. Company culture and
+# finances move slowly, so it's a nudge to consider a rebuild, not a block.
+DOSSIER_STALE_DAYS = 182
+
+
+def _company_key(name: str | None) -> str:
+    return " ".join((name or "").split()).casefold()
+
+
+def _dossier_index() -> dict[str, dict[str, Any]]:
+    """Newest dossier per company, keyed by normalised company name."""
+    from charon.db import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, timestamp, company, input_value, score FROM history "
+            "WHERE command = 'dossier' ORDER BY timestamp DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    now = datetime.now(timezone.utc)
+    index: dict[str, dict[str, Any]] = {}
+    for row_id, stamp, company, input_value, score in rows:
+        key = _company_key(company or input_value)
+        if not key or key in index:
+            continue
+        age_days: int | None = None
+        try:
+            built = datetime.fromisoformat(stamp)
+            if built.tzinfo is None:
+                built = built.replace(tzinfo=timezone.utc)
+            age_days = (now - built).days
+        except (TypeError, ValueError):
+            pass
+        index[key] = {
+            "id": row_id,
+            "built_at": stamp,
+            "score": _round1(score),
+            "age_days": age_days,
+            "stale": age_days is not None and age_days > DOSSIER_STALE_DAYS,
+        }
+    return index
+
+
 def _ready_discoveries() -> list[dict[str, Any]]:
     from charon.db import get_discoveries
 
@@ -83,7 +129,145 @@ def _ready_discoveries() -> list[dict[str, Any]]:
     rows = [r for r in rows if r.get("judged_at")]
     # Not capped: Ready holds a handful of rows and it's where postings
     # actually get read.
-    return [_summarize_discovery(r) for r in rows]
+    index = _dossier_index()
+    out = []
+    for r in rows:
+        summary = _summarize_discovery(r)
+        summary["dossier"] = index.get(_company_key(r.get("company")))
+        summary["dossier_building"] = _dossier_job_running(r.get("company"))
+        out.append(summary)
+    return out
+
+
+# ── dossier builds ─────────────────────────────────────────────────────
+# A dossier makes several web searches and routinely takes longer than the
+# 100 seconds Cloudflare allows a request on charon.empire12.net, so builds
+# run on a thread and the page polls for the result.
+
+_dossier_lock = threading.Lock()
+_dossier_jobs: dict[str, dict[str, Any]] = {}
+
+
+def _dossier_job_running(company: str | None) -> bool:
+    with _dossier_lock:
+        job = _dossier_jobs.get(_company_key(company))
+        return bool(job and job.get("running"))
+
+
+def _dossier_job_snapshot(company: str | None) -> dict[str, Any]:
+    key = _company_key(company)
+    with _dossier_lock:
+        job = dict(_dossier_jobs.get(key) or {})
+    job["dossier"] = _dossier_index().get(key)
+    job.setdefault("running", False)
+    return job
+
+
+def _dossier_worker(company: str, role: str | None) -> None:
+    from charon.ai import AIError
+    from charon.db import save_history
+    from charon.dossier import analyze_dossier, save_dossier_markdown
+    from charon.profile import load_profile
+
+    key = _company_key(company)
+    error: str | None = None
+    history_id: int | None = None
+    try:
+        profile = load_profile()
+        result = analyze_dossier(company, profile, role_title=role, include_contacts=False)
+        history_id = save_history(
+            "dossier", "company", company, result.get("weighted_score"), result,
+            company=company,
+        )
+        save_path = (profile.get("dossier") or {}).get("save_path", "~/.charon/dossiers/")
+        try:
+            save_dossier_markdown(result, save_path)
+        except OSError:
+            pass  # the history row is the record; the markdown copy is a convenience
+    except AIError as e:
+        error = str(e)
+    except Exception as e:  # noqa: BLE001 — surface, don't kill the server thread
+        error = f"{type(e).__name__}: {e}"
+    finally:
+        with _dossier_lock:
+            job = _dossier_jobs.setdefault(key, {})
+            job.update({
+                "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error": error,
+                "history_id": history_id,
+            })
+
+
+def _start_dossier_build(discovery_id: int) -> dict[str, Any]:
+    from charon.db import get_discovery
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+    company = (discovery.get("company") or "").strip()
+    if not company:
+        raise DashboardError(f"Discovery #{discovery_id} has no company name.")
+
+    key = _company_key(company)
+    with _dossier_lock:
+        if (_dossier_jobs.get(key) or {}).get("running"):
+            raise DashboardError(f"A dossier on {company} is already being built.")
+        _dossier_jobs[key] = {
+            "running": True,
+            "company": company,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "error": None,
+            "history_id": None,
+        }
+    threading.Thread(
+        target=_dossier_worker, args=(company, discovery.get("role")), daemon=True
+    ).start()
+    return _dossier_job_snapshot(company)
+
+
+def _dossier_payload(history_id: int) -> dict[str, Any]:
+    """A stored dossier, shaped for the page. Contacts are left out: they're
+    their own action now, and older dossiers carry LinkedIn-only lists."""
+    from charon.db import get_connection
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, timestamp, company, input_value, score, result_json "
+            "FROM history WHERE id = ? AND command = 'dossier'",
+            (history_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise DashboardError(f"No dossier with id {history_id}.")
+
+    row_id, stamp, company, input_value, score, raw = row
+    try:
+        result = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+
+    entry = _dossier_index().get(_company_key(company or input_value)) or {}
+    dims = result.get("dimensions") if isinstance(result.get("dimensions"), dict) else {}
+    return {
+        "id": row_id,
+        "company": result.get("company") or company or input_value,
+        "built_at": stamp,
+        "age_days": entry.get("age_days") if entry.get("id") == row_id else None,
+        "stale": bool(entry.get("stale")) if entry.get("id") == row_id else False,
+        "is_latest": entry.get("id") == row_id,
+        "weighted_score": _round1(result.get("weighted_score", score)),
+        "overall_score": _round1(result.get("overall_score")),
+        "summary": result.get("summary") or "",
+        "verdict": result.get("verdict") or "",
+        "dimensions": dims,
+        "stock": result.get("stock") if isinstance(result.get("stock"), dict) else None,
+    }
 
 
 def _gathered_discoveries(limit: int = 200) -> list[dict[str, Any]]:
@@ -2230,6 +2414,27 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
             return
+        if path == "/api/dossier/status":
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            company = (qs.get("company", [""])[0] or "").strip()
+            if not company:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "company is required")
+                return
+            self._serve_json({"job": _dossier_job_snapshot(company)})
+            return
+        if path.startswith("/api/dossier/"):
+            try:
+                history_id = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "dossier id must be an integer")
+                return
+            try:
+                payload = _dossier_payload(history_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.NOT_FOUND)
+                return
+            self._serve_json({"dossier": payload})
+            return
         if path.startswith("/api/detail/") or path.startswith("/api/description/"):
             # Everything a list payload left out: the full posting and the
             # analyzer detail, fetched when a card is actually opened.
@@ -2364,6 +2569,23 @@ class _Handler(BaseHTTPRequestHandler):
                 "ready": _ready_discoveries(),
                 "refused": _refused_discoveries(),
             })
+            return
+        if path == "/api/dossier/build":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
+                return
+            try:
+                discovery_id = int(body.get("discovery_id"))
+            except (TypeError, ValueError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery_id must be an integer")
+                return
+            try:
+                snap = _start_dossier_build(discovery_id)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "job": snap})
             return
         if path == "/api/rescore-resume":
             body = self._read_json_body() or {}

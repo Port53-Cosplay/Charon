@@ -323,8 +323,14 @@ def analyze_dossier(
     company: str,
     profile: dict[str, Any],
     role_title: str | None = None,
+    include_contacts: bool = True,
 ) -> dict[str, Any]:
-    """Research a company and score it against the user's values profile."""
+    """Research a company and score it against the user's values profile.
+
+    `include_contacts=False` skips the second web-search call that hunts for
+    recruiters and hiring managers. The dashboard keeps contacts a separate,
+    per-posting action, so its dossiers are company research only.
+    """
     values = profile.get("values", {})
     weights_str = "\n".join(
         f"- {k.replace('_', ' ').title()}: {v:.0%}"
@@ -370,9 +376,10 @@ def analyze_dossier(
     )
 
     # Find hiring contacts
-    target_roles = profile.get("target_roles", [])
-    contacts = find_contacts(company, target_roles, role_title)
-    validated["contacts"] = contacts
+    if include_contacts:
+        target_roles = profile.get("target_roles", [])
+        contacts = find_contacts(company, target_roles, role_title)
+        validated["contacts"] = contacts
 
     return validated
 
