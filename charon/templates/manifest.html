@@ -1532,7 +1532,7 @@
 
     .card .actions .open-btn:hover { background: var(--gold); }
 
-    .card .actions .contacts-btn {
+    .card .actions .company-contacts-btn {
       background: transparent;
       color: var(--plum-soft);
       border: 1px solid var(--lilac);
@@ -1546,12 +1546,54 @@
       font-family: inherit;
     }
 
-    .card .actions .contacts-btn:hover {
+    .card .actions .company-contacts-btn:hover {
       background: var(--lilac-soft);
       color: var(--plum);
     }
 
-    .card .actions .contacts-btn[disabled] { opacity: 0.7; cursor: wait; }
+    .card .actions .company-contacts-btn[disabled] { opacity: 0.7; cursor: wait; }
+
+    .card .actions .company-contacts-btn .stale-tag { color: var(--gold-deep); font-weight: 600; }
+
+    #contacts-modal .modal { max-width: 760px; }
+
+    .contact-group { margin-bottom: 18px; }
+
+    .contact-group h3 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 4px;
+    }
+
+    .contact-row {
+      border-top: 1px solid var(--card-border);
+      padding: 10px 0;
+    }
+
+    .contact-row .contact-name { font-weight: 600; }
+    .contact-row .contact-title { color: var(--ink-soft); }
+
+    .contact-row .contact-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+      margin-top: 4px;
+      font-size: 12.5px;
+      color: var(--ink-muted);
+    }
+
+    .contact-row .contact-meta a { color: var(--plum-soft); }
+    .contact-row .contact-relevance { margin-top: 4px; line-height: 1.5; color: var(--ink-soft); }
+
+    .contacts-notes {
+      margin-top: 8px;
+      font-size: 12.5px;
+      color: var(--ink-muted);
+      line-height: 1.5;
+    }
 
     /* Dossier — company research, one per company, shared across its postings */
     .card .actions .dossier-btn {
@@ -2383,6 +2425,19 @@
     </div>
   </div>
 
+  <div id="contacts-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="contacts-title">
+      <header>
+        <div>
+          <h2 id="contacts-title">Contacts</h2>
+          <div class="sub">People at this company, found outside LinkedIn</div>
+        </div>
+        <button class="close-btn" id="close-contacts-btn" aria-label="Close">×</button>
+      </header>
+      <div id="contacts-body"></div>
+    </div>
+  </div>
+
   <div id="charts-modal" class="modal-backdrop" aria-hidden="true">
     <div class="modal" role="dialog" aria-labelledby="charts-title">
       <header>
@@ -2577,9 +2632,6 @@
       const offeringsBadge = hasOfferings
         ? `<span class="badge" title="Forge + petition complete">materials</span>`
         : "";
-      const contactsBadge = d.has_contacts
-        ? `<span class="badge" title="LinkedIn contacts saved to folder">contacts</span>`
-        : "";
       const salaryBadge = d.has_salary
         ? `<span class="badge salary-badge" data-id="${d.id}" title="Click to open the full salary intel in a new tab" style="cursor:pointer">${formatSalaryRange(d.salary_data) || "salary"}</span>`
         : "";
@@ -2622,10 +2674,8 @@
 
       const dossierBtn = dossierButtonHtml(d);
 
-      // Contacts: only offered once materials exist (otherwise nowhere to save)
-      const contactsBtn = hasOfferings
-        ? `<button class="contacts-btn" data-id="${d.id}">${d.has_contacts ? "Refresh contacts" : "Find contacts"}</button>`
-        : "";
+      // Contacts are per company, like dossiers, and don't need materials first.
+      const contactsBtn = contactsButtonHtml(d, d.id);
 
       // Salary intel: also requires offerings folder (needs somewhere to save the .md)
       const salaryBtn = hasOfferings
@@ -2648,7 +2698,6 @@
             ${tierBadge}
             ${atsBadge}
             ${offeringsBadge}
-            ${contactsBadge}
             ${salaryBadge}
           </div>
           <div class="actions">
@@ -3009,7 +3058,24 @@
       financial_health: "Financial health",
     };
 
-    const dossierPolls = new Set();
+    const researchPolls = new Set();
+
+    const RESEARCH = {
+      dossier: {
+        build: "/api/dossier/build",
+        status: "/api/dossier/status",
+        btnClass: "dossier-btn",
+        noun: "dossier",
+        busy: "Researching…",
+      },
+      contacts: {
+        build: "/api/company-contacts/build",
+        status: "/api/company-contacts/status",
+        btnClass: "company-contacts-btn",
+        noun: "contacts search",
+        busy: "Searching…",
+      },
+    };
 
     function dossierAgeText(ageDays) {
       if (ageDays == null) return "";
@@ -3024,7 +3090,7 @@
       if (d.dossier_building) {
         // A build started before this page loaded (or from another tab):
         // pick the polling back up so the card updates when it lands.
-        pollDossier(d.company || "");
+        pollResearch("dossier", d.company || "");
         return `<button class="dossier-btn" data-company="${company}" disabled>Researching…</button>`;
       }
       const ds = d.dossier;
@@ -3036,65 +3102,205 @@
       return `<button class="dossier-btn" data-build-id="${d.id}" data-company="${company}" title="Research ${company} and score it against your values">Build dossier</button>`;
     }
 
-    function setDossierButtonsBuilding(company) {
-      document.querySelectorAll(".dossier-btn").forEach((b) => {
+    function setResearchButtonsBuilding(kind, company) {
+      const cfg = RESEARCH[kind];
+      document.querySelectorAll(`.${cfg.btnClass}`).forEach((b) => {
         if (b.dataset.company === company) {
           b.disabled = true;
-          b.textContent = "Researching…";
+          b.textContent = cfg.busy;
         }
       });
     }
 
-    async function startDossierBuild(discoveryId, company, isRebuild) {
-      const verb = isRebuild ? "Rebuild" : "Build";
-      const ok = window.confirm(
+    const RESEARCH_CONFIRM = {
+      dossier: (verb, company) =>
         `${verb} a dossier on ${company}?\n\n` +
         "Charon runs several web searches and scores the company against your values. " +
-        "It takes a few minutes and spends API credit. You can keep working while it runs."
-      );
-      if (!ok) return false;
+        "It takes a few minutes and spends API credit. You can keep working while it runs.",
+      contacts: (verb, company) =>
+        `${verb} contacts at ${company}?\n\n` +
+        "Charon searches the company's site, conference talks, GitHub, personal sites, " +
+        "infosec.exchange, Bluesky and security chapters. No LinkedIn. It takes a few " +
+        "minutes and spends API credit. One list covers every posting from this company.",
+    };
+
+    async function startResearch(kind, discoveryId, company, isRebuild) {
+      const cfg = RESEARCH[kind];
+      const verb = isRebuild ? (kind === "dossier" ? "Rebuild" : "Search again for") : (kind === "dossier" ? "Build" : "Find");
+      if (!window.confirm(RESEARCH_CONFIRM[kind](verb, company))) return false;
       try {
-        const r = await fetch("/api/dossier/build", {
+        const r = await fetch(cfg.build, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ discovery_id: Number(discoveryId) }),
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-        setDossierButtonsBuilding(company);
-        showToast(`Researching ${company} — a few minutes.`);
-        pollDossier(company);
+        setResearchButtonsBuilding(kind, company);
+        showToast(kind === "dossier"
+          ? `Researching ${company} — a few minutes.`
+          : `Looking for people at ${company} — a few minutes.`);
+        pollResearch(kind, company);
         return true;
       } catch (e) {
-        showToast("Couldn't start the dossier: " + e.message, true);
+        showToast(`Couldn't start the ${cfg.noun}: ` + e.message, true);
         return false;
       }
     }
 
-    function pollDossier(company) {
-      if (dossierPolls.has(company)) return;
-      dossierPolls.add(company);
+    function startDossierBuild(discoveryId, company, isRebuild) {
+      return startResearch("dossier", discoveryId, company, isRebuild);
+    }
+
+    function pollResearch(kind, company) {
+      const cfg = RESEARCH[kind];
+      const pollKey = `${kind}:${company}`;
+      if (researchPolls.has(pollKey)) return;
+      researchPolls.add(pollKey);
       const tick = async () => {
         try {
-          const r = await fetch(`/api/dossier/status?company=${encodeURIComponent(company)}`);
+          const r = await fetch(`${cfg.status}?company=${encodeURIComponent(company)}`);
           const data = await r.json();
           const job = data.job || {};
           if (job.running) {
             setTimeout(tick, 5000);
             return;
           }
-          dossierPolls.delete(company);
+          researchPolls.delete(pollKey);
           if (job.error) {
-            showToast(`Dossier on ${company} failed: ${job.error}`, true);
-          } else {
+            showToast(`The ${cfg.noun} for ${company} failed: ${job.error}`, true);
+          } else if (kind === "dossier") {
             showToast(`Dossier on ${company} is ready.`);
+          } else {
+            const n = (job.contacts && job.contacts.score) || 0;
+            showToast(n
+              ? `Found ${n} ${n === 1 ? "person" : "people"} at ${company}.`
+              : `No one turned up at ${company} outside LinkedIn.`, !n);
           }
           loadReady();
+          loadApplications();
         } catch (e) {
           setTimeout(tick, 8000);
         }
       };
       setTimeout(tick, 5000);
+    }
+
+    function contactsButtonHtml(d, discoveryId) {
+      const company = escapeHtml(d.company || "");
+      if (d.company_contacts_building) {
+        pollResearch("contacts", d.company || "");
+        return `<button class="company-contacts-btn" data-company="${company}" disabled>Searching…</button>`;
+      }
+      const cc = d.company_contacts;
+      const disc = discoveryId != null ? ` data-discovery-id="${discoveryId}"` : "";
+      if (cc && cc.id) {
+        const n = Math.round(cc.score || 0);
+        const when = cc.built_at ? fmtShortDate(cc.built_at) : "";
+        const stale = cc.stale ? ` <span class="stale-tag">· ${dossierAgeText(cc.age_days)}</span>` : "";
+        return `<button class="company-contacts-btn" data-contacts-id="${cc.id}"${disc} data-company="${company}" title="People at ${company} found outside LinkedIn">Contacts (${n})${when ? " · " + when : ""}${stale}</button>`;
+      }
+      if (discoveryId == null) return "";
+      return `<button class="company-contacts-btn" data-find-id="${discoveryId}" data-company="${company}" title="Find people at ${company} outside LinkedIn">Find contacts</button>`;
+    }
+
+    const CONTACT_GROUPS = [
+      ["security_leadership", "Security leadership"],
+      ["recruiter", "Recruiters"],
+      ["practitioner", "Practitioners"],
+      ["other", "Others"],
+    ];
+
+    const CONTACT_SOURCES = {
+      company_site: "company site",
+      conference: "conference",
+      github: "GitHub",
+      personal_site: "personal site",
+      social: "social",
+      advisory: "advisory / CVE",
+      bug_bounty: "bug bounty",
+      chapter: "chapter / meetup",
+      press: "press",
+      other: "other",
+    };
+
+    function safeHref(url) {
+      return /^https?:\/\//i.test(url || "") ? url : "";
+    }
+
+    function renderContacts(cs, discoveryId) {
+      const people = Array.isArray(cs.contacts) ? cs.contacts : [];
+      const groups = CONTACT_GROUPS.map(([key, label]) => {
+        const rows = people.filter((p) => (p.category || "other") === key);
+        if (!rows.length) return "";
+        return `
+          <div class="contact-group">
+            <h3>${label}</h3>
+            ${rows.map((p) => {
+              const href = safeHref(p.url);
+              const source = CONTACT_SOURCES[p.source_type] || "source";
+              const link = href
+                ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source)}</a>`
+                : escapeHtml(source);
+              return `
+                <div class="contact-row">
+                  <div><span class="contact-name">${escapeHtml(p.name || "")}</span>${p.title ? ` <span class="contact-title">— ${escapeHtml(p.title)}</span>` : ""}</div>
+                  <div class="contact-meta">
+                    <span>Found via ${link}</span>
+                    ${p.source_date ? `<span>${escapeHtml(p.source_date)}</span>` : ""}
+                    ${p.contact_route ? `<span>Reach: ${escapeHtml(p.contact_route)}</span>` : ""}
+                  </div>
+                  ${p.relevance ? `<div class="contact-relevance">${escapeHtml(p.relevance)}</div>` : ""}
+                </div>`;
+            }).join("")}
+          </div>`;
+      }).join("");
+
+      const built = cs.built_at ? new Date(cs.built_at) : null;
+      const builtText = built && !isNaN(built)
+        ? built.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+        : "unknown date";
+      const stale = cs.stale ? `<span class="stale-tag">${dossierAgeText(cs.age_days)} — people move, worth a new search</span>` : "";
+      const again = discoveryId
+        ? `<button class="rebuild-btn" data-discovery-id="${discoveryId}" data-company="${escapeHtml(cs.company || "")}">Search again</button>`
+        : "";
+
+      document.getElementById("contacts-title").textContent = cs.company || "Contacts";
+      document.getElementById("contacts-body").innerHTML = `
+        <div class="dossier-meta">
+          <span class="dossier-score">${people.length}</span>
+          <span>${people.length === 1 ? "person" : "people"}</span>
+          <span>Searched ${escapeHtml(builtText)}</span>
+          ${stale}
+          ${again}
+        </div>
+        ${groups || `<div class="state"><div class="glyph">·</div>No one turned up outside LinkedIn.</div>`}
+        ${cs.search_notes ? `<div class="contacts-notes"><strong>Search notes:</strong> ${escapeHtml(cs.search_notes)}</div>` : ""}
+      `;
+    }
+
+    async function openContactsModal(contactsId, discoveryId) {
+      const backdrop = document.getElementById("contacts-modal");
+      document.getElementById("contacts-title").textContent = "Contacts";
+      document.getElementById("contacts-body").innerHTML =
+        `<div class="state"><div class="glyph">·</div>Opening the list…</div>`;
+      backdrop.classList.add("show");
+      backdrop.setAttribute("aria-hidden", "false");
+      try {
+        const r = await fetch(`/api/company-contacts/${encodeURIComponent(contactsId)}`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+        renderContacts(data.contacts || {}, discoveryId);
+      } catch (e) {
+        document.getElementById("contacts-body").innerHTML =
+          `<div class="state"><div class="glyph">·</div>Couldn't load contacts. ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function closeContactsModal() {
+      const backdrop = document.getElementById("contacts-modal");
+      backdrop.classList.remove("show");
+      backdrop.setAttribute("aria-hidden", "true");
     }
 
     function renderDossier(ds, discoveryId) {
@@ -3558,16 +3764,12 @@
         folderBtn = resumeBtn + letterBtn;
       }
 
-      const contactsBtn = a.has_offerings && a.discovery_id != null
-        ? `<button class="contacts-btn" data-id="${a.discovery_id}">${a.has_contacts ? "Refresh contacts" : "Find contacts"}</button>`
-        : "";
+      // Company contacts: viewable whenever a list exists; a new search needs
+      // the linked discovery to know which company to look up.
+      const contactsBtn = contactsButtonHtml(a, a.discovery_id);
 
       const linkBadge = a.discovery_id != null
         ? `<span class="badge" title="Linked to discovery">#${a.discovery_id}</span>`
-        : "";
-
-      const contactsBadge = a.has_contacts
-        ? `<span class="badge" title="LinkedIn contacts saved to folder">contacts</span>`
         : "";
 
       return `
@@ -3582,7 +3784,6 @@
           <div class="applied-meta">
             <span>Applied <strong>${escapeHtml(relativeApplied(a.days_since, a.applied_at))}</strong></span>
             ${linkBadge}
-            ${contactsBadge}
           </div>
           <div class="actions">
             ${posting}
@@ -4402,41 +4603,6 @@ judging happens without a separate confirm.`;
       }
     }
 
-    async function findContacts(id, cardEl) {
-      const btn = cardEl.querySelector(".contacts-btn");
-      if (!btn) return;
-      btn.disabled = true;
-      btn.innerHTML = `<span class="prep-status">Searching<span class="dots"></span></span>`;
-      showToast(`Searching LinkedIn for #${id} contacts — usually 10–20 seconds.`);
-
-      try {
-        const r = await fetch(`/api/contacts/${id}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-
-        const c = data.contacts || {};
-        const total = c.count || 0;
-        if (total === 0) {
-          showToast(`No contacts surfaced for #${id}. Saved an empty file.`, true);
-        } else {
-          const bc = c.by_category || {};
-          const bits = [];
-          if (bc.recruiter) bits.push(`${bc.recruiter} recruiter${bc.recruiter > 1 ? "s" : ""}`);
-          if (bc.hiring_manager) bits.push(`${bc.hiring_manager} hiring mgr${bc.hiring_manager > 1 ? "s" : ""}`);
-          if (bc.team_member) bits.push(`${bc.team_member} team`);
-          showToast(`Found ${total} for #${id}: ${bits.join(", ")}. Saved.`);
-        }
-        renderList(data.ready || []);
-      } catch (e) {
-        btn.disabled = false;
-        btn.textContent = "Find contacts";
-        showToast("Couldn't find contacts: " + e.message, true);
-      }
-    }
 
     // Event delegation — handles cards even after re-render
     document.addEventListener("click", (ev) => {
@@ -4719,12 +4885,26 @@ judging happens without a separate confirm.`;
         return;
       }
 
-      // Find LinkedIn contacts
-      const contactsBtn = ev.target.closest(".contacts-btn");
-      if (contactsBtn && !contactsBtn.disabled) {
-        const card = contactsBtn.closest(".card");
-        const id = contactsBtn.getAttribute("data-id");
-        if (id && card) findContacts(id, card);
+      // Company contacts (outside LinkedIn)
+      const companyContactsBtn = ev.target.closest(".company-contacts-btn");
+      if (companyContactsBtn && !companyContactsBtn.disabled) {
+        const ds = companyContactsBtn.dataset;
+        if (ds.contactsId) {
+          openContactsModal(ds.contactsId, ds.discoveryId);
+        } else if (ds.findId) {
+          startResearch("contacts", ds.findId, ds.company, false);
+        }
+        return;
+      }
+      const contactsAgainBtn = ev.target.closest("#contacts-modal .rebuild-btn");
+      if (contactsAgainBtn && !contactsAgainBtn.disabled) {
+        startResearch(
+          "contacts", contactsAgainBtn.dataset.discoveryId, contactsAgainBtn.dataset.company, true
+        ).then((started) => { if (started) closeContactsModal(); });
+        return;
+      }
+      if (ev.target.closest("#close-contacts-btn") || ev.target.id === "contacts-modal") {
+        closeContactsModal();
         return;
       }
 
