@@ -235,6 +235,54 @@ def _expire_stale_ready(days: int) -> dict[str, Any]:
     return {"expired": count, "days": days}
 
 
+_RESCORE_MAX_ROWS = 50
+
+
+def _rescore_resume(ids: list[int] | None, status: str | None) -> dict[str, Any]:
+    """Re-run résumé match for chosen rows inside the service.
+
+    Lives here rather than only in the CLI because the Anthropic key is in the
+    service's environment, not in a login shell's. Capped at a few dozen rows
+    since it runs synchronously — one AI call a row.
+    """
+    from charon.profile import load_profile
+    from charon.screen import rescore_resume_batch
+
+    if not ids and status not in {"ready", "rejected"}:
+        raise DashboardError("Pass ids, or status 'ready' or 'rejected'.")
+    if ids and len(ids) > _RESCORE_MAX_ROWS:
+        raise DashboardError(f"At most {_RESCORE_MAX_ROWS} rows per rescore.")
+    busy = _pipeline_busy()
+    if busy is not None:
+        raise DashboardError(f"A {busy} job is already running — wait for it.")
+    try:
+        profile = load_profile()
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Profile error: {e}") from e
+
+    if not ids:
+        from charon.db import get_discoveries
+
+        pending = [d for d in get_discoveries(status=status) if d.get("judged_at")]
+        if len(pending) > _RESCORE_MAX_ROWS:
+            raise DashboardError(
+                f"{len(pending)} {status} rows is more than {_RESCORE_MAX_ROWS} "
+                "per rescore — pass ids instead."
+            )
+
+    rows = rescore_resume_batch(profile=profile, ids=ids or None, status=status)
+    out = []
+    for r in rows:
+        out.append({
+            k: r.get(k) for k in (
+                "discovery_id", "company", "role", "resume_kind", "closest_target",
+                "old_resume_match", "new_resume_match", "old_combined",
+                "new_combined", "old_status", "screened_status", "error",
+            )
+        })
+    return {"rows": out, "count": len(out)}
+
+
 def _stats(include_charts: bool = False) -> dict[str, Any]:
     """Pipeline-wide counters for the stats band.
 
@@ -2316,6 +2364,33 @@ class _Handler(BaseHTTPRequestHandler):
                 "ready": _ready_discoveries(),
                 "refused": _refused_discoveries(),
             })
+            return
+        if path == "/api/rescore-resume":
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
+                return
+            raw_ids = body.get("ids")
+            ids: list[int] | None = None
+            if raw_ids is not None:
+                if not isinstance(raw_ids, list):
+                    self._serve_status(HTTPStatus.BAD_REQUEST, "ids must be a list")
+                    return
+                try:
+                    ids = [int(i) for i in raw_ids]
+                except (TypeError, ValueError):
+                    self._serve_status(HTTPStatus.BAD_REQUEST, "ids must be integers")
+                    return
+            status = body.get("status")
+            if status is not None and not isinstance(status, str):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "status must be a string")
+                return
+            try:
+                result = _rescore_resume(ids, status)
+            except DashboardError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, **result})
             return
         if path == "/api/expire":
             body = self._read_json_body() or {}

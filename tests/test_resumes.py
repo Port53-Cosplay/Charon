@@ -271,3 +271,17 @@ class TestOfferingFileChoice:
         assert _offering_file(str(tmp_path), "resume") == "resume.docx"
         (tmp_path / "resume.html").write_text("<html></html>", encoding="utf-8")
         assert _offering_file(str(tmp_path), "resume") == "resume.html"
+
+
+class TestRescoreEndpointGuards:
+    def test_needs_ids_or_a_valid_status(self):
+        from charon.dashboard import DashboardError, _rescore_resume
+        with pytest.raises(DashboardError):
+            _rescore_resume(None, None)
+        with pytest.raises(DashboardError):
+            _rescore_resume(None, "applied")
+
+    def test_refuses_oversized_id_lists(self):
+        from charon.dashboard import DashboardError, _rescore_resume
+        with pytest.raises(DashboardError, match="At most"):
+            _rescore_resume(list(range(500)), None)
