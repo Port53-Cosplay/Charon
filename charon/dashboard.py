@@ -2589,6 +2589,17 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/ready":
             self._serve_json({"ready": _ready_discoveries()})
             return
+        if path == "/api/letter-bakeoff/status":
+            from charon.bakeoff import job_snapshot
+
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            try:
+                discovery_id = int(qs.get("discovery_id", [""])[0])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery_id must be an integer")
+                return
+            self._serve_json({"job": job_snapshot(discovery_id)})
+            return
         if path in ("/api/dossier/status", "/api/company-contacts/status"):
             kind = "dossier" if path.startswith("/api/dossier/") else "contacts"
             qs = urllib.parse.parse_qs(parsed.query or "")
@@ -2830,6 +2841,25 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._serve_json({"ok": True, "rejection": rec, "ready": _ready_discoveries()})
+            return
+        if path == "/api/letter-bakeoff":
+            from charon.bakeoff import BakeoffError, start_bakeoff
+
+            body = self._read_json_body() or {}
+            if not isinstance(body, dict):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
+                return
+            try:
+                discovery_id = int(body.get("discovery_id"))
+            except (TypeError, ValueError):
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery_id must be an integer")
+                return
+            try:
+                snap = start_bakeoff(discovery_id, body.get("models"))
+            except BakeoffError as e:
+                self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json({"ok": True, "job": snap})
             return
         if path.startswith("/api/rewrite-letter/"):
             try:
