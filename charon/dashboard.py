@@ -608,6 +608,7 @@ def _rewrite_cover_letter(discovery_id: int) -> dict[str, Any]:
         "letter_path": result["letter_path"],
         "previous": kept,
         "dash_cleanup": result.get("dash_cleanup"),
+        "letter_check": result.get("letter_check"),
         "unverified_claims": result.get("unverified_claims") or [],
         "words": len(text.split()),
         "dashes_remaining": sum(text.count(d) for d in ("\u2014", "\u2013")),
@@ -877,6 +878,7 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
             "has_resume": has_resume,
             "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
             "has_letter": has_letter,
+            **_letter_flags(offerings_path if has_letter else None),
             "is_archived": is_archived,
         })
     dossiers = _dossier_index()
@@ -2043,6 +2045,26 @@ def _offering_has(offerings_path: str, stem: str) -> bool:
     return _offering_file(offerings_path, stem) is not None
 
 
+def _letter_flags(offerings_path: str | None) -> dict[str, Any]:
+    """What the claim check left in the saved letter, for the card's warning.
+
+    letter_flags: None = no check on file (older letter), -1 = the check
+    failed to run, otherwise how many problems are still in the letter.
+    """
+    from charon.letter_check import flag_count, read_report
+
+    report = read_report(offerings_path)
+    count = flag_count(report)
+    items: list[str] = []
+    if report and count:
+        if count == -1:
+            items = [f"Claim check didn't run: {report.get('error') or 'unknown error'}"]
+        else:
+            items = [f"Not on résumé: \"{c.get('quote')}\"" for c in report.get("unsupported") or []]
+            items += [f"{s.get('pattern')}: \"{s.get('quote')}\"" for s in report.get("style") or []]
+    return {"letter_flags": count, "letter_flag_items": items}
+
+
 DESCRIPTION_PREVIEW_CHARS = 600
 
 
@@ -2123,6 +2145,7 @@ def _summarize_discovery(
         "has_resume": has_resume,
         "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
         "has_letter": has_letter,
+        **_letter_flags(offerings_path if has_letter else None),
         "salary_data": _parse_salary_data(r.get("salary_data")),
         # Detail-view fields — eager so click-to-expand is instant, but the
         # posting text is capped for list views (see preview_chars).

@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from charon import letter_check
 from charon import tailor as _tailor
 from charon.resume_match import ResumeMatchError, load_resume_text
 from charon.resumes import closest_target_of, resume_path_for
@@ -384,11 +385,20 @@ def petition_discovery(
     except ForgeError as e:
         return {"discovery_id": discovery.get("id"), "error": str(e)}
 
+    # Claims and banned patterns first, then punctuation: the claim rewrite
+    # can reintroduce a dash, the dash rewrite is told to add nothing.
+    generated, check_report, check_usage = letter_check.guard_letter(
+        generated,
+        resume_text,
+        writer_model=model,
+        max_tokens=cfg["max_tokens"],
+        profile=profile,
+    )
     generated, dash_usage, dash_note = remove_dashes(
         generated, model=model, max_tokens=cfg["max_tokens"], profile=profile
     )
     usage = {
-        k: int(usage.get(k, 0)) + int(dash_usage.get(k, 0))
+        k: int(usage.get(k, 0)) + int(check_usage.get(k, 0)) + int(dash_usage.get(k, 0))
         for k in ("input_tokens", "output_tokens")
     }
 
@@ -396,6 +406,7 @@ def petition_discovery(
 
     folder.mkdir(parents=True, exist_ok=True)
     letter_out.write_text(generated, encoding="utf-8")
+    letter_check.write_report(folder, check_report)
 
     audit_out = folder / "petition_audit.md"
     audit = _tailor._build_audit(
@@ -408,6 +419,7 @@ def petition_discovery(
         generated=generated,
         discovery=discovery,
     )
+    audit += "\n" + letter_check.audit_section(check_report)
     if dash_note:
         audit += f"\n\n## Punctuation cleanup\n\n{dash_note}\n"
     audit_out.write_text(audit, encoding="utf-8")
@@ -417,6 +429,7 @@ def petition_discovery(
         "offerings_path": str(folder),
         "letter_path": str(letter_out),
         "dash_cleanup": dash_note,
+        "letter_check": check_report,
         "audit_path": str(audit_out),
         "unverified_claims": unverified,
         "usage": usage,

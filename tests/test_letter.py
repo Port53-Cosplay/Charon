@@ -10,6 +10,17 @@ from charon import tailor
 from charon.letter import petition_discovery
 
 
+@pytest.fixture(autouse=True)
+def _no_claim_check(monkeypatch):
+    """These tests mock one model reply; the claim check has its own tests."""
+    from charon import letter_check
+
+    monkeypatch.setattr(
+        letter_check, "guard_letter",
+        lambda text, resume, **kw: (text, {"status": "clean"}, {"input_tokens": 0, "output_tokens": 0}),
+    )
+
+
 PROFILE = {
     "values": {"security_culture": 0.5, "people_treatment": 0.5},
     "dealbreakers": [],

@@ -2982,8 +2982,10 @@ def _print_petition_result(result: dict, terse: bool = False) -> None:
         console.print(f"      [dim]{folder}[/dim]")
         return
 
-    style = "warning" if unverified else "good"
-    marker = "[!]" if unverified else "[+]"
+    check = result.get("letter_check") or {}
+    check_problem = check.get("status") in ("flagged", "unchecked")
+    style = "warning" if (unverified or check_problem) else "good"
+    marker = "[!]" if (unverified or check_problem) else "[+]"
 
     console.print(f"  [{style}]{marker}[/{style}] #{discovery_id} petitioned -> {folder}")
     if unverified:
@@ -2992,6 +2994,12 @@ def _print_petition_result(result: dict, terse: bool = False) -> None:
             f"{', '.join(unverified[:5])}"
             + (" ..." if len(unverified) > 5 else "")
         )
+    if check.get("status") == "unchecked":
+        console.print(f"      [warning]Claim check didn't run:[/warning] {check.get('error')}")
+    elif check.get("status") == "flagged":
+        left = len(check.get("unsupported") or []) + len(check.get("style") or [])
+        console.print(f"      [warning]{left} claim/style problem(s) survived the rewrite.[/warning]")
+    if unverified or check_problem:
         console.print(
             f"      [dim]Review petition_audit.md before submitting.[/dim]"
         )

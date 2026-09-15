@@ -17,6 +17,17 @@ from charon import tailor
 EM, EN = "—", "–"
 
 
+@pytest.fixture(autouse=True)
+def _no_claim_check(monkeypatch):
+    """These tests script the model replies for dashes only; see test_letter_check."""
+    from charon import letter_check
+
+    monkeypatch.setattr(
+        letter_check, "guard_letter",
+        lambda text, resume, **kw: (text, {"status": "clean"}, {"input_tokens": 0, "output_tokens": 0}),
+    )
+
+
 class TestPrompt:
     def test_rendered_prompt_models_no_dashes(self):
         prompt = letter.build_petition_system_prompt({})

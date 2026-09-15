@@ -161,6 +161,26 @@ def _trim_input(text: str, cap: int = 80_000) -> str:
     return text[:cap] + "\n[truncated]"
 
 
+# Newer Claude models return a 400 on `temperature` and think by default.
+# Thinking tokens count against max_tokens, so those models get headroom
+# and a longer timeout or a letter can come back cut off mid-sentence.
+_NO_SAMPLING_PREFIXES = (
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-fable",
+    "claude-mythos",
+)
+THINKING_MIN_MAX_TOKENS = 16_000
+THINKING_TIMEOUT_SECONDS = 300
+
+
+def _is_thinking_model(model: str) -> bool:
+    name = model.split("/", 1)[-1]  # tolerate "anthropic/claude-..." slugs
+    return name.startswith(_NO_SAMPLING_PREFIXES)
+
+
 def _generate_via_anthropic(
     system_prompt: str,
     user_prompt: str,
@@ -176,19 +196,25 @@ def _generate_via_anthropic(
     if not api_key:
         raise ForgeError("Set ANTHROPIC_API_KEY environment variable.")
 
+    thinking = _is_thinking_model(model)
     client = anthropic.Anthropic(
         api_key=api_key,
-        timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=10.0),
+        timeout=httpx.Timeout(
+            THINKING_TIMEOUT_SECONDS if thinking else TIMEOUT_SECONDS, connect=10.0
+        ),
     )
 
+    params: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max(max_tokens, THINKING_MIN_MAX_TOKENS) if thinking else max_tokens,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    if not thinking:
+        params["temperature"] = 0.3
+
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=0.3,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+        response = client.messages.create(**params)
     except anthropic.AuthenticationError:
         raise ForgeError("Invalid Anthropic API key.")
     except anthropic.RateLimitError:
@@ -198,9 +224,14 @@ def _generate_via_anthropic(
     except anthropic.APIConnectionError:
         raise ForgeError("Cannot reach Anthropic API.")
 
-    if not response.content:
+    if response.stop_reason == "refusal":
+        raise ForgeError(f"{model} declined to write this.")
+    # Thinking models put a thinking block ahead of the text.
+    text = "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
+    if not text.strip():
         raise ForgeError("Empty response from Anthropic.")
-    text = response.content[0].text
+    if response.stop_reason == "max_tokens":
+        raise ForgeError(f"{model} ran out of tokens before finishing.")
     usage = {
         "input_tokens": getattr(response.usage, "input_tokens", 0),
         "output_tokens": getattr(response.usage, "output_tokens", 0),
@@ -243,18 +274,22 @@ def _generate_via_openrouter(
         "HTTP-Referer": "https://github.com/Pickle-Pixel/Charon",
         "X-Title": "Charon",
     }
-    body = {
+    body: dict[str, Any] = {
         "model": model,
-        "temperature": 0.3,
-        "max_tokens": max_tokens,
+        # Reasoning models on OpenRouter spend hidden tokens too; only
+        # tokens actually used are billed, so the ceiling costs nothing.
+        "max_tokens": max(max_tokens, THINKING_MIN_MAX_TOKENS),
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     }
+    # No temperature: several OpenRouter models (GPT-5.6 Sol, Claude 5) don't
+    # accept it, and every writer should run at its vendor's default so a
+    # comparison between them is fair.
 
     try:
-        with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
+        with httpx.Client(timeout=THINKING_TIMEOUT_SECONDS) as client:
             response = client.post(OPENROUTER_API, json=body, headers=headers)
     except httpx.TimeoutException:
         raise ForgeError(f"OpenRouter timed out for model '{model}'.")
@@ -276,7 +311,11 @@ def _generate_via_openrouter(
     choices = data.get("choices") or []
     if not choices:
         raise ForgeError("OpenRouter returned no choices.")
-    text = choices[0].get("message", {}).get("content", "")
+    text = choices[0].get("message", {}).get("content") or ""
+    if not text.strip():
+        raise ForgeError(f"OpenRouter model '{model}' returned no text.")
+    if choices[0].get("finish_reason") == "length":
+        raise ForgeError(f"OpenRouter model '{model}' ran out of tokens before finishing.")
     usage_data = data.get("usage") or {}
     usage = {
         "input_tokens": int(usage_data.get("prompt_tokens", 0)),

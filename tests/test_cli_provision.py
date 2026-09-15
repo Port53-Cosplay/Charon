@@ -19,6 +19,17 @@ from charon.db import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_claim_check(monkeypatch):
+    """Call counts here are about orchestration; the claim check has its own tests."""
+    from charon import letter_check
+
+    monkeypatch.setattr(
+        letter_check, "guard_letter",
+        lambda text, resume, **kw: (text, {"status": "clean"}, {"input_tokens": 0, "output_tokens": 0}),
+    )
+
+
 def _seed_ready(tmp_path, **overrides):
     """Seed an enriched + judged ready discovery for tests."""
     defaults = dict(
