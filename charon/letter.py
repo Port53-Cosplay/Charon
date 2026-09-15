@@ -63,7 +63,11 @@ ABSOLUTE RULES:
 or technologies in the letter must trace back to the resume or to the \
 confirmed facts listed with it. Nothing else counts as true about her.
 
-1b. Never say the candidate lacks experience, hasn't used a tool, or has a \
+1b. Past jobs and finished projects go in past tense. Never call anything \
+current, active, recent or ongoing unless the sources say so. A job with \
+an end date is over, and a project with no date isn't known to be ongoing.
+
+1c. Never say the candidate lacks experience, hasn't used a tool, or has a \
 gap. The resume lists what she has done, not everything she hasn't, so any \
 "I haven't worked with X" is a guess, and it's usually wrong. If the \
 posting asks for something the sources don't show, leave it out and lead \
@@ -107,6 +111,8 @@ VOICE (match these traits):
 
 LETTER-SPECIFIC TONAL NOTES (apply on top of the voice above):
 
+- Contract the way she talks: "I'm", "I'd", "I've", "don't", "it's". \
+"I am curious" is wrong for her; "I'm curious" is right.
 - A cover letter is tighter than a post. ONE associative connection or \
 parenthetical aside is good; two starts to feel performative. Don't force it.
 - Light mythology or metaphor is okay if it lands naturally and serves \

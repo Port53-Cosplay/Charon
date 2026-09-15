@@ -166,6 +166,26 @@ class TestFactsAndGaps:
         assert "reads as five years of both" in letter_check.CHECK_SYSTEM
         assert "tie each to where it happened" in letter_check.REWRITE_SYSTEM
 
+    def test_ongoing_framing_and_tense_are_claims(self):
+        # Bake-off: "The core of that work involves..." for a job that ended
+        # in 2021, and "Recently, I have been doing ... research" for a
+        # project she built once and doesn't maintain.
+        p = letter_check.CHECK_SYSTEM
+        assert "A job with an end date is over" in p
+        assert '"actively"' in p and '"recently"' in p
+        assert "put it in past tense" in letter_check.REWRITE_SYSTEM
+        assert "Past jobs and finished projects go in past tense" in letter.PETITION_SYSTEM_PROMPT
+
+    def test_stiff_phrasing_is_reported_and_labeled(self, monkeypatch):
+        assert '"stiff"' in letter_check.CHECK_SYSTEM
+        assert "I'm curious" in letter.PETITION_SYSTEM_PROMPT
+        models = ScriptedModels(
+            checks=[_check_json(style=[("I am curious about", "stiff")]), _check_json()],
+            rewrites=[CLEANED],
+        )
+        _guard(monkeypatch, models)
+        assert 'STIFF: "I am curious about"' in models.calls[1][2]
+
     def test_checker_treats_gap_statements_as_unsupported(self):
         assert "can never be verified" in letter_check.CHECK_SYSTEM
         assert "honest admissions of a gap" not in letter_check.CHECK_SYSTEM

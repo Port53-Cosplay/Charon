@@ -73,6 +73,11 @@ incident response practice from leading a team at a competition" is \
 unsupported when the five years was one job and the competition was a \
 single event, because it reads as five years of both. Quote the whole \
 misleading sentence.
+- ongoing or recent framing the sources don't state. Words like "currently", \
+"actively", "recently", "still", "maintain", "have been doing", or present \
+tense ("I build", "that work involves") make a claim that something is \
+still going on. A job with an end date is over; a project with no date is \
+not known to be ongoing. Quote the sentence.
 - ANY statement that she lacks experience, hasn't used something, or has a \
 gap ("I haven't worked in a production SIEM", "my cloud experience is \
 limited"). The sources list what she has done, not everything she hasn't, \
@@ -90,6 +95,9 @@ Y", "not just X, but Y", "isn't about X, it's about Y", "less X, more Y".
 ("clear, calm and specific"). Only report triads if the letter has TWO or \
 more of them; a single triad is fine. A plain factual list of three named \
 things (three tools she used) is not a triad.
+- "stiff": an uncontracted phrase where she would naturally use a \
+contraction. "I am", "I would", "I have", "I do not", "it is", "that is", \
+"I will". Report every one, quoting the phrase with a few words around it.
 
 OUTPUT: Only JSON, no commentary, in exactly this shape:
 {
@@ -129,6 +137,12 @@ For a CONTRAST ("X, not Y" and its relatives): state the thing directly. \
 Say what is true and drop the negated half.
 
 For a TRIAD: break the rhythm. Use two items, or restructure the sentence.
+
+For STIFF phrasing: use the contraction ("I'm", "I'd", "I've", "don't", \
+"it's"). Change nothing else in that sentence.
+
+If a finished job or a project is described as ongoing, put it in past \
+tense and drop words like "currently", "actively" or "recently".
 
 Keep the candidate's voice:
 {voice_block}
@@ -226,7 +240,7 @@ def _problems_text(findings: dict[str, Any]) -> str:
     for c in findings["unsupported"]:
         lines.append(f'UNSUPPORTED CLAIM: "{c["quote"]}"')
     for s in findings["style"]:
-        label = "TRIAD" if s["pattern"] == "triad" else "CONTRAST"
+        label = {"triad": "TRIAD", "stiff": "STIFF"}.get(s["pattern"], "CONTRAST")
         lines.append(f'{label}: "{s["quote"]}"')
     return "\n".join(lines)
 
