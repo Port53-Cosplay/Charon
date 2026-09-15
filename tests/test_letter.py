@@ -161,11 +161,12 @@ class TestJudgementHints:
         profile["forge"] = {"offerings_dir": str(tmp_path)}
         petition_discovery(d, profile=profile, resume_text="x")
 
-        # All three signal types must appear in the user prompt
         assert "STRENGTHS TO LEAD WITH" in captured["user"]
         assert "Citi fraud detection" in captured["user"]
-        assert "GAPS" in captured["user"]
-        assert "No SOC 2" in captured["user"]
+        # Analyzer gaps are guesses from what the résumé omits; letters turned
+        # them into false "I haven't used X" lines, so they stay out.
+        assert "GAPS" not in captured["user"]
+        assert "No SOC 2" not in captured["user"]
         assert "GREEN FLAGS" in captured["user"]
         assert "remote-friendly" in captured["user"]
 
@@ -201,8 +202,9 @@ class TestVoicePromptContent:
         assert "Conversational" in PETITION_SYSTEM_PROMPT
         assert "Specific over abstract" in PETITION_SYSTEM_PROMPT
         assert "Vary sentence length" in PETITION_SYSTEM_PROMPT
-        # Honesty about gaps
-        assert "Honest about gaps" in PETITION_SYSTEM_PROMPT
+        # Gaps are never volunteered
+        assert "Never say the candidate lacks experience" in PETITION_SYSTEM_PROMPT
+        assert "Honest about gaps" not in PETITION_SYSTEM_PROMPT
 
     def test_geographic_fabrication_explicitly_banned(self):
         """Regression: an early Coalfire petition fabricated 'I'm in the UK'.

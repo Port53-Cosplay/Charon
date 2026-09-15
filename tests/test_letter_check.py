@@ -136,6 +136,70 @@ class TestGuard:
         assert report["checker_model"] == "claude-opus-5"
 
 
+class TestFactsAndGaps:
+    """Bake-off 2026-09-15: four of five letters claimed no SIEM/EDR/cloud
+    experience. She has run Wazuh, used Velociraptor and built on AWS; none
+    of it was on the résumé, so the gap guesses were wrong."""
+
+    FACTS = {"facts_not_on_resume": ["Set up Wazuh on my home network twice", "  "]}
+
+    def test_confirmed_facts_reach_checker_and_rewrite(self, monkeypatch):
+        models = ScriptedModels(
+            checks=[_check_json(unsupported=["I haven't used a SIEM"]), _check_json()],
+            rewrites=[CLEANED],
+        )
+        _guard(monkeypatch, models, profile=self.FACTS)
+        for _, _, user in models.calls:
+            assert "- Set up Wazuh on my home network twice" in user
+            assert "CONFIRMED FACTS NOT ON THE RÉSUMÉ" in user
+
+    def test_no_facts_means_no_empty_section(self, monkeypatch):
+        models = ScriptedModels(checks=[_check_json()])
+        _guard(monkeypatch, models)
+        assert "CONFIRMED FACTS" not in models.calls[0][2]
+
+    def test_checker_reads_sentences_whole_for_spilled_durations(self):
+        # Bake-off letter: "five years of ... documentation experience and live
+        # incident response practice from leading ... the DOE Cyberforce
+        # Competition" read as five years of competition IR. She caught it.
+        assert "attaches to another" in letter_check.CHECK_SYSTEM
+        assert "reads as five years of both" in letter_check.CHECK_SYSTEM
+        assert "tie each to where it happened" in letter_check.REWRITE_SYSTEM
+
+    def test_checker_treats_gap_statements_as_unsupported(self):
+        assert "can never be verified" in letter_check.CHECK_SYSTEM
+        assert "honest admissions of a gap" not in letter_check.CHECK_SYSTEM
+        assert "delete it" in letter_check.REWRITE_SYSTEM
+
+    def test_letter_prompt_carries_facts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(letter_check, "guard_letter", lambda t, r, **kw: (t, {"status": "clean"}, NO_USAGE))
+        captured = {}
+
+        def fake_generate(system, user, *, model, max_tokens, profile):
+            captured["user"] = user
+            return "A letter.", NO_USAGE
+
+        monkeypatch.setattr(tailor, "_generate", fake_generate)
+        d = {"id": 5, "company": "X", "role": "Y", "screened_status": "ready", "full_description": "SOC " * 200}
+        letter.petition_discovery(
+            d, profile={**self.FACTS, "forge": {"offerings_dir": str(tmp_path)}}, resume_text=RESUME
+        )
+        assert "Set up Wazuh on my home network twice" in captured["user"]
+
+    def test_profile_validates_facts(self):
+        from charon.profile import ProfileError, validate_profile
+
+        base = {
+            "values": {"security_culture": 1.0},
+            "dealbreakers": [], "yellow_flags": [], "green_flags": [],
+        }
+        validate_profile({**base, "facts_not_on_resume": ["Used Velociraptor"]})
+        with pytest.raises(ProfileError):
+            validate_profile({**base, "facts_not_on_resume": "Used Velociraptor"})
+        with pytest.raises(ProfileError):
+            validate_profile({**base, "facts_not_on_resume": [3]})
+
+
 class TestPrompts:
     def test_checker_is_told_about_the_beyondtrust_failure_modes(self):
         p = letter_check.CHECK_SYSTEM

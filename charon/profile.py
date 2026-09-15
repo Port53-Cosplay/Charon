@@ -52,6 +52,10 @@ DEFAULT_PROFILE = {
     # municipal boards that would require relocation). Case-insensitive exact
     # match on the posting's company name.
     "blocked_employers": [],
+    # True things about you that aren't on your résumé. Cover letters may use
+    # them and the claim check counts them as supported. Write them plainly;
+    # the letter can't say more than the words here.
+    "facts_not_on_resume": [],
     # When true, the cull drops postings whose location clearly names a country
     # outside the US/Canada (US, Canada, and bare "Remote" always pass).
     "us_canada_only": False,
@@ -221,6 +225,16 @@ def validate_profile(profile: dict[str, Any]) -> None:
         for i, item in enumerate(blocked):
             if not isinstance(item, str):
                 raise ProfileError(f"'blocked_employers[{i}]' must be a string")
+
+    # Validate facts_not_on_resume (optional list of strings — true things
+    # cover letters may use and the claim check accepts)
+    facts = profile.get("facts_not_on_resume")
+    if facts is not None:
+        if not isinstance(facts, list):
+            raise ProfileError("'facts_not_on_resume' must be a list")
+        for i, item in enumerate(facts):
+            if not isinstance(item, str):
+                raise ProfileError(f"'facts_not_on_resume[{i}]' must be a string")
 
     # Validate us_canada_only (optional bool — geography cull gate)
     us_ca = profile.get("us_canada_only")
