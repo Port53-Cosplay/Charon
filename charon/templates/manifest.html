@@ -1746,10 +1746,72 @@
     .card .actions .salary-btn:active { transform: scale(0.95); }
     .card .actions .salary-btn[disabled] { opacity: 0.6; cursor: wait; }
 
-    /* When intel already exists, give the button a filled look so it reads
-       "this is done" vs "click to do" — same glyph, different weight. */
+    /* Once intel exists the button stops being a glyph and becomes the
+       answer: the range itself, filled, click to read the reasoning. */
     .card .actions .salary-btn.has-it {
       background: var(--gold-soft);
+      border-color: var(--gold-deep);
+      width: auto;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .card .actions .salary-btn.has-it:hover { background: var(--gold); }
+
+    /* ── salary intel modal ──────────────────────────────────── */
+
+    #salary-modal .modal { max-width: 720px; }
+
+    .salary-headline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 18px;
+      align-items: baseline;
+      margin: -12px 0 18px;
+      font-size: 12px;
+      color: var(--ink-muted);
+    }
+
+    .salary-headline .salary-range {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 22px;
+      color: var(--gold-deep);
+      font-weight: 600;
+    }
+
+    .salary-headline .refresh-btn {
+      margin-left: auto;
+      background: transparent;
+      color: var(--plum-soft);
+      border: 1px solid var(--lilac);
+      padding: 5px 12px;
+      font-size: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .salary-headline .refresh-btn:hover { background: var(--lilac-soft); color: var(--plum); }
+    .salary-headline .refresh-btn[disabled] { opacity: 0.7; cursor: wait; }
+
+    .salary-doc { line-height: 1.55; font-size: 13.5px; color: var(--ink-soft); }
+    .salary-doc h3 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 15px;
+      color: var(--plum);
+      margin: 18px 0 8px;
+    }
+    .salary-doc h3:first-child { margin-top: 0; }
+    .salary-doc p { margin-bottom: 10px; }
+    .salary-doc ul { margin: 0 0 12px 18px; }
+    .salary-doc li { margin-bottom: 5px; }
+    .salary-doc strong { color: var(--plum-soft); }
+    .salary-doc hr {
+      border: none;
+      border-top: 1px solid var(--card-border);
+      margin: 16px 0 10px;
     }
 
     /* ── expandable detail section ───────────────────────────── */
@@ -2442,6 +2504,19 @@
     </div>
   </div>
 
+  <div id="salary-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="salary-title">
+      <header>
+        <div>
+          <h2 id="salary-title">Salary intel</h2>
+          <div class="sub">What the role pays, and what to ask for</div>
+        </div>
+        <button class="close-btn" id="close-salary-btn" aria-label="Close">×</button>
+      </header>
+      <div id="salary-body"></div>
+    </div>
+  </div>
+
   <div id="charts-modal" class="modal-backdrop" aria-hidden="true">
     <div class="modal" role="dialog" aria-labelledby="charts-title">
       <header>
@@ -2509,6 +2584,41 @@
       const lo = fmt(s.low), hi = fmt(s.high);
       if (!lo || !hi) return null;
       return `${lo}–${hi}`;
+    }
+
+    // The salary control is one button in two states: a dull "$" that runs
+    // the lookup, or the range itself, filled, that opens the reasoning.
+    // Shown on Ready and Applied cards alike — once intel exists it stays
+    // readable for the life of the row.
+    // Structured {low, mid, high, ...} per discovery, stashed at render time
+    // so the modal headline doesn't have to re-parse the markdown.
+    const SALARY_BY_ID = {};
+
+    function salaryCardHeading(card) {
+      if (!card) return "Salary intel";
+      const companyEl = card.querySelector(".company");
+      // .company holds the name plus a "· #id" span — keep only the text.
+      const company = companyEl
+        ? Array.from(companyEl.childNodes)
+            .filter((n) => n.nodeType === Node.TEXT_NODE)
+            .map((n) => n.textContent).join("").trim()
+        : "";
+      const roleEl = card.querySelector(".role");
+      const role = roleEl ? roleEl.textContent.trim() : "";
+      return [company, role].filter(Boolean).join(" · ") || "Salary intel";
+    }
+
+    function salaryButtonHtml(d, discoveryId) {
+      if (discoveryId == null) return "";
+      if (d.salary_data) SALARY_BY_ID[discoveryId] = d.salary_data;
+      if (d.has_salary) {
+        const range = formatSalaryRange(d.salary_data) || "salary";
+        return `<button class="salary-btn has-it" data-id="${discoveryId}" title="Read the salary intel for this role">${escapeHtml(range)}</button>`;
+      }
+      // No intel yet: needs an offerings folder to save the .md into.
+      const hasOfferings = d.has_offerings || d.forged_at || d.petition_at || d.offerings_path;
+      if (!hasOfferings) return "";
+      return `<button class="salary-btn" data-id="${discoveryId}" title="Get salary intel for this role" aria-label="Salary intel">$</button>`;
     }
 
     function showToast(message, isError = false) {
@@ -2649,9 +2759,6 @@
       const offeringsBadge = hasOfferings
         ? `<span class="badge" title="Forge + petition complete">materials</span>`
         : "";
-      const salaryBadge = d.has_salary
-        ? `<span class="badge salary-badge" data-id="${d.id}" title="Click to open the full salary intel in a new tab" style="cursor:pointer">${formatSalaryRange(d.salary_data) || "salary"}</span>`
-        : "";
       const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
       const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
 
@@ -2689,15 +2796,12 @@
         materialsBtn = `<button class="prep-btn" data-id="${d.id}">Prep materials</button>`;
       }
 
-      const dossierBtn = dossierButtonHtml(d);
+      const dossierBtn = dossierButtonHtml(d, d.id);
 
       // Contacts are per company, like dossiers, and don't need materials first.
       const contactsBtn = contactsButtonHtml(d, d.id);
 
-      // Salary intel: also requires offerings folder (needs somewhere to save the .md)
-      const salaryBtn = hasOfferings
-        ? `<button class="salary-btn${d.has_salary ? " has-it" : ""}" data-id="${d.id}" title="${d.has_salary ? "Refresh salary intel" : "Get salary intel for this role"}" aria-label="Salary intel">$</button>`
-        : "";
+      const salaryBtn = salaryButtonHtml(d, d.id);
 
       return `
         <article class="card" data-id="${d.id}">
@@ -2715,7 +2819,6 @@
             ${tierBadge}
             ${atsBadge}
             ${offeringsBadge}
-            ${salaryBadge}
           </div>
           <div class="actions">
             ${posting}
@@ -3102,7 +3205,10 @@
       return `${months} mo old`;
     }
 
-    function dossierButtonHtml(d) {
+    // discoveryId is passed in rather than read off `d` because Applied
+    // cards are keyed by application id — their discovery link lives in
+    // d.discovery_id, and may be missing for hand-added applications.
+    function dossierButtonHtml(d, discoveryId) {
       const company = escapeHtml(d.company || "");
       if (d.dossier_building) {
         // A build started before this page loaded (or from another tab):
@@ -3111,12 +3217,14 @@
         return `<button class="dossier-btn" data-company="${company}" disabled>Researching…</button>`;
       }
       const ds = d.dossier;
+      const disc = discoveryId != null ? ` data-discovery-id="${discoveryId}"` : "";
       if (ds && ds.id) {
         const when = ds.built_at ? fmtShortDate(ds.built_at) : "";
         const stale = ds.stale ? ` <span class="stale-tag">· ${dossierAgeText(ds.age_days)}</span>` : "";
-        return `<button class="dossier-btn" data-dossier-id="${ds.id}" data-discovery-id="${d.id}" data-company="${company}" title="Open the dossier on ${company}">Dossier${when ? " · " + when : ""}${stale}</button>`;
+        return `<button class="dossier-btn" data-dossier-id="${ds.id}"${disc} data-company="${company}" title="Open the dossier on ${company}">Dossier${when ? " · " + when : ""}${stale}</button>`;
       }
-      return `<button class="dossier-btn" data-build-id="${d.id}" data-company="${company}" title="Research ${company} and score it against your values">Build dossier</button>`;
+      if (discoveryId == null) return "";
+      return `<button class="dossier-btn" data-build-id="${discoveryId}" data-company="${company}" title="Research ${company} and score it against your values">Build dossier</button>`;
     }
 
     function setResearchButtonsBuilding(kind, company) {
@@ -3316,6 +3424,102 @@
 
     function closeContactsModal() {
       const backdrop = document.getElementById("contacts-modal");
+      backdrop.classList.remove("show");
+      backdrop.setAttribute("aria-hidden", "true");
+    }
+
+    // ── Salary intel ────────────────────────────────────────────
+    // The intel lives as markdown in the offerings folder. Rather than
+    // dumping it in a tab as plain text, render the handful of constructs
+    // the generator actually emits: headings, bullets, bold, rules.
+    function renderSalaryMarkdown(text) {
+      const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+      const out = [];
+      let para = [];
+      let list = [];
+
+      const inline = (s) =>
+        escapeHtml(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+      const flushPara = () => {
+        if (para.length) { out.push(`<p>${inline(para.join(" "))}</p>`); para = []; }
+      };
+      const flushList = () => {
+        if (list.length) {
+          out.push(`<ul>${list.map((li) => `<li>${inline(li)}</li>`).join("")}</ul>`);
+          list = [];
+        }
+      };
+
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) { flushPara(); flushList(); continue; }
+        if (/^-{3,}$/.test(line)) { flushPara(); flushList(); out.push("<hr>"); continue; }
+        const heading = line.match(/^(#{1,6})\s+(.*)$/);
+        if (heading) {
+          flushPara(); flushList();
+          // The file's h1/h2 duplicate the modal title — render everything
+          // at one level so the body reads as sections, not a title stack.
+          out.push(`<h3>${inline(heading[2])}</h3>`);
+          continue;
+        }
+        const bullet = line.match(/^[-*]\s+(.*)$/);
+        if (bullet) { flushPara(); list.push(bullet[1]); continue; }
+        // "**Suggested range:** …" and friends arrive as consecutive lines.
+        // They're labelled facts, not prose — keep them one per line instead
+        // of letting them run together into a paragraph.
+        if (/^\*\*[^*]+:\*\*/.test(line)) {
+          flushPara(); flushList();
+          out.push(`<p>${inline(line)}</p>`);
+          continue;
+        }
+        flushList();
+        para.push(line);
+      }
+      flushPara();
+      flushList();
+      return out.join("");
+    }
+
+    function salaryHeadlineHtml(discoveryId, salaryData) {
+      const s = salaryData || {};
+      const range = formatSalaryRange(s);
+      const cur = s.currency || "USD";
+      const sym = cur === "USD" ? "$" : `${cur} `;
+      const target = typeof s.mid === "number" ? `${sym}${s.mid.toLocaleString()}` : null;
+      const when = s.fetched_at ? fmtShortDate(s.fetched_at) : "";
+      return `
+        <div class="salary-headline">
+          ${range ? `<span class="salary-range">${escapeHtml(range)}</span>` : ""}
+          ${target ? `<span>Target ask <strong>${escapeHtml(target)}</strong></span>` : ""}
+          ${s.confidence ? `<span>${escapeHtml(String(s.confidence))} confidence</span>` : ""}
+          ${when ? `<span>Pulled ${escapeHtml(when)}</span>` : ""}
+          <button class="refresh-btn" data-salary-refresh="${discoveryId}">Refresh</button>
+        </div>`;
+    }
+
+    async function openSalaryModal(discoveryId, heading, salaryData) {
+      const backdrop = document.getElementById("salary-modal");
+      document.getElementById("salary-title").textContent = heading || "Salary intel";
+      document.getElementById("salary-body").innerHTML =
+        `<div class="state"><div class="glyph">·</div>Opening the intel…</div>`;
+      backdrop.classList.add("show");
+      backdrop.setAttribute("aria-hidden", "false");
+      try {
+        const r = await fetch(`/api/offerings/${discoveryId}/salary_intel.md`);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const text = await r.text();
+        document.getElementById("salary-body").innerHTML =
+          salaryHeadlineHtml(discoveryId, salaryData) +
+          `<div class="salary-doc">${renderSalaryMarkdown(text)}</div>`;
+      } catch (e) {
+        document.getElementById("salary-body").innerHTML =
+          `<div class="state"><div class="glyph">·</div>Couldn't load the salary intel. ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function closeSalaryModal() {
+      const backdrop = document.getElementById("salary-modal");
       backdrop.classList.remove("show");
       backdrop.setAttribute("aria-hidden", "true");
     }
@@ -3785,6 +3989,11 @@
       // the linked discovery to know which company to look up.
       const contactsBtn = contactsButtonHtml(a, a.discovery_id);
 
+      // Research done before applying stays readable after — the dossier and
+      // the salary intel are the two things worth re-reading at interview time.
+      const dossierBtn = dossierButtonHtml(a, a.discovery_id);
+      const salaryBtn = salaryButtonHtml(a, a.discovery_id);
+
       const linkBadge = a.discovery_id != null
         ? `<span class="badge" title="Linked to discovery">#${a.discovery_id}</span>`
         : "";
@@ -3804,8 +4013,10 @@
           </div>
           <div class="actions">
             ${posting}
+            ${dossierBtn}
             ${folderBtn}
             ${contactsBtn}
+            ${salaryBtn}
             ${statusSelect}
           </div>
         </article>
@@ -4591,11 +4802,11 @@ judging happens without a separate confirm.`;
       window.open(`/api/offerings/${id}/${filename}`, "_blank", "noopener");
     }
 
-    async function fetchSalary(id, cardEl) {
-      const btn = cardEl.querySelector(".salary-btn");
-      if (!btn) return;
-      btn.disabled = true;
-      // Keep the $ visible; just dim it. The toast carries the progress message.
+    // Runs the (slow, paid) lookup, then opens the result rather than
+    // flashing it past in a toast. `btn` is whichever control started it —
+    // a card's $ button, or the Refresh inside an open modal.
+    async function fetchSalary(id, btn, heading) {
+      if (btn) btn.disabled = true;
       showToast(`Pulling salary intel for #${id} — usually 20-40 seconds.`);
 
       try {
@@ -4608,14 +4819,14 @@ judging happens without a separate confirm.`;
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
 
         const s = data.salary || {};
-        const cur = s.currency || "USD";
-        const sym = cur === "USD" ? "$" : `${cur} `;
-        const fmt = n => (typeof n === "number" ? `${sym}${n.toLocaleString()}` : "—");
-        const conf = (s.confidence || "—").toString();
-        showToast(`#${id}: ${fmt(s.low)}–${fmt(s.high)} · target ${fmt(s.mid)} · ${conf}. Saved.`);
+        showToast(`Salary intel for #${id} saved.`);
         renderList(data.ready || []);
+        // Applied cards read the same intel, and their list isn't in the
+        // POST response — reload it so its button picks up the range.
+        loadApplications();
+        openSalaryModal(id, heading, s);
       } catch (e) {
-        btn.disabled = false;
+        if (btn) btn.disabled = false;
         showToast("Couldn't fetch salary: " + e.message, true);
       }
     }
@@ -4925,20 +5136,34 @@ judging happens without a separate confirm.`;
         return;
       }
 
-      // Salary intel
+      // Salary intel — the $ runs the lookup, the range opens what it found
       const salaryBtn = ev.target.closest(".salary-btn");
       if (salaryBtn && !salaryBtn.disabled) {
         const card = salaryBtn.closest(".card");
         const id = salaryBtn.getAttribute("data-id");
-        if (id && card) fetchSalary(id, card);
+        if (!id) return;
+        const heading = salaryCardHeading(card);
+        if (salaryBtn.classList.contains("has-it")) {
+          openSalaryModal(id, heading, SALARY_BY_ID[id]);
+        } else {
+          fetchSalary(id, salaryBtn, heading);
+        }
         return;
       }
 
-      // Salary badge — open the full intel markdown in a new tab
-      const salaryBadge = ev.target.closest(".salary-badge");
-      if (salaryBadge) {
-        const id = salaryBadge.getAttribute("data-id");
-        if (id) window.open(`/api/offerings/${id}/salary_intel.md`, "_blank", "noopener");
+      // Refresh, from inside the open intel
+      const salaryRefresh = ev.target.closest("[data-salary-refresh]");
+      if (salaryRefresh && !salaryRefresh.disabled) {
+        fetchSalary(
+          salaryRefresh.getAttribute("data-salary-refresh"),
+          salaryRefresh,
+          document.getElementById("salary-title").textContent
+        );
+        return;
+      }
+
+      if (ev.target.closest("#close-salary-btn") || ev.target.id === "salary-modal") {
+        closeSalaryModal();
         return;
       }
 
@@ -5001,6 +5226,11 @@ judging happens without a separate confirm.`;
         const modal = document.getElementById("charts-modal");
         if (modal && modal.classList.contains("show")) {
           closeChartsModal();
+          return;
+        }
+        const salaryModal = document.getElementById("salary-modal");
+        if (salaryModal && salaryModal.classList.contains("show")) {
+          closeSalaryModal();
           return;
         }
       }

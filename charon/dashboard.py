@@ -788,6 +788,7 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
     from datetime import datetime, timezone
     from charon.contacts import CONTACTS_FILENAME
     from charon.db import get_applications, get_connection
+    from charon.salary import SALARY_FILENAME
 
     apps = get_applications()
     if not apps:
@@ -797,7 +798,7 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, company, role, offerings_path FROM discoveries "
+            "SELECT id, company, role, offerings_path, salary_data FROM discoveries "
             "WHERE offerings_path IS NOT NULL OR screened_status = 'applied'"
         ).fetchall()
     finally:
@@ -808,6 +809,7 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
         by_key[key] = {
             "discovery_id": r["id"],
             "offerings_path": r["offerings_path"],
+            "salary_data": r["salary_data"],
         }
 
     now = datetime.now(timezone.utc)
@@ -822,11 +824,16 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
         has_contacts = False
         has_resume = False
         has_letter = False
+        has_salary = False
         if offerings_path:
             try:
                 has_contacts = (Path(offerings_path) / CONTACTS_FILENAME).exists()
             except OSError:
                 has_contacts = False
+            try:
+                has_salary = (Path(offerings_path) / SALARY_FILENAME).exists()
+            except OSError:
+                has_salary = False
             has_resume = _offering_has(offerings_path, "resume")
             has_letter = _offering_has(offerings_path, "cover_letter")
 
@@ -879,6 +886,8 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
             "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
             "has_letter": has_letter,
             **_letter_flags(offerings_path if has_letter else None),
+            "has_salary": has_salary,
+            "salary_data": _parse_salary_data(link.get("salary_data")),
             "is_archived": is_archived,
         })
     dossiers = _dossier_index()
