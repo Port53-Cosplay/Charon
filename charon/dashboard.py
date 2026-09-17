@@ -2415,11 +2415,16 @@ def _salary_lookup(discovery_id: int) -> dict[str, Any]:
         "posted_range": result.get("posted_range"),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
+    # The lookup creates the offerings folder when the row doesn't have one
+    # yet (salary intel doesn't wait for prepped materials). Record it so the
+    # file endpoint can serve the .md — COALESCE so a real forge path wins.
+    folder = str(Path(result["path"]).parent) if result.get("path") else None
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE discoveries SET salary_data = ? WHERE id = ?",
-            (json.dumps(cached), discovery_id),
+            "UPDATE discoveries SET salary_data = ?, "
+            "offerings_path = COALESCE(NULLIF(offerings_path, ''), ?) WHERE id = ?",
+            (json.dumps(cached), folder, discovery_id),
         )
         conn.commit()
     finally:

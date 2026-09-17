@@ -164,33 +164,44 @@ def suggest_salary_for_discovery(discovery_id: int) -> dict[str, Any]:
     """Run the web-search salary lookup for a discovery and persist
     the result to its offerings folder.
 
+    Knowing what a posting pays is useful *before* deciding to apply, so
+    this doesn't wait for materials to be prepped — if the discovery has
+    no offerings folder yet, it creates the one forge would have used.
+    Forge and petition later write into that same folder.
+
     Returns a summary dict with the file path and the structured fields
     (low/mid/high/confidence). Raises SalaryError on prerequisite
-    failures (missing discovery, missing offerings folder).
+    failures (missing discovery, unwritable folder).
     """
     from charon.ai import AIError, query_claude_web_search_json
     from charon.db import get_discovery
     from charon.profile import load_profile
-    from charon.tailor import load_resume_text
+    from charon.tailor import load_resume_text, offerings_folder
 
     discovery = get_discovery(discovery_id)
     if discovery is None:
         raise SalaryError(f"No discovery with id {discovery_id}.")
 
-    folder_str = discovery.get("offerings_path")
-    if not folder_str:
-        raise SalaryError(
-            f"No offerings folder for #{discovery_id}. "
-            f"Run `charon provision --id {discovery_id}` first."
-        )
-    folder = Path(folder_str)
-    if not folder.exists():
-        raise SalaryError(f"Offerings folder missing on disk: {folder}")
-
     try:
         profile = load_profile()
     except Exception as e:  # noqa: BLE001
         raise SalaryError(f"Profile error: {e}") from e
+
+    folder_str = discovery.get("offerings_path")
+    if folder_str:
+        folder = Path(folder_str)
+    else:
+        from charon.tailor import DEFAULT_OFFERINGS_DIR
+
+        forge_cfg = (profile or {}).get("forge") or {}
+        folder = offerings_folder(
+            discovery,
+            base_dir=forge_cfg.get("offerings_dir", DEFAULT_OFFERINGS_DIR),
+        )
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise SalaryError(f"Can't create the offerings folder {folder}: {e}") from e
 
     resume_text = ""
     resume_path = (profile or {}).get("resume_path", "")
