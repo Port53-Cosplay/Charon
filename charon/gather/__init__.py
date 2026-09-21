@@ -26,6 +26,7 @@ from charon.db import (
     add_discovery,
     discovery_exists,
     get_applied_companies,
+    touch_discoveries,
 )
 
 
@@ -308,6 +309,10 @@ def gather_employer(
 
     summary["fetched"] = len(jobs)
 
+    # Postings we've seen before: collected here and recorded in one batch
+    # below, so "this req is still live" survives the run.
+    still_listed: list[str] = []
+
     for job in jobs:
         company = job.get("company") or name
         if company.lower() in skip_set:
@@ -344,6 +349,10 @@ def gather_employer(
             summary["new"] += 1
         else:
             summary["dupes"] += 1
+            still_listed.append(dedupe_hash)
+
+    if still_listed:
+        touch_discoveries(still_listed)
 
     return summary
 

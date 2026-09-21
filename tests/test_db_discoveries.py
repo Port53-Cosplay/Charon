@@ -1,8 +1,11 @@
 """Tests for the discoveries table CRUD helpers."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from charon.db import (
+    MIGRATION_BACKFILLS,
     add_application,
     add_discovery,
     discovery_exists,
@@ -15,6 +18,7 @@ from charon.db import (
     get_enrichable_discoveries,
     get_expirable_discoveries,
     get_unenriched_discoveries,
+    touch_discoveries,
     update_application_status,
     update_discovery_judgement,
 )
@@ -56,6 +60,129 @@ class TestAddDiscovery:
         a = _seed_discovery(dedupe_hash="hash-A")
         b = _seed_discovery(dedupe_hash="hash-B")
         assert a is not None and b is not None and a != b
+
+
+def _backdate_sighting(discovery_id, days):
+    """Pretend the row was discovered and last seen `days` days ago."""
+    stamp = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE discoveries SET discovered_at = ?, last_seen_at = ? WHERE id = ?",
+            (stamp, stamp, discovery_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _sighting(discovery_id):
+    row = get_discovery(discovery_id)
+    return row["seen_count"], row["last_seen_at"]
+
+
+class TestSightingTracking:
+    """How long a req stays live is the strongest ghost-job tell, so a
+    posting Charon re-sees is recorded rather than dropped."""
+
+    def test_new_row_starts_at_one_sighting(self):
+        new_id = _seed_discovery()
+        count, last_seen = _sighting(new_id)
+        assert count == 1
+        assert last_seen is not None
+        assert last_seen == get_discovery(new_id)["discovered_at"]
+
+    def test_re_adding_does_not_itself_record_a_sighting(self):
+        # add_discovery stays insert-only; gather batches the touches.
+        new_id = _seed_discovery()
+        _backdate_sighting(new_id, 3)
+        assert _seed_discovery() is None
+
+        count, _ = _sighting(new_id)
+        assert count == 1
+
+    def test_sighting_on_a_later_day_counts(self):
+        new_id = _seed_discovery()
+        _backdate_sighting(new_id, 3)
+
+        assert touch_discoveries(["hash-12345"]) == 1
+        count, last_seen = _sighting(new_id)
+        assert count == 2
+        assert last_seen > get_discovery(new_id)["discovered_at"]
+
+    def test_same_day_sightings_do_not_inflate_the_count(self):
+        new_id = _seed_discovery()
+        touch_discoveries(["hash-12345"])
+        touch_discoveries(["hash-12345"])
+
+        count, _ = _sighting(new_id)
+        assert count == 1
+
+    def test_same_day_sighting_still_moves_last_seen(self):
+        new_id = _seed_discovery()
+        _, first_seen = _sighting(new_id)
+        touch_discoveries(["hash-12345"])
+
+        _, later = _sighting(new_id)
+        assert later >= first_seen
+
+    def test_duplicate_hashes_in_one_batch_count_once(self):
+        new_id = _seed_discovery()
+        _backdate_sighting(new_id, 1)
+        touch_discoveries(["hash-12345", "hash-12345", "hash-12345"])
+
+        count, _ = _sighting(new_id)
+        assert count == 2
+
+    def test_days_live_accumulate_over_separate_days(self):
+        new_id = _seed_discovery()
+        for day in (5, 4, 3, 2, 1):
+            _backdate_sighting(new_id, day)
+            touch_discoveries(["hash-12345"])
+        # discovered_at is rewritten by the backdating helper, so the count is
+        # what carries the history: one sighting per distinct day.
+        count, _ = _sighting(new_id)
+        assert count == 6
+
+    def test_touches_many_rows_in_one_call(self):
+        ids = {
+            h: _seed_discovery(dedupe_hash=h, url=f"https://example.com/{h}")
+            for h in (f"h{n}" for n in range(5))
+        }
+        for new_id in ids.values():
+            _backdate_sighting(new_id, 2)
+
+        assert touch_discoveries(list(ids)) == 5
+        assert all(_sighting(i)[0] == 2 for i in ids.values())
+
+    def test_unknown_hash_touches_nothing(self):
+        _seed_discovery()
+        assert touch_discoveries(["never-seen-this"]) == 0
+
+    def test_empty_batch_is_a_no_op(self):
+        assert touch_discoveries([]) == 0
+
+    def test_backfill_statements_fill_existing_rows(self):
+        """The migration's backfill treats an old row as seen once, when
+        it was discovered."""
+        new_id = _seed_discovery()
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE discoveries SET last_seen_at = NULL, seen_count = NULL WHERE id = ?",
+                (new_id,),
+            )
+            conn.commit()
+            for statements in MIGRATION_BACKFILLS.values():
+                for sql in statements:
+                    conn.execute(sql)
+            conn.commit()
+        finally:
+            conn.close()
+
+        row = get_discovery(new_id)
+        assert row["seen_count"] == 1
+        assert row["last_seen_at"] == row["discovered_at"]
 
 
 class TestDiscoveryQueries:

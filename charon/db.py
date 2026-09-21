@@ -126,7 +126,23 @@ MIGRATIONS = [
     "ALTER TABLE discoveries ADD COLUMN culled_at TEXT",
     "ALTER TABLE discoveries ADD COLUMN monoculture_score REAL",
     "ALTER TABLE discoveries ADD COLUMN expired_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN last_seen_at TEXT",
+    "ALTER TABLE discoveries ADD COLUMN seen_count INTEGER",
 ]
+
+
+# Data fix-ups that belong with a specific new column. They run only on the
+# gather where the ALTER actually succeeded — init_db() runs on every import,
+# and a backfill in MIGRATIONS would re-scan the whole table every time.
+MIGRATION_BACKFILLS: dict[str, tuple[str, ...]] = {
+    # Every existing row was seen at least once: when it was discovered.
+    "ALTER TABLE discoveries ADD COLUMN last_seen_at TEXT": (
+        "UPDATE discoveries SET last_seen_at = discovered_at WHERE last_seen_at IS NULL",
+    ),
+    "ALTER TABLE discoveries ADD COLUMN seen_count INTEGER": (
+        "UPDATE discoveries SET seen_count = 1 WHERE seen_count IS NULL",
+    ),
+}
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -135,7 +151,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         try:
             conn.execute(migration)
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            continue  # Column already exists — its backfill ran with it
+        for followup in MIGRATION_BACKFILLS.get(migration, ()):
+            conn.execute(followup)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -505,14 +523,20 @@ def add_discovery(
     tier: str | None = None,
     category: str | None = None,
 ) -> int | None:
-    """Insert a discovery. Returns the row ID, or None if dedupe_hash already exists."""
+    """Insert a discovery. Returns the row ID, or None if dedupe_hash already exists.
+
+    A new row starts its sighting record: seen once, today. Re-sightings of
+    an existing posting are recorded in batch by ``touch_discoveries``.
+    """
     conn = get_connection()
+    now = datetime.now(timezone.utc).isoformat()
     try:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO discoveries "
             "(ats, slug, company, role, location, url, description, posted_at, "
-            "discovered_at, dedupe_hash, tier, category, screened_status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+            "discovered_at, dedupe_hash, tier, category, screened_status, "
+            "last_seen_at, seen_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, 1)",
             (
                 ats,
                 slug,
@@ -522,16 +546,58 @@ def add_discovery(
                 url,
                 description,
                 posted_at,
-                datetime.now(timezone.utc).isoformat(),
+                now,
                 dedupe_hash,
                 tier,
                 category,
+                now,
             ),
         )
         conn.commit()
         return cursor.lastrowid if cursor.rowcount > 0 else None
     finally:
         conn.close()
+
+
+# Chunked so the IN clause stays well under SQLite's variable limit.
+_TOUCH_CHUNK = 400
+
+
+def touch_discoveries(dedupe_hashes: list[str]) -> int:
+    """Record that these postings are still listed. Returns rows touched.
+
+    How long a req stays live is the strongest ghost-job signal there is, and
+    gather already learns it every night — it just used to throw the
+    observation away as a "dupe". ``seen_count`` counts DISTINCT DAYS a
+    posting was seen, so a second gather in one day (or a company reachable
+    under two board slugs) moves ``last_seen_at`` without inflating the count.
+
+    Batched on purpose: a nightly gather re-sees ~100k postings, and one
+    commit per posting would mean ~100k fsyncs.
+    """
+    if not dedupe_hashes:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    unique = list(dict.fromkeys(dedupe_hashes))
+    touched = 0
+    conn = get_connection()
+    try:
+        for start in range(0, len(unique), _TOUCH_CHUNK):
+            chunk = unique[start:start + _TOUCH_CHUNK]
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = conn.execute(
+                "UPDATE discoveries SET last_seen_at = ?, seen_count = "
+                "  COALESCE(seen_count, 1) + (CASE WHEN "
+                "    date(COALESCE(last_seen_at, discovered_at)) < date(?) "
+                "  THEN 1 ELSE 0 END) "
+                f"WHERE dedupe_hash IN ({placeholders})",
+                [now, now] + chunk,
+            )
+            touched += cursor.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return touched
 
 
 def discovery_exists(dedupe_hash: str) -> bool:

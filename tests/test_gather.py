@@ -1,13 +1,14 @@
 """Tests for the gather package — registry, dedupe, orchestrator, Greenhouse adapter."""
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 import pytest
 
 from charon import gather
-from charon.db import add_application, get_discoveries
+from charon.db import add_application, get_connection, get_discoveries
 from charon.gather import (
     GatherError,
     gather_employer,
@@ -262,6 +263,45 @@ class TestGatherEmployer:
         assert first["new"] == 3
         assert second["new"] == 0
         assert second["dupes"] == 3
+
+    def test_second_run_records_the_postings_as_still_listed(self, monkeypatch):
+        """A re-seen posting is evidence the req is still open, so the second
+        gather updates last_seen_at instead of discarding the sighting."""
+        payload = json.loads((FIXTURES / "greenhouse_sample.json").read_text(encoding="utf-8"))
+
+        def fake_fetch(slug, *, entry=None, client=None):
+            return [
+                {
+                    "company": "Example Co",
+                    "role": j["title"],
+                    "url": j["absolute_url"],
+                    "description": "",
+                    "posted_at": j.get("updated_at"),
+                }
+                for j in payload["jobs"]
+            ]
+        monkeypatch.setattr(greenhouse, "fetch_jobs", fake_fetch)
+        entry = {"slug": "example", "name": "Example Co"}
+
+        gather_employer("greenhouse", entry)
+        # Backdate every row so the second gather lands on a later day.
+        conn = get_connection()
+        try:
+            stamp = (datetime.now(timezone.utc) - timedelta(days=9)).isoformat()
+            conn.execute(
+                "UPDATE discoveries SET discovered_at = ?, last_seen_at = ? WHERE slug = 'example'",
+                (stamp, stamp),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        gather_employer("greenhouse", entry)
+
+        rows = get_discoveries(slug="example")
+        assert len(rows) == 3
+        assert all(r["seen_count"] == 2 for r in rows)
+        assert all(r["last_seen_at"] > r["discovered_at"] for r in rows)
 
     def test_dry_run_does_not_write(self, monkeypatch):
         def fake_fetch(slug, *, entry=None, client=None):
