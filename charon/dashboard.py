@@ -780,10 +780,11 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
     match a discovery just won't get the offering-side actions.
     Logged as a §11.5 candidate for a real FK later.
 
-    By default, applications that have been in a terminal status
-    (stranded / rejected / offered) for ``ARCHIVE_DAYS`` or more days
-    are filtered out — they're not deleted, just hidden so the active
-    view stays focused. Pass include_archived=True to see everything.
+    By default, applications in a terminal status (stranded / rejected /
+    offered) drop out of the view after ``ARCHIVE_DAYS``, counted from
+    updated_at for rejected/offered and from applied_at for stranded —
+    they're not deleted, just hidden so the active view stays focused.
+    Pass include_archived=True to see everything.
     """
     from datetime import datetime, timezone
     from charon.contacts import CONTACTS_FILENAME
@@ -848,19 +849,27 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
             except (ValueError, AttributeError):
                 pass
 
-        # Archive filter: hide terminal-status applications whose updated_at
-        # is older than ARCHIVE_DAYS. Stays in the DB; just falls out of
-        # the dashboard's default view.
+        # Archive filter: hide terminal-status applications once ARCHIVE_DAYS
+        # have passed. Stays in the DB; just falls out of the default view.
+        #
+        # Which date that counts from depends on the status. Rejected and
+        # offered are events the company caused on a day she recorded, so
+        # updated_at is right. Stranded is the opposite — nothing happened.
+        # The silence started when she applied, and the sweep flipping the
+        # row months later shouldn't restart the clock, or an application
+        # that went quiet in June sticks around for another 45 days because
+        # Charon only just admitted it.
         status = app.get("status")
         is_archived = False
         if status in TERMINAL_STATUSES_FOR_ARCHIVE:
-            updated_at = app.get("updated_at")
-            if updated_at:
+            anchor = applied_at if status == "ghosted" else None
+            anchor = anchor or app.get("updated_at")
+            if anchor:
                 try:
-                    updated_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
-                    if updated_dt.tzinfo is None:
-                        updated_dt = updated_dt.replace(tzinfo=timezone.utc)
-                    if (now - updated_dt).days >= ARCHIVE_DAYS:
+                    anchor_dt = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+                    if anchor_dt.tzinfo is None:
+                        anchor_dt = anchor_dt.replace(tzinfo=timezone.utc)
+                    if (now - anchor_dt).days >= ARCHIVE_DAYS:
                         is_archived = True
                 except (ValueError, AttributeError):
                     pass
