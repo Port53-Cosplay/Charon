@@ -585,7 +585,8 @@ STATS_OVERRIDES: dict[str, int] = {
     "judged_sonnet": 2315,
     "unjudged": 430,
     "judgeable": 64,
-    "awaiting_enrich": 23,
+    # Nonzero shows as "N stuck" on the action strip; the demo never has any.
+    "awaiting_enrich": 0,
     "cullable": 212,
     "refused": 17196,
 }

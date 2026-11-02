@@ -107,4 +107,5 @@ def test_stats_overrides_name_real_keys(built):
     _, _, data = built
     stats = data["opening"]["stats"]
     assert stats["gathered"] == 18412
+    assert stats["awaiting_enrich"] == 0  # nonzero reads "N stuck" on the strip
     assert {s["key"] for s in stats["funnel"]} >= {"gathered", "judged", "ready"}

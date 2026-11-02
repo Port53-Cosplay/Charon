@@ -254,13 +254,15 @@
     } else if (f.phase === "enrich") {
       const en = f.enrich;
       en.processed = Math.min(en.limit, en.processed + Math.ceil(en.limit / 2));
+      // Every description fetches in the demo: a failure would surface as
+      // "N stuck" on the action strip.
       en.closed = Math.round(en.processed * 0.04);
-      en.failed = Math.round(en.processed * 0.12);
+      en.failed = 0;
       en.paid = Math.round(en.processed * 0.08);
-      en.recovered = en.processed - en.closed - en.failed;
+      en.recovered = en.processed - en.closed;
       if (en.processed >= en.limit) {
         st.judgeable += en.recovered;
-        st.awaiting_enrich = en.failed;
+        st.awaiting_enrich = 0;
         parkAtGate();
       }
     } else if (f.phase === "judge") {
