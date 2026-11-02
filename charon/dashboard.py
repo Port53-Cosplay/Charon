@@ -146,6 +146,9 @@ def _attach_research(summary: dict[str, Any], company: str | None,
     summary["dossier_building"] = _research_job_running("dossier", company)
     summary["company_contacts"] = contacts.get(key)
     summary["company_contacts_building"] = _research_job_running("contacts", company)
+    summary["prep_building"] = (
+        isinstance(summary.get("id"), int) and _prep_job_running(summary["id"])
+    )
     return summary
 
 
@@ -220,13 +223,9 @@ def _run_research(kind: str, company: str, role: str | None) -> int:
             pass  # the history row is the record; the markdown copy is a convenience
         return history_id
 
-    from charon.contacts import find_company_contacts
+    from charon.prep import search_contacts
 
-    result = find_company_contacts(company, profile)
-    return save_history(
-        "contacts", "company", company, float(len(result.get("contacts") or [])),
-        result, company=company,
-    )
+    return search_contacts(company, profile)
 
 
 def _research_worker(kind: str, company: str, role: str | None) -> None:
@@ -894,6 +893,7 @@ def _applications(include_archived: bool = False) -> tuple[list[dict[str, Any]],
             "has_resume": has_resume,
             "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
             "has_letter": has_letter,
+            "letter_file": _offering_file(offerings_path, "cover_letter") if offerings_path else None,
             **_letter_flags(offerings_path if has_letter else None),
             "has_salary": has_salary,
             "salary_data": _parse_salary_data(link.get("salary_data")),
@@ -2163,6 +2163,7 @@ def _summarize_discovery(
         "has_resume": has_resume,
         "resume_file": _offering_file(offerings_path, "resume") if offerings_path else None,
         "has_letter": has_letter,
+        "letter_file": _offering_file(offerings_path, "cover_letter") if offerings_path else None,
         **_letter_flags(offerings_path if has_letter else None),
         "salary_data": _parse_salary_data(r.get("salary_data")),
         # Detail-view fields — eager so click-to-expand is instant, but the
@@ -2315,79 +2316,111 @@ def _reject_discovery(discovery_id: int, reason: str | None) -> dict[str, Any]:
 
 
 def _provision_discovery(discovery_id: int) -> dict[str, Any]:
-    """Bridge: forge + petition + render for a discovery. Blocks ~30s.
+    """Bridge: write the blank letter template for a discovery.
 
-    Mirrors `charon provision --id N` step-for-step (without the click
-    layer). Returns a summary dict including any error and the rendered
-    artifact paths.
+    Same code as `charon provision` (charon.prep). Free and fast; contacts,
+    which address the letter, are searched first by _start_prep when the
+    company has none.
     """
-    from charon.db import (
-        get_discovery,
-        update_discovery_forged,
-        update_discovery_petitioned,
-    )
-    from charon.letter import petition_discovery
+    from charon.db import get_discovery
+    from charon.prep import prep_discovery
     from charon.profile import load_profile
-    from charon.tailor import forge_discovery
 
     discovery = get_discovery(discovery_id)
     if discovery is None:
         raise DashboardError(f"No discovery with id {discovery_id}.")
-
     try:
         profile = load_profile()
     except Exception as e:  # noqa: BLE001
         raise DashboardError(f"Profile error: {e}") from e
 
-    summary: dict[str, Any] = {"id": discovery_id, "errors": []}
-
-    # Forge resume
-    try:
-        forge_result = forge_discovery(discovery, profile=profile)
-    except Exception as e:  # noqa: BLE001
-        forge_result = {"error": f"{type(e).__name__}: {e}"}
-    if forge_result.get("offerings_path") and not forge_result.get("error"):
-        update_discovery_forged(
-            discovery_id, offerings_path=forge_result["offerings_path"]
-        )
-    elif forge_result.get("error"):
-        summary["errors"].append(f"forge: {forge_result['error']}")
-
-    # Petition cover letter (independent of forge)
-    try:
-        petition_result = petition_discovery(discovery, profile=profile)
-    except Exception as e:  # noqa: BLE001
-        petition_result = {"error": f"{type(e).__name__}: {e}"}
-    if petition_result.get("letter_path") and not petition_result.get("error"):
-        update_discovery_petitioned(
-            discovery_id, offerings_path=petition_result.get("offerings_path")
-        )
-    elif petition_result.get("error"):
-        summary["errors"].append(f"petition: {petition_result['error']}")
-
-    # Auto-render .html alongside .md (mirrors provision_cmd's tail)
-    if (
-        (forge_result.get("offerings_path") and not forge_result.get("error"))
-        or (petition_result.get("letter_path") and not petition_result.get("error"))
-    ):
-        from charon.render import RenderError, render_offering
-        try:
-            r = render_offering(discovery_id)
-            summary["resume_path"] = r.get("resume_path")
-            summary["cover_letter_path"] = r.get("cover_letter_path")
-            summary["errors"].extend(r.get("errors") or [])
-        except RenderError as e:
-            summary["errors"].append(f"render: {e}")
-        except Exception as e:  # noqa: BLE001
-            summary["errors"].append(f"render: {type(e).__name__}: {e}")
-
-    summary["offerings_path"] = (
-        forge_result.get("offerings_path") or petition_result.get("offerings_path")
-    )
-    summary["ok"] = bool(summary["offerings_path"]) and not (
-        forge_result.get("error") and petition_result.get("error")
-    )
+    summary = prep_discovery(discovery, profile)
+    summary["ok"] = bool(summary.get("letter_path"))
     return summary
+
+
+# ── Prep: contacts first (if the company has none), then the letter ──
+# The contacts search outlasts Cloudflare's 100-second request limit, so when
+# one is needed the whole prep runs on a thread and the page polls. Without
+# one, prep is instant and answers inline.
+
+PREP_CONTACTS_WAIT_SECONDS = 15 * 60
+
+_prep_lock = threading.Lock()
+_prep_jobs: dict[int, dict[str, Any]] = {}
+
+
+def _prep_job_running(discovery_id: int) -> bool:
+    with _prep_lock:
+        return bool((_prep_jobs.get(discovery_id) or {}).get("running"))
+
+
+def _prep_job_snapshot(discovery_id: int) -> dict[str, Any]:
+    with _prep_lock:
+        job = dict(_prep_jobs.get(discovery_id) or {})
+    job.setdefault("running", False)
+    return job
+
+
+def _prep_worker(discovery_id: int, company: str) -> None:
+    import time
+
+    summary: dict[str, Any] | None = None
+    error: str | None = None
+    contacts_error: str | None = None
+    try:
+        deadline = time.monotonic() + PREP_CONTACTS_WAIT_SECONDS
+        while _research_job_running("contacts", company) and time.monotonic() < deadline:
+            time.sleep(3)
+        contacts_error = _research_job_snapshot("contacts", company).get("error")
+        # A failed search still gets a letter, addressed to the team.
+        summary = _provision_discovery(discovery_id)
+        if contacts_error:
+            summary.setdefault("errors", []).insert(0, f"contacts: {contacts_error}")
+    except Exception as e:  # noqa: BLE001 — surface, don't kill the server thread
+        error = f"{type(e).__name__}: {e}"
+    finally:
+        with _prep_lock:
+            _prep_jobs[discovery_id] = {
+                "running": False,
+                "company": company,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error": error,
+                "summary": summary,
+            }
+
+
+def _start_prep(discovery_id: int) -> dict[str, Any]:
+    """Prep a Ready card. Returns {"pending": False, "summary"} when it ran
+    inline, or {"pending": True, "job"} when a contacts search runs first."""
+    from charon.db import get_discovery
+
+    discovery = get_discovery(discovery_id)
+    if discovery is None:
+        raise DashboardError(f"No discovery with id {discovery_id}.")
+    company = (discovery.get("company") or "").strip()
+    if _prep_job_running(discovery_id):
+        raise DashboardError(f"#{discovery_id} is already being prepped.")
+
+    needs_search = bool(company) and _company_key(company) not in _contacts_index()
+    if not needs_search:
+        return {"pending": False, "summary": _provision_discovery(discovery_id)}
+
+    if not _research_job_running("contacts", company):
+        _start_research("contacts", discovery_id)
+    with _prep_lock:
+        _prep_jobs[discovery_id] = {
+            "running": True,
+            "company": company,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "error": None,
+            "summary": None,
+        }
+    threading.Thread(
+        target=_prep_worker, args=(discovery_id, company), daemon=True
+    ).start()
+    return {"pending": True, "job": _prep_job_snapshot(discovery_id)}
 
 
 def _find_contacts(discovery_id: int) -> dict[str, Any]:
@@ -2481,6 +2514,7 @@ def _sirens_polish(payload: dict[str, Any]) -> dict[str, Any]:
 _OFFERING_ALLOWED_FILES = {
     "cover_letter.html",
     "cover_letter.md",
+    "cover_letter.docx",
     "resume.html",
     "resume.md",
     "resume.docx",
@@ -2631,6 +2665,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_status(HTTPStatus.BAD_REQUEST, "company is required")
                 return
             self._serve_json({"job": _research_job_snapshot(kind, company)})
+            return
+        if path == "/api/prep/status":
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            try:
+                discovery_id = int(qs.get("discovery_id", [""])[0])
+            except ValueError:
+                self._serve_status(HTTPStatus.BAD_REQUEST, "discovery_id must be an integer")
+                return
+            self._serve_json({"job": _prep_job_snapshot(discovery_id)})
             return
         if path.startswith("/api/dossier/") or path.startswith("/api/company-contacts/"):
             is_dossier = path.startswith("/api/dossier/")
@@ -2904,10 +2947,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_status(HTTPStatus.BAD_REQUEST, "discovery id must be an integer")
                 return
             try:
-                summary = _provision_discovery(discovery_id)
+                started = _start_prep(discovery_id)
             except DashboardError as e:
                 self._serve_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
                 return
+            if started["pending"]:
+                self._serve_json({"ok": True, "pending": True, "job": started["job"]})
+                return
+            summary = started["summary"]
             self._serve_json(
                 {"ok": summary.get("ok", False), "summary": summary, "ready": _ready_discoveries()}
             )
@@ -3281,7 +3328,11 @@ class _Handler(BaseHTTPRequestHandler):
         if filename.endswith(".docx"):
             import re
 
-            kind = "Resume" if filename.startswith("resume") else "Document"
+            kind = (
+                "Resume" if filename.startswith("resume")
+                else "Cover Letter" if filename.startswith("cover_letter")
+                else "Document"
+            )
             safe = re.sub(r'[\\/:*?"<>|]+', "-", _pdf_friendly_title(discovery, kind))
             disposition = f'attachment; filename="{safe}.docx"'
         else:

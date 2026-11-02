@@ -3013,25 +3013,23 @@ def _print_petition_result(result: dict, terse: bool = False) -> None:
 
 
 @cli.command("provision")
-@click.option("--id", "discovery_id", type=int, help="Provision a single discovery (forge + petition).")
+@click.option("--id", "discovery_id", type=int, help="Prep a single discovery's letter template.")
 @click.option("--ready", "provision_ready", is_flag=True,
-              help="Provision all ready discoveries that are missing materials.")
+              help="Prep every ready discovery that has no letter template yet.")
 @click.option("--ats", help="Limit batch to one ATS.")
 @click.option("--limit", type=int, default=None, help="Cap how many discoveries to process.")
-@click.option("--force", is_flag=True, help="Overwrite existing materials.")
-@click.option("--model", "model_override", default=None,
-              help="Override forge.model for this run.")
-@click.option("--yes", is_flag=True, help="Skip the confirmation prompt for large batches.")
+@click.option("--force", is_flag=True,
+              help="Make a fresh template; the old one is kept as cover_letter.previous-*.docx.")
+@click.option("--yes", is_flag=True, help="Run any needed contacts searches without asking.")
 def provision_cmd(
     discovery_id: int | None,
     provision_ready: bool,
     ats: str | None,
     limit: int | None,
     force: bool,
-    model_override: str | None,
     yes: bool,
 ) -> None:
-    """Forge a resume + write a cover letter for ready discoveries. The full provisions."""
+    """Make a blank cover letter (.docx) to write yourself. Same as Prep on the portal."""
     if not discovery_id and not provision_ready:
         print_error("Provide --id <N> or --ready.")
         return
@@ -3042,131 +3040,87 @@ def provision_cmd(
         print_error(f"Profile error: {e}")
         return
 
-    if not (prof.get("resume_path") or "").strip():
-        print_error("No resume configured. Set profile.resume_path.")
-        return
+    from charon.db import get_discovery, get_ready_discoveries
+    from charon.letter_template import LETTER_FILENAME
 
-    from charon.db import (
-        get_discovery,
-        get_ready_discoveries,
-        update_discovery_forged,
-        update_discovery_petitioned,
-    )
-
-    # ── single ──────────────────────────────────────────────────
     if discovery_id is not None:
         discovery = get_discovery(discovery_id)
         if discovery is None:
             print_error(f"No discovery with id {discovery_id}.")
             return
+        targets = [discovery]
         section_header(f"PROVISION #{discovery_id}")
-        _provision_one(
-            discovery, prof, model_override, force,
-            update_discovery_forged, update_discovery_petitioned,
-        )
+    else:
+        def has_letter(d: dict) -> bool:
+            folder = d.get("offerings_path")
+            return bool(folder) and (Path(folder) / LETTER_FILENAME).exists()
+
+        targets = [
+            d for d in get_ready_discoveries(ats=ats, limit=limit)
+            if force or not has_letter(d)
+        ]
+        if not targets:
+            print_info("Nothing to prep - every ready discovery has a letter template. Use --force to remake.")
+            return
+        section_header("PROVISION BATCH")
+
+    if not _provision_contacts_first(targets, prof, yes):
+        print_info("Aborted. Nothing written.")
         return
 
-    # ── batch ───────────────────────────────────────────────────
-    if provision_ready:
-        # "Missing materials" = either forge OR petition hasn't run
-        all_ready = get_ready_discoveries(ats=ats, limit=limit)
-        if force:
-            targets = all_ready
-        else:
-            targets = [
-                d for d in all_ready
-                if not d.get("forged_at") or not d.get("petition_at")
-            ]
-        if not targets:
-            print_info(
-                "Nothing to provision - all ready discoveries already have "
-                "both materials. Use --force to regenerate."
-            )
-            return
+    print_info(f"Making {len(targets)} letter template(s)...")
+    console.print()
+    for d in targets:
+        _provision_one(d, prof, force)
 
-        if len(targets) > 20 and not yes:
-            est_low = 0.04 * len(targets)
-            est_high = 0.10 * len(targets)
-            print_warning(
-                f"About to provision {len(targets)} discoveries (forge + petition each) - "
-                f"roughly ${est_low:.2f}-${est_high:.2f} on Haiku."
-            )
-            if not click.confirm("Proceed?", default=False):
-                print_info("Aborted. Use --yes to skip this prompt.")
-                return
 
-        section_header("PROVISION BATCH")
-        print_info(f"Processing {len(targets)} discoveries (forge + petition each)...")
-        console.print()
+def _provision_contacts_first(targets: list[dict], prof: dict, yes: bool) -> bool:
+    """Search contacts for companies that have none, after asking. False = aborted."""
+    from charon.prep import has_contacts, search_contacts
 
-        for d in targets:
+    missing: list[str] = []
+    for d in targets:
+        company = (d.get("company") or "").strip()
+        if company and company not in missing and not has_contacts(company):
+            missing.append(company)
+    if not missing:
+        return True
+
+    print_warning(
+        f"No contacts on file for {len(missing)} compan{'y' if len(missing) == 1 else 'ies'}: "
+        f"{', '.join(missing)}. The letter needs someone to address."
+    )
+    print_info(
+        f"Contacts search is a paid web search, about $0.15-0.40 each "
+        f"(${0.15 * len(missing):.2f}-${0.40 * len(missing):.2f} total), a few minutes each."
+    )
+    if not yes and not click.confirm("Search now?", default=False):
+        return False
+
+    for company in missing:
+        with console.status(f"Looking for people at {company}..."):
             try:
-                _provision_one(
-                    d, prof, model_override, force,
-                    update_discovery_forged, update_discovery_petitioned,
-                )
-            except KeyboardInterrupt:
-                print_warning("Interrupted. Partial results written.")
-                return
-            console.print()
+                search_contacts(company, prof)
+            except AIError as e:
+                print_warning(f"{company}: contacts search failed ({e}). Letter goes to the team.")
+                continue
+        print_success(f"{company}: contacts saved.")
+    console.print()
+    return True
 
 
-def _provision_one(
-    discovery: dict,
-    prof: dict,
-    model_override: str | None,
-    force: bool,
-    update_forged,
-    update_petitioned,
-) -> None:
-    """Run forge + petition for a single discovery, recording each."""
-    company = discovery.get("company", "?")
-    role = discovery.get("role", "?")
-    discovery_id = discovery.get("id")
+def _provision_one(discovery: dict, prof: dict, force: bool) -> None:
+    """Write one letter template and report it."""
+    from charon.prep import prep_discovery
 
-    print_info(f"#{discovery_id} {company}: {role}")
-
-    # forge
-    try:
-        forge_result = forge_discovery(
-            discovery, profile=prof, model_override=model_override, force=force,
-        )
-    except Exception as e:
-        forge_result = {"error": f"{type(e).__name__}: {e}"}
-    _print_forge_result(forge_result, terse=True)
-    if forge_result.get("offerings_path") and not forge_result.get("error"):
-        update_forged(discovery_id, offerings_path=forge_result["offerings_path"])
-
-    # petition (independent of forge — runs even if forge errored)
-    try:
-        petition_result = petition_discovery(
-            discovery, profile=prof, model_override=model_override, force=force,
-        )
-    except Exception as e:
-        petition_result = {"error": f"{type(e).__name__}: {e}"}
-    _print_petition_result(petition_result, terse=True)
-    if petition_result.get("letter_path") and not petition_result.get("error"):
-        update_petitioned(
-            discovery_id,
-            offerings_path=petition_result.get("offerings_path"),
-        )
-
-    # Render .html alongside the .md files so "materials ready" actually
-    # means browser-ready (print-to-PDF in one step). Best-effort — render
-    # errors don't roll back forge/petition, they just surface as a warning.
-    if (
-        (forge_result.get("offerings_path") and not forge_result.get("error"))
-        or (petition_result.get("letter_path") and not petition_result.get("error"))
-    ):
-        try:
-            from charon.render import RenderError, render_offering
-            r = render_offering(discovery_id)
-            for err in r.get("errors") or []:
-                print_warning(err)
-        except RenderError as e:
-            print_warning(f"Render skipped: {e}")
-        except Exception as e:  # noqa: BLE001
-            print_warning(f"Render failed: {type(e).__name__}: {e}")
+    print_info(f"#{discovery.get('id')} {discovery.get('company', '?')}: {discovery.get('role', '?')}")
+    result = prep_discovery(discovery, prof, force=force)
+    for err in result.get("errors") or []:
+        print_error(err)
+    if result.get("skipped_reason"):
+        print_info(f"Skipped: {result['skipped_reason']} (--force to remake)")
+    elif result.get("letter_path"):
+        print_success(f"{result['greeting']}  ->  {result['letter_path']}")
 
 
 @cli.command("salary")

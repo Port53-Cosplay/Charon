@@ -2560,14 +2560,20 @@
     // Cover letter button, with a warning when the claim check left problems
     // in the saved letter (letter_check.json). flags: null = no check on
     // file, -1 = check failed, N = problems still in the letter.
-    function letterButtonHtml(id, flags, items) {
+    // A .docx is the blank template she writes herself: it downloads, and
+    // there's no claim check because nothing in it was generated.
+    function letterButtonHtml(id, flags, items, file) {
+      const f = file || "cover_letter.html";
+      if (f.endsWith(".docx")) {
+        return `<button class="open-btn open-letter-btn" data-id="${id}" data-file="${escapeHtml(f)}" title="Download the letter template to write in Word">Cover letter (.docx)</button>`;
+      }
       const base = "Open cover letter in a new tab — Ctrl+P to save as PDF";
       if (flags == null || flags === 0) {
-        return `<button class="open-btn open-letter-btn" data-id="${id}" title="${base}">Cover letter</button>`;
+        return `<button class="open-btn open-letter-btn" data-id="${id}" data-file="${escapeHtml(f)}" title="${base}">Cover letter</button>`;
       }
       const tag = flags === -1 ? "unchecked" : `${flags} to check`;
       const detail = (items || []).map(escapeHtml).join("&#10;");
-      return `<button class="open-btn open-letter-btn letter-flagged" data-id="${id}" title="Check before sending:&#10;${detail}">Cover letter <span class="check-tag">· ${tag}</span></button>`;
+      return `<button class="open-btn open-letter-btn letter-flagged" data-id="${id}" data-file="${escapeHtml(f)}" title="Check before sending:&#10;${detail}">Cover letter <span class="check-tag">· ${tag}</span></button>`;
     }
 
     // Compact rendering of {low, high, currency} -> "$100K–$130K".
@@ -2758,7 +2764,7 @@
       // folder, since a salary lookup creates one on its own.
       const hasOfferings = d.forged_at || d.petition_at || d.has_resume || d.has_letter;
       const offeringsBadge = hasOfferings
-        ? `<span class="badge" title="Forge + petition complete">materials</span>`
+        ? `<span class="badge" title="Letter template made">materials</span>`
         : "";
       const atsBadge = d.ats ? `<span class="badge">${escapeHtml(d.ats)}</span>` : "";
       const tierBadge = d.tier ? `<span class="badge">${escapeHtml(d.tier)}</span>` : "";
@@ -2790,11 +2796,11 @@
           ? resumeButtonHtml(d.id, d.resume_file)
           : "";
         const letterBtn = d.has_letter
-          ? letterButtonHtml(d.id, d.letter_flags, d.letter_flag_items)
+          ? letterButtonHtml(d.id, d.letter_flags, d.letter_flag_items, d.letter_file)
           : "";
         materialsBtn = resumeBtn + letterBtn;
       } else {
-        materialsBtn = `<button class="prep-btn" data-id="${d.id}">Prep materials</button>`;
+        materialsBtn = prepButtonHtml(d);
       }
 
       const dossierBtn = dossierButtonHtml(d, d.id);
@@ -3981,7 +3987,7 @@
           ? resumeButtonHtml(a.discovery_id, a.resume_file)
           : "";
         const letterBtn = a.has_letter
-          ? letterButtonHtml(a.discovery_id, a.letter_flags, a.letter_flag_items)
+          ? letterButtonHtml(a.discovery_id, a.letter_flags, a.letter_flag_items, a.letter_file)
           : "";
         folderBtn = resumeBtn + letterBtn;
       }
@@ -4752,12 +4758,39 @@ judging happens without a separate confirm.`;
       }
     }
 
+    // Prep writes a blank letter template (.docx) she fills in herself,
+    // addressed from the company's contacts. Same code as `charon provision`. With no
+    // contacts on file it searches first (paid, a few minutes) and the
+    // server runs the rest on its own thread, so prep survives a reload.
+    const prepPolls = new Set();
+
+    function prepButtonHtml(d) {
+      const company = escapeHtml(d.company || "");
+      if (d.prep_building) {
+        pollPrep(d.id, d.company || "");
+        return `<button class="prep-btn" data-id="${d.id}" data-company="${company}" disabled><span class="prep-status">Preparing<span class="dots"></span></span></button>`;
+      }
+      const needs = (d.company_contacts || d.company_contacts_building) ? "" : " data-needs-contacts=\"1\"";
+      const title = needs
+        ? "Make a blank cover letter to write in Word. Searches for contacts first so it has someone to address."
+        : "Make a blank cover letter to write in Word";
+      return `<button class="prep-btn" data-id="${d.id}" data-company="${company}"${needs} title="${title}">Prep</button>`;
+    }
+
     async function prepMaterials(id, cardEl) {
       const btn = cardEl.querySelector(".prep-btn");
       if (!btn) return;
+      const company = btn.getAttribute("data-company") || "this company";
+      if (btn.hasAttribute("data-needs-contacts") && !window.confirm(
+        `Prep needs contacts at ${company} first, so the letter has someone to address.
+
+` +
+        "That's a paid web search (about $0.15–0.40) and takes a few minutes. " +
+        "One search covers every posting from this company. Go?"
+      )) return;
+
       btn.disabled = true;
       btn.innerHTML = `<span class="prep-status">Preparing<span class="dots"></span></span>`;
-      showToast(`Preparing materials for #${id} — this takes about 30 seconds.`);
 
       try {
         const r = await fetch(`/api/provision/${id}`, {
@@ -4767,20 +4800,56 @@ judging happens without a separate confirm.`;
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-
-        // Surface any partial errors as a warning toast, but still refresh
-        const errs = (data.summary && data.summary.errors) || [];
-        if (errs.length > 0) {
-          showToast(`Materials ready for #${id} (with warnings: ${errs[0]})`, true);
-        } else {
-          showToast(`Materials ready for #${id}. Open the folder to upload.`);
+        if (data.pending) {
+          setResearchButtonsBuilding("contacts", company);
+          showToast(`Looking for people at ${company}, then making the letter. A few minutes.`);
+          pollPrep(id, company);
+          return;
         }
+        prepDoneToast(id, data.summary);
         renderList(data.ready || []);
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = "Prep materials";
+        btn.textContent = "Prep";
         showToast("Couldn't prep: " + e.message, true);
       }
+    }
+
+    function prepDoneToast(id, summary) {
+      const errs = (summary && summary.errors) || [];
+      const greeting = summary && summary.greeting ? ` Letter opens "${summary.greeting}"` : "";
+      if (errs.length > 0) {
+        showToast(`Prepped #${id}, with a warning: ${errs[0]}`, true);
+      } else {
+        showToast(`Prepped #${id}.${greeting}`);
+      }
+    }
+
+    function pollPrep(id, company) {
+      const key = String(id);
+      if (prepPolls.has(key)) return;
+      prepPolls.add(key);
+      const tick = async () => {
+        try {
+          const r = await fetch(`/api/prep/status?discovery_id=${encodeURIComponent(id)}`);
+          const data = await r.json();
+          const job = data.job || {};
+          if (job.running) {
+            setTimeout(tick, 5000);
+            return;
+          }
+          prepPolls.delete(key);
+          if (job.error) {
+            showToast(`Couldn't prep #${id}: ${job.error}`, true);
+          } else if (job.summary) {
+            prepDoneToast(id, job.summary);
+          }
+          loadReady();
+        } catch (e) {
+          setTimeout(tick, 8000);
+        }
+      };
+      setTimeout(tick, 5000);
     }
 
     // Forge attaches whichever résumé the posting routed to, as-is: rendered
@@ -5110,7 +5179,7 @@ judging happens without a separate confirm.`;
       const letterBtn = ev.target.closest(".open-letter-btn");
       if (letterBtn) {
         const id = letterBtn.getAttribute("data-id");
-        if (id) openOfferingFile(id, "cover_letter.html");
+        if (id) openOfferingFile(id, letterBtn.getAttribute("data-file") || "cover_letter.html");
         return;
       }
 
