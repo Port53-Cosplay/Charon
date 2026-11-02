@@ -3028,6 +3028,8 @@
         document.getElementById("awaiting-cull").textContent = s.cullable ?? "—";
         document.getElementById("awaiting-enrich-n").textContent = s.awaiting_enrich ?? "—";
         document.getElementById("awaiting-judge-n").textContent = s.judgeable ?? "—";
+        document.getElementById("awaiting-lifetime").textContent =
+          (s.gathered != null) ? s.gathered.toLocaleString() : "—";
         setStat("stat-ready", s.ready);
         expiredCount = s.expired || 0;
         setStat("stat-applied", s.applied_total);
@@ -3666,11 +3668,8 @@
       const container = document.getElementById("gathered-container");
       const chipTotal = (total != null) ? total : gathered.length;
       document.getElementById("count-gathered").textContent = chipTotal;
-      // Header: "{awaiting} of {lifetime} · waiting to be scored"
-      const lifetimeEl = document.getElementById("stat-gathered");
-      const lifetime = lifetimeEl ? lifetimeEl.textContent : "—";
+      // The header's lifetime count comes from loadStats().
       document.getElementById("awaiting-count").textContent = chipTotal;
-      document.getElementById("awaiting-lifetime").textContent = lifetime;
       if (gathered.length === 0) {
         container.innerHTML = `
           <div class="state">
