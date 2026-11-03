@@ -93,7 +93,7 @@ Local HTTP dashboard with five tabs covering the full funnel:
 - **Ready** — score-sorted, per-card actions for Prep materials / Open folder / Salary intel / Find contacts / Mark applied / Not for me, plus a corner X for closed postings. Click any card to expand the detail view (full posting, judgement reasoning, dealbreakers, flags, alignment & resume-match chips).
 - **Applied** — tracked applications with inline status dropdowns, 45-day archive on terminal statuses, Mark stranded toolbar
 - **Refused** — score-sorted refusals with the judge's reason quoted; "Send to ready" overrides
-- **Sirens** — voice-true LinkedIn post writer. Magical-question prompt above a brain-dump textarea; polish through Sonnet using the same `voice` block in `profile.yaml` that petition uses; best-time-to-post panel below the output.
+- **Link buttons** — LinkedIn and GitHub buttons under the tabs copy your URL for pasting into application forms. Set them in the `links` block of `profile.yaml`.
 
 Plus **Charon's Pulse** charts modal (funnel waterfall, fates donut, weekly rhythm). Dark theme, coin score badges, illustrated tab icons. Loopback-only (`127.0.0.1`) — nothing exposed to the network.
 

@@ -120,6 +120,7 @@ VALID_VALUE_KEYS = {
     "work_life_balance",
     "compensation",
 }
+VALID_LINK_KEYS = {"linkedin", "github"}
 
 # Keys that contain sensitive data — never log or display
 SENSITIVE_KEYS = {"mail_pass", "mail_user", "imap_pass", "token", "secret_id"}
@@ -331,6 +332,20 @@ def validate_profile(profile: dict[str, Any]) -> None:
                         raise ProfileError("notifications.mail_to list entries must be strings")
             elif not isinstance(mail_to, str):
                 raise ProfileError("notifications.mail_to must be a string or list of strings")
+
+    # Validate links (optional; the dashboard sidebar shows a copy button per link)
+    links = profile.get("links")
+    if links is not None:
+        if not isinstance(links, dict):
+            raise ProfileError("'links' must be a mapping of name: URL")
+        unknown = set(links.keys()) - VALID_LINK_KEYS
+        if unknown:
+            raise ProfileError(f"Unknown links: {', '.join(sorted(unknown))}")
+        for key, url in links.items():
+            if url is None or url == "":
+                continue
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise ProfileError(f"links.{key} must be an https:// URL")
 
 
 def get_profile_display(profile: dict[str, Any]) -> dict[str, Any]:

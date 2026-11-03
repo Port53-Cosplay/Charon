@@ -4,7 +4,26 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 
 ## [Unreleased]
 
-(Nothing pending — see ROADMAP.md for the next phase.)
+### Added
+
+- LinkedIn and GitHub buttons in the dashboard sidebar. A click copies
+  the URL for pasting into application forms. Set them in a new
+  `links` block in `profile.yaml` (https only).
+
+### Changed
+
+- Charon's Pulse: Gathered and Judged are dim number-only rows, and
+  the bars scale to Ready onward, so the small stages are readable.
+  A share over 100% (Applied can outnumber Ready) is no longer shown.
+- Charon's Pulse: new donut colors. Applied and Stranded were nearly
+  the same lilac. The set is checked for colorblind and normal-vision
+  separation on the dark panel.
+- pypdf allowed up to <7.
+
+### Removed
+
+- The Sirens tab. `charon/sirens.py` and its API routes stay, since
+  cover letters share its voice block.
 
 ## [0.10.0] — 2026-05-12
 

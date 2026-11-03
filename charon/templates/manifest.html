@@ -162,14 +162,12 @@
        a tiny diamond glyph mid-fade. Less "section heading", more
        "illuminated manuscript marker". */
     .chart-panel h3,
-    .sirens-intro h3,
     .state.hero .title {
       position: relative;
       padding-bottom: 6px;
     }
 
     .chart-panel h3::after,
-    .sirens-intro h3::after,
     .state.hero .title::after {
       content: "";
       position: absolute;
@@ -325,6 +323,31 @@
     }
 
     .tab-pane[hidden] { display: none; }
+
+    /* Copy buttons for the profile's links, under the tabs. A click puts
+       the URL on the clipboard for pasting into application forms. */
+    .profile-links {
+      display: flex;
+      gap: 8px;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--card-border);
+    }
+    .profile-links[hidden] { display: none; }
+    .profile-link {
+      flex: 1 1 0;
+      background: var(--lilac-soft);
+      color: var(--plum);
+      border: 1px solid var(--lilac);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .profile-link:hover { background: var(--lilac); color: var(--ink); }
 
     /* ── stats band ──────────────────────────────────────────── */
 
@@ -627,6 +650,18 @@
       margin-left: 4px;
     }
 
+    /* Gathered and Judged: dim number-only rows above the bars */
+    .funnel-row.context .stage,
+    .funnel-row.context .count {
+      color: var(--ink-muted);
+      font-weight: 500;
+    }
+    .funnel-row.context + .funnel-row:not(.context) {
+      margin-top: 6px;
+      padding-top: 12px;
+      border-top: 1px solid var(--card-border);
+    }
+
     /* Charts row — donut + time series side by side */
     .charts-row {
       display: grid;
@@ -897,279 +932,6 @@
     .judge-progress .breakdown {
       color: var(--ink-muted);
       font-size: 12px;
-    }
-
-    /* ── Sirens ──────────────────────────────────────────────── */
-
-    .sirens-pane {
-      max-width: 760px;
-    }
-
-    .sirens-intro {
-      margin-bottom: 18px;
-    }
-
-    .sirens-intro h3 {
-      font-family: 'Fraunces', Georgia, serif;
-      font-size: 28px;
-      color: var(--plum);
-      margin-bottom: 6px;
-      letter-spacing: -0.01em;
-    }
-
-    .sirens-intro p {
-      color: var(--ink-soft);
-      font-size: 13px;
-      line-height: 1.55;
-    }
-
-    .sirens-question {
-      background: var(--lilac-soft);
-      border: 1px solid var(--lilac);
-      border-radius: 12px;
-      padding: 14px 18px;
-      margin-bottom: 14px;
-      position: relative;
-    }
-
-    .sirens-question-label {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--plum-soft);
-      margin-bottom: 6px;
-    }
-
-    .sirens-question-text {
-      font-family: 'Fraunces', Georgia, serif;
-      font-size: 17px;
-      color: var(--plum);
-      line-height: 1.4;
-      letter-spacing: -0.005em;
-      padding-right: 90px;
-    }
-
-    .sirens-shuffle {
-      position: absolute;
-      top: 12px;
-      right: 14px;
-      background: transparent;
-      border: 1px solid var(--lilac);
-      color: var(--plum-soft);
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-family: inherit;
-      font-size: 11px;
-      cursor: pointer;
-      transition: background 0.12s ease, color 0.12s ease;
-    }
-
-    .sirens-shuffle:hover {
-      background: var(--lilac);
-      color: var(--plum);
-    }
-
-    .sirens-textarea {
-      width: 100%;
-      min-height: 200px;
-      max-height: 480px;
-      resize: vertical;
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 14px 16px;
-      font-family: inherit;
-      font-size: 14px;
-      line-height: 1.55;
-      color: var(--ink);
-      background: var(--paper);
-      box-shadow: var(--card-shadow);
-    }
-
-    .sirens-textarea::placeholder {
-      color: var(--ink-faint);
-      font-style: italic;
-    }
-
-    .sirens-textarea:focus {
-      outline: none;
-      border-color: var(--plum-soft);
-      box-shadow: 0 0 0 3px rgba(104, 69, 160, 0.12);
-    }
-
-    .sirens-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-top: 12px;
-    }
-
-    .sirens-char-count {
-      color: var(--ink-muted);
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .sirens-actions .spacer { flex: 1 1 auto; }
-
-    .sirens-actions button {
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      padding: 7px 16px;
-      border-radius: 9px;
-      cursor: pointer;
-    }
-
-    .sirens-actions .cancel-btn {
-      background: transparent;
-      color: var(--ink-muted);
-      border: 1px solid transparent;
-    }
-
-    .sirens-actions .cancel-btn:hover { color: var(--ink-soft); background: var(--bg-soft); }
-
-    .sirens-actions .confirm-btn {
-      background: var(--plum-soft);
-      color: white;
-      border: 1px solid var(--plum-soft);
-      font-weight: 600;
-      padding: 7px 22px;
-    }
-
-    .sirens-actions .confirm-btn:hover { background: var(--plum); }
-    .sirens-actions .confirm-btn[disabled] { opacity: 0.6; cursor: wait; }
-
-    .sirens-output {
-      margin-top: 24px;
-      background: var(--paper);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 20px 22px;
-      box-shadow: var(--card-shadow);
-    }
-
-    .sirens-output h4 {
-      font-family: 'Fraunces', Georgia, serif;
-      font-size: 18px;
-      color: var(--plum);
-      margin-bottom: 4px;
-    }
-
-    .sirens-output .out-meta {
-      font-size: 12px;
-      color: var(--ink-muted);
-      margin-bottom: 14px;
-    }
-
-    .sirens-output .out-meta .over {
-      color: var(--blush-deep);
-      font-weight: 600;
-    }
-
-    .sirens-output .out-post {
-      white-space: pre-wrap;
-      font-size: 14px;
-      line-height: 1.6;
-      color: var(--ink);
-      background: var(--bg-soft);
-      border-radius: 10px;
-      padding: 16px 18px;
-      margin-bottom: 14px;
-    }
-
-    .sirens-output .out-notes {
-      font-size: 12.5px;
-      color: var(--ink-muted);
-      font-style: italic;
-      margin-bottom: 10px;
-    }
-
-    .sirens-output .out-warnings {
-      background: #3D2D14;
-      border-left: 3px solid var(--gold);
-      padding: 8px 12px;
-      margin: 10px 0;
-      font-size: 12px;
-      color: var(--gold-deep);
-      border-radius: 0 8px 8px 0;
-    }
-
-    .sirens-output .out-warnings ul { padding-left: 18px; margin-top: 4px; }
-
-    .sirens-output .out-actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 10px;
-    }
-
-    .sirens-output .out-actions button {
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      padding: 7px 16px;
-      border-radius: 9px;
-      cursor: pointer;
-    }
-
-    .sirens-output .copy-btn {
-      background: var(--blush);
-      color: var(--blush-deep);
-      border: 1px solid var(--blush-hover);
-      font-weight: 600;
-    }
-
-    .sirens-output .copy-btn:hover { background: var(--blush-hover); }
-
-    .sirens-output .save-btn {
-      background: transparent;
-      color: var(--plum-soft);
-      border: 1px solid var(--lilac);
-    }
-
-    .sirens-output .save-btn:hover { background: var(--lilac-soft); color: var(--plum); }
-
-    .post-timing {
-      margin-top: 18px;
-      padding-top: 14px;
-      border-top: 1px dashed var(--card-border);
-      font-size: 12px;
-      color: var(--ink-muted);
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-    }
-
-    .post-timing .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      flex: 0 0 auto;
-      margin-top: 3px;
-    }
-
-    .post-timing .dot.peak { background: #6BA890; }     /* green */
-    .post-timing .dot.ok   { background: #E4C77A; }     /* gold */
-    .post-timing .dot.cold { background: var(--ink-faint); }
-
-    .post-timing .body { flex: 1 1 auto; }
-
-    .post-timing .body .verdict {
-      color: var(--ink-soft);
-      font-weight: 600;
-      font-size: 13px;
-      margin-bottom: 2px;
-    }
-
-    .post-timing .body .next {
-      color: var(--ink-muted);
-      margin-bottom: 6px;
-    }
-
-    .post-timing .body .windows {
-      font-size: 11px;
-      color: var(--ink-faint);
-      letter-spacing: 0.02em;
     }
 
     /* On narrow viewports, drop the sidebar back to top */
@@ -2292,11 +2054,9 @@
           <img class="tab-icon" src="/static/charon_book.png" alt="">
           <span class="tab-label">Refused</span><span class="tab-count" id="count-refused">—</span>
         </button>
-        <button class="tab" data-tab="sirens">
-          <img class="tab-icon" src="/static/charon_star.png" alt="">
-          <span class="tab-label">Sirens</span>
-        </button>
       </nav>
+
+      <div class="profile-links" id="profile-links" hidden></div>
     </aside>
 
     <main class="main">
@@ -2420,36 +2180,6 @@
         </div>
         <div id="refused-container" class="ready-list">
           <div class="state"><div class="glyph">·</div>Loading refused discoveries…</div>
-        </div>
-      </section>
-
-      <section class="tab-pane" data-pane="sirens" hidden>
-        <div class="sirens-pane">
-          <div class="sirens-intro">
-            <h3 class="with-lantern"><svg class="lantern" aria-hidden="true"><use href="#lantern"/></svg>Sirens</h3>
-            <p>Brain-dump first, edit later. Sirens polishes what you wrote — preserves your voice, kills LinkedIn corporate-speak. The magical question below is just a prompt; ignore it, follow it, do whatever.</p>
-          </div>
-
-          <div class="sirens-question" id="sirens-question-box">
-            <div class="sirens-question-label">A question to turn over:</div>
-            <div class="sirens-question-text" id="sirens-question-text">Loading…</div>
-            <button class="sirens-shuffle" id="sirens-shuffle-btn" title="Another question">↻ another</button>
-          </div>
-
-          <textarea
-            id="sirens-textarea"
-            class="sirens-textarea"
-            placeholder="Brain-dump here. Run-ons, parentheticals, half-thoughts, the whole mess. Sirens will tidy without sanding off your voice."
-          ></textarea>
-
-          <div class="sirens-actions">
-            <span class="sirens-char-count" id="sirens-char-count">0 chars</span>
-            <div class="spacer"></div>
-            <button class="cancel-btn" id="sirens-clear-btn">Clear</button>
-            <button class="confirm-btn" id="sirens-polish-btn">Polish</button>
-          </div>
-
-          <div id="sirens-output" class="sirens-output" hidden></div>
         </div>
       </section>
     </main>
@@ -3042,15 +2772,20 @@
 
     // ── Charts modal ───────────────────────────────────────────
 
+    // Checked for colorblind (protan/deutan) and normal-vision separation
+    // across every pair on the dark panel, since empty statuses drop out
+    // and any two can end up neighbours in the donut.
     const STATUS_COLORS = {
-      applied:      "#D7C5EE",
-      acknowledged: "#E4C77A",
-      responded:    "#E4C77A",
-      interviewing: "#95C9AC",
-      offered:      "#6BA890",
-      rejected:     "#F0B8D6",
-      ghosted:      "#C8C0D6",
+      applied:      "#A878E6",
+      acknowledged: "#EAD984",
+      responded:    "#EAD984",
+      interviewing: "#7CC198",
+      offered:      "#3D8F65",
+      rejected:     "#F2B5D5",
+      ghosted:      "#756788",
     };
+
+    const FUNNEL_CONTEXT_KEYS = new Set(["gathered", "judged"]);
 
     function renderFunnel(stages) {
       const rows = document.getElementById("funnel-rows");
@@ -3058,12 +2793,27 @@
         rows.innerHTML = `<div style="color:var(--ink-muted);font-size:12px">No data yet.</div>`;
         return;
       }
-      const top = Math.max(stages[0].count, 1);
+      // Gathered and Judged run to thousands while everything from Ready on
+      // is in the dozens, so those two are dim number-only rows and the bars
+      // scale to the stages that are left.
+      const barred = stages.filter(s => !FUNNEL_CONTEXT_KEYS.has(s.key));
+      const top = Math.max(...barred.map(s => s.count), 1);
       rows.innerHTML = stages.map((s, i) => {
-        const pct = (s.count / top) * 100;
         const prev = i > 0 ? stages[i - 1].count : null;
         const dropPct = (prev && prev > 0) ? Math.round((s.count / prev) * 100) : null;
-        const dropLabel = dropPct !== null ? `<span class="pct">(${dropPct}%)</span>` : "";
+        // Applied can outnumber Ready (applications added by hand), and a
+        // share over 100% means nothing here.
+        const dropText = (dropPct === 0 && s.count > 0) ? "<1%" : `${dropPct}%`;
+        const dropLabel = (dropPct !== null && dropPct <= 100) ? `<span class="pct">(${escapeHtml(dropText)})</span>` : "";
+        if (FUNNEL_CONTEXT_KEYS.has(s.key)) {
+          return `
+          <div class="funnel-row context">
+            <div class="stage">${escapeHtml(s.label)}</div>
+            <div></div>
+            <div class="count">${s.count.toLocaleString()}${dropLabel}</div>
+          </div>`;
+        }
+        const pct = (s.count / top) * 100;
         return `
           <div class="funnel-row">
             <div class="stage">${escapeHtml(s.label)}</div>
@@ -4065,219 +3815,6 @@
       }
     }
 
-    // ── Sirens ────────────────────────────────────────────────
-
-    let _sirensCurrentQuestion = "";
-    let _sirensLastOutput = null;
-
-    async function loadMagicalQuestion() {
-      try {
-        const r = await fetch("/api/sirens/question");
-        const data = await r.json();
-        _sirensCurrentQuestion = data.question || "";
-        document.getElementById("sirens-question-text").textContent =
-          _sirensCurrentQuestion || "(no questions configured)";
-      } catch (e) {
-        _sirensCurrentQuestion = "";
-        document.getElementById("sirens-question-text").textContent =
-          "Couldn't load — write whatever you want anyway.";
-      }
-    }
-
-    function updateSirensCharCount() {
-      const n = document.getElementById("sirens-textarea").value.length;
-      document.getElementById("sirens-char-count").textContent = `${n} char${n === 1 ? "" : "s"}`;
-    }
-
-    async function polishSirens() {
-      const dump = document.getElementById("sirens-textarea").value.trim();
-      if (!dump) {
-        showToast("Nothing to polish — write something first.", true);
-        return;
-      }
-      const btn = document.getElementById("sirens-polish-btn");
-      btn.disabled = true;
-      btn.textContent = "Polishing…";
-      try {
-        const r = await fetch("/api/sirens/polish", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            brain_dump: dump,
-            magical_question: _sirensCurrentQuestion || null,
-          }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-        _sirensLastOutput = data.result || {};
-        renderSirensOutput(_sirensLastOutput);
-      } catch (e) {
-        showToast("Polish failed: " + e.message, true);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Polish";
-      }
-    }
-
-    // Best-time-to-post heuristic. Pure client-side; uses the user's
-    // local time (DeAnna is in Eastern Time, which is also where most
-    // US tech recruiters scan LinkedIn). Based on rough industry guidance:
-    // Tue/Wed/Thu peaks 7:30–9:30am, 12–1pm, 5–7pm. Avoid weekends,
-    // Mon mornings, Fri afternoons.
-    //
-    // Returns { tier: "peak"|"ok"|"cold", verdict: string, next: string|null }
-    function postTimingNow(now = new Date()) {
-      const day = now.getDay(); // 0 Sun, 1 Mon, ..., 6 Sat
-      const hour = now.getHours() + now.getMinutes() / 60;
-
-      const isWeekend = (day === 0 || day === 6);
-      const isPeakDay = (day === 2 || day === 3 || day === 4); // Tue-Thu
-      const isMidDay = (day === 1 || day === 5);               // Mon, Fri
-
-      // Window classifier for a given (day-tier, hour)
-      const inWindow = (lo, hi) => hour >= lo && hour < hi;
-      const morning = inWindow(7.5, 9.5);
-      const lunch = inWindow(12, 13);
-      const evening = inWindow(17, 19);
-
-      let tier = "cold";
-      let verdict = "";
-
-      if (isWeekend) {
-        tier = "cold";
-        verdict = "Weekend — most recruiters aren't scrolling.";
-      } else if (isPeakDay && (morning || lunch || evening)) {
-        tier = "peak";
-        verdict = "Peak window — post now.";
-      } else if (isMidDay && (morning || lunch || evening)) {
-        tier = "ok";
-        verdict = day === 1
-          ? "Monday — decent but recruiters are catching up on emails."
-          : "Friday in-window — okay, but Tue-Thu hits harder.";
-      } else if (isPeakDay) {
-        tier = "ok";
-        verdict = "Off-peak hour on a peak day — fine to post.";
-      } else {
-        tier = "cold";
-        verdict = "Outside any peak window.";
-      }
-
-      // Compute next peak time
-      const next = nextPeakWindow(now);
-
-      return { tier, verdict, next };
-    }
-
-    function nextPeakWindow(from) {
-      const peakHours = [7.5, 12, 17]; // morning, lunch, evening
-      const peakLabels = ["8–10am", "12–1pm", "5–7pm"];
-      const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-      for (let offset = 0; offset < 8; offset++) {
-        const d = new Date(from.getTime() + offset * 86400000);
-        const day = d.getDay();
-        if (day !== 2 && day !== 3 && day !== 4) continue; // Tue-Thu only for "peak"
-        for (let i = 0; i < peakHours.length; i++) {
-          const peak = peakHours[i];
-          const peakDate = new Date(d);
-          peakDate.setHours(Math.floor(peak), Math.round((peak - Math.floor(peak)) * 60), 0, 0);
-          if (peakDate <= from) continue;
-
-          const diffMs = peakDate - from;
-          const diffH = Math.floor(diffMs / 3600000);
-          const diffM = Math.floor((diffMs % 3600000) / 60000);
-          const inLabel = diffH > 0 ? `in ${diffH}h ${diffM}m` : `in ${diffM}m`;
-          const dayLabel = offset === 0 ? "Today" : dayNames[day];
-          return `${dayLabel} ${peakLabels[i]} (${inLabel})`;
-        }
-      }
-      return null;
-    }
-
-    function renderSirensOutput(result) {
-      const box = document.getElementById("sirens-output");
-      const post = result.post || "";
-      const chars = result.char_count || post.length;
-      const overLimit = result.over_limit;
-      const notes = result.notes || "";
-      const warnings = result.voice_warnings || [];
-
-      const charsLabel = overLimit
-        ? `<span class="over">${chars} chars — over LinkedIn's 3000 limit</span>`
-        : `${chars} chars`;
-
-      const warningsHtml = warnings.length
-        ? `<div class="out-warnings"><strong>Voice watch:</strong><ul>${
-            warnings.map(w => `<li>${escapeHtml(w)}</li>`).join("")
-          }</ul></div>`
-        : "";
-
-      // Best time to post — current verdict
-      const timing = postTimingNow();
-      const nextLine = timing.next
-        ? `<div class="next">Next peak: ${escapeHtml(timing.next)}</div>`
-        : "";
-      const timingHtml = `
-        <div class="post-timing">
-          <div class="dot ${timing.tier}" title="Posting-time verdict"></div>
-          <div class="body">
-            <div class="verdict">${escapeHtml(timing.verdict)}</div>
-            ${nextLine}
-            <div class="windows">Peak windows (Tue–Thu ET): 8–10am · 12–1pm · 5–7pm</div>
-          </div>
-        </div>`;
-
-      box.innerHTML = `
-        <h4>Polished</h4>
-        <div class="out-meta">${charsLabel}</div>
-        <div class="out-post" id="sirens-post-text">${escapeHtml(post)}</div>
-        ${notes ? `<div class="out-notes">${escapeHtml(notes)}</div>` : ""}
-        ${warningsHtml}
-        <div class="out-actions">
-          <button class="copy-btn" id="sirens-copy-btn">Copy</button>
-          <button class="save-btn" id="sirens-save-btn">Save draft</button>
-        </div>
-        ${timingHtml}
-      `;
-      box.hidden = false;
-      box.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    async function copySirensPost() {
-      if (!_sirensLastOutput?.post) return;
-      try {
-        await navigator.clipboard.writeText(_sirensLastOutput.post);
-        showToast("Copied to clipboard.");
-      } catch (e) {
-        showToast("Couldn't copy: " + e.message, true);
-      }
-    }
-
-    async function saveSirensDraft() {
-      if (!_sirensLastOutput?.post) return;
-      const dump = document.getElementById("sirens-textarea").value.trim();
-      try {
-        const r = await fetch("/api/sirens/polish", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          // Re-uses the same endpoint with save:true; the server will
-          // re-polish (cheap) and persist. Cleaner than a separate
-          // save-only endpoint that would have to take the polished
-          // output from the client.
-          body: JSON.stringify({
-            brain_dump: dump,
-            magical_question: _sirensCurrentQuestion || null,
-            save: true,
-          }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
-        showToast(`Draft saved.`);
-      } catch (e) {
-        showToast("Save failed: " + e.message, true);
-      }
-    }
-
     // ── The ferry (one-button pipeline) ────────────────────────
     // One chained crossing: harvest → cull → enrich, then a pause at the
     // judge gate (the server holds phase='awaiting_judge' until confirmed,
@@ -4647,7 +4184,6 @@ judging happens without a separate confirm.`;
       if (name === "ready") loadReady();
       if (name === "refused") loadRefused();
       if (name === "gathered") loadGathered();
-      if (name === "sirens" && !_sirensCurrentQuestion) loadMagicalQuestion();
       loadStats();
     }
 
@@ -4910,6 +4446,13 @@ judging happens without a separate confirm.`;
         return;
       }
 
+      // Sidebar link: copy its URL
+      const linkBtn = ev.target.closest(".profile-link");
+      if (linkBtn) {
+        copyProfileLink(linkBtn);
+        return;
+      }
+
       // Ghost-check button (Applications toolbar)
       const ghostBtn = ev.target.closest("#ghost-check-btn");
       if (ghostBtn && !ghostBtn.disabled) {
@@ -5036,37 +4579,6 @@ judging happens without a separate confirm.`;
       // Paste-judge modal — copy
       if (ev.target.closest("#paste-judge-copy")) {
         copyPastePrompt();
-        return;
-      }
-
-      // Sirens: shuffle question
-      if (ev.target.closest("#sirens-shuffle-btn")) {
-        loadMagicalQuestion();
-        return;
-      }
-      // Sirens: clear textarea
-      if (ev.target.closest("#sirens-clear-btn")) {
-        const ta = document.getElementById("sirens-textarea");
-        ta.value = "";
-        updateSirensCharCount();
-        document.getElementById("sirens-output").hidden = true;
-        _sirensLastOutput = null;
-        ta.focus();
-        return;
-      }
-      // Sirens: polish
-      if (ev.target.closest("#sirens-polish-btn")) {
-        polishSirens();
-        return;
-      }
-      // Sirens: copy
-      if (ev.target.closest("#sirens-copy-btn")) {
-        copySirensPost();
-        return;
-      }
-      // Sirens: save draft
-      if (ev.target.closest("#sirens-save-btn")) {
-        saveSirensDraft();
         return;
       }
 
@@ -5280,9 +4792,6 @@ judging happens without a separate confirm.`;
       }
     });
     document.addEventListener("input", (ev) => {
-      if (ev.target && ev.target.id === "sirens-textarea") {
-        updateSirensCharCount();
-      }
       if (ev.target && ev.target.id === "ferry-judge-count") {
         updateFerryCostEstimate();
       }
@@ -5328,7 +4837,34 @@ judging happens without a separate confirm.`;
       } catch (e) { /* silent — banner is advisory */ }
     }
 
+    // Sidebar copy buttons, one per link in profile.yaml's `links` block.
+    const PROFILE_LINK_LABELS = { linkedin: "LinkedIn", github: "GitHub" };
+
+    async function loadProfileLinks() {
+      try {
+        const r = await fetch("/api/links");
+        if (!r.ok) return;
+        const links = (await r.json()).links || {};
+        const box = document.getElementById("profile-links");
+        box.innerHTML = Object.keys(PROFILE_LINK_LABELS)
+          .filter(k => links[k])
+          .map(k => `<button class="profile-link" data-url="${escapeHtml(links[k])}" title="Copy ${escapeHtml(links[k])}">${PROFILE_LINK_LABELS[k]}</button>`)
+          .join("");
+        box.hidden = !box.innerHTML;
+      } catch (e) { /* silent — the buttons are a convenience */ }
+    }
+
+    async function copyProfileLink(btn) {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.url);
+        showToast(`${btn.textContent} URL copied.`);
+      } catch (e) {
+        showToast("Couldn't copy: " + e.message, true);
+      }
+    }
+
     loadEnvBanner();
+    loadProfileLinks();
     loadReady();
     loadApplications();
     loadRefused();

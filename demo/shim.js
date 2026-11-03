@@ -395,6 +395,8 @@
   // "METHOD /path/:param" → handler(params, query, body)
   const ROUTES = [
     ["GET /api/env", () => json({ env: D.env })],
+    // No profile links in the demo, so the sidebar shows no copy buttons.
+    ["GET /api/links", () => json({ links: {} })],
     ["GET /api/ready", () => json({ ready: readyPayload() })],
     ["GET /api/gathered", () => json({ gathered: S.gathered.slice(), total: S.gatheredTotal })],
     ["GET /api/refused", (p, q) => {

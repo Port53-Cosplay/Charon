@@ -561,31 +561,24 @@ range, confidence level, rationale, experience-adjustment paragraph,
 negotiation guidance, posting's stated range if any, and source
 list. Dashboard surfaces this as the `$` button on Ready cards.
 
-### Sirens (LinkedIn Posts in Your Voice)
+### Link Buttons (LinkedIn, GitHub)
 
-`charon manifest` includes a Sirens tab — voice-true LinkedIn post
-writer. There's no CLI command for Sirens; it lives entirely in the
-dashboard.
+The dashboard sidebar has a LinkedIn button and a GitHub button under
+the tabs. Click one and its URL lands on your clipboard, ready to
+paste into an application form. Set them in `profile.yaml`:
 
-The flow: open the Sirens tab, glance at the magical question above
-the textarea (one of 35 cybersecurity-themed reflective prompts —
-hit "↻ another" if it doesn't land), then brain-dump into the
-textarea. Run-ons, half-thoughts, parentheticals, the whole mess.
-Click **Polish**. Sonnet processes it for ~5-10s using the voice
-block in your `profile.yaml` (the same source `petition` uses for
-cover letters, so your posts and letters share one calibrated voice).
+```yaml
+links:
+  linkedin: https://www.linkedin.com/in/your-name
+  github: https://github.com/your-name
+```
 
-The output card shows the polished post (under LinkedIn's 3000-char
-limit), the model's notes on what it changed, and any voice-warning
-bubbles if it caught itself drifting toward AI-speak. A best-time-
-to-post panel underneath tells you whether to post now (green =
-Tue/Wed/Thu peak window) or wait until the next peak (countdown
-shown).
+Only `https://` URLs are accepted. Leave a link out and its button
+doesn't show.
 
-Drafts save to `~/.charon/sirens/drafts/` as JSON. The system prompt
-explicitly bans "🚀", "Excited to announce", "I'm thrilled", "deep
-dive", "game-changer", engagement CTAs, performative gratitude, and
-em-dash overuse.
+The Sirens tab (LinkedIn post writer) was taken out of the dashboard
+in November 2026. `charon/sirens.py` stays, because cover letters
+read their voice block through it.
 
 ### Browse the Funnel in a Browser (`manifest`)
 

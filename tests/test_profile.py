@@ -81,3 +81,23 @@ def test_display_empty_secrets_not_redacted(valid_profile):
     valid_profile["notifications"]["mail_pass"] = ""
     display = get_profile_display(valid_profile)
     assert display["notifications"]["mail_pass"] == ""
+
+
+def test_links_accept_https_urls(valid_profile):
+    valid_profile["links"] = {
+        "linkedin": "https://www.linkedin.com/in/someone",
+        "github": "https://github.com/someone",
+    }
+    validate_profile(valid_profile)  # should not raise
+
+
+def test_links_reject_non_https(valid_profile):
+    valid_profile["links"] = {"github": "javascript:alert(1)"}
+    with pytest.raises(ProfileError, match="https"):
+        validate_profile(valid_profile)
+
+
+def test_links_reject_unknown_keys(valid_profile):
+    valid_profile["links"] = {"myspace": "https://myspace.com/someone"}
+    with pytest.raises(ProfileError, match="Unknown links"):
+        validate_profile(valid_profile)

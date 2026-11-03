@@ -76,6 +76,25 @@ def _env_info() -> dict[str, Any]:
     }
 
 
+def _profile_links() -> dict[str, str]:
+    """The profile's `links` block, for the sidebar's copy buttons.
+
+    Only the known keys with https URLs come through; a broken profile
+    just means no buttons."""
+    from charon.profile import VALID_LINK_KEYS, load_profile
+
+    try:
+        links = load_profile().get("links") or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(links, dict):
+        return {}
+    return {
+        k: v for k, v in links.items()
+        if k in VALID_LINK_KEYS and isinstance(v, str) and v.startswith("https://")
+    }
+
+
 # A dossier older than this gets flagged on the card. Company culture and
 # finances move slowly, so it's a nudge to consider a rebuild, not a block.
 # Contacts use the same threshold for now.
@@ -2774,6 +2793,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/env":
             self._serve_json({"env": _env_info()})
+            return
+        if path == "/api/links":
+            self._serve_json({"links": _profile_links()})
             return
         if path == "/api/sirens/question":
             from charon.sirens import random_magical_question

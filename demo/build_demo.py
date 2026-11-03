@@ -45,7 +45,6 @@ FORBIDDEN = ("deanna", "shanks", "lurka", "empire12", "port53", "192.168.")
 SCRUBS = (
     ("DeAnna's funnel · ferryman view", "Sample funnel · ferryman view"),
     ("DeAnna Shanks", "Sample Applicant"),
-    ("DeAnna is in Eastern Time", "the user is in Eastern Time"),
     (
         'Live job-hunt data lives at <a href="https://charon.empire12.net" '
         'target="_blank" rel="noopener">charon.empire12.net</a>. ',
@@ -277,8 +276,6 @@ def _assemble(data: dict[str, Any], *, resize_images: bool) -> str:
     head_extra = (
         '<meta name="description" content="A walkthrough of Charon, a job-hunt tool for '
         'security work, running on sample data.">\n'
-        # The Sirens tab is parked in the real app too; keep the demo to the funnel.
-        '<style>.tab[data-tab="sirens"]{display:none}</style>\n'
     )
     html = html.replace("</head>", head_extra + "</head>", 1)
 
