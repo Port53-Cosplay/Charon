@@ -770,14 +770,17 @@ def _stats(include_charts: bool = False) -> dict[str, Any]:
             {"status": s, "count": app_buckets.get(s, 0)}
             for s in breakdown_order
         ]
-        # Funnel waterfall — six stages, each a strict subset of the prior.
+        # Funnel waterfall. Each stage's share is taken against the stage
+        # before it, unless "of" names another one: Stranded and Engaged
+        # are both slices of Applied, so both read as a share of it.
         offered = app_buckets.get("offered", 0)
         out["funnel"] = [
             {"label": "Gathered",  "count": gathered,      "key": "gathered"},
             {"label": "Judged",    "count": judged_sonnet, "key": "judged"},
             {"label": "Ready",     "count": ready,         "key": "ready"},
             {"label": "Applied",   "count": total_apps, "key": "applied"},
-            {"label": "Engaged",   "count": engaged,    "key": "engaged"},
+            {"label": "Stranded",  "count": stranded,   "key": "stranded", "of": "applied"},
+            {"label": "Engaged",   "count": engaged,    "key": "engaged",  "of": "applied"},
             {"label": "Offered",   "count": offered,    "key": "offered"},
         ]
         out["weekly"] = weekly

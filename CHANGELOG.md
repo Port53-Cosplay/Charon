@@ -18,6 +18,8 @@ All notable changes to Charon are tracked here. Format follows [Keep a Changelog
 - Charon's Pulse: new donut colors. Applied and Stranded were nearly
   the same lilac. The set is checked for colorblind and normal-vision
   separation on the dark panel.
+- Charon's Pulse: Stranded gets its own bar under Applied. Stranded
+  and Engaged both show their share of Applied.
 - pypdf allowed up to <7.
 
 ### Removed

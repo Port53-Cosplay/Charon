@@ -2798,8 +2798,12 @@
       // scale to the stages that are left.
       const barred = stages.filter(s => !FUNNEL_CONTEXT_KEYS.has(s.key));
       const top = Math.max(...barred.map(s => s.count), 1);
+      const byKey = Object.fromEntries(stages.map(s => [s.key, s]));
       rows.innerHTML = stages.map((s, i) => {
-        const prev = i > 0 ? stages[i - 1].count : null;
+        // "of" points a stage at the one its share is taken from (Stranded
+        // and Engaged are both slices of Applied); otherwise it's the row above.
+        const base = s.of ? byKey[s.of] : stages[i - 1];
+        const prev = base ? base.count : null;
         const dropPct = (prev && prev > 0) ? Math.round((s.count / prev) * 100) : null;
         // Applied can outnumber Ready (applications added by hand), and a
         // share over 100% means nothing here.

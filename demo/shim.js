@@ -352,6 +352,7 @@
     if (st.funnel) {
       st.funnel.forEach((f) => {
         if (f.key === "applied") f.count = total;
+        if (f.key === "stranded") f.count = st.stranded;
         if (f.key === "engaged") f.count = st.engaged;
         if (f.key === "offered") f.count = count.offered || 0;
       });
